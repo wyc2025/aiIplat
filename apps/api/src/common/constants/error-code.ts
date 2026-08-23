@@ -56,6 +56,22 @@ export const ErrorCode = {
   DictTypeExists: 10601,
   /** 字典类型下存在数据，不可删除 */
   DictTypeHasData: 10602,
+
+  // ========== ai 域（20xxx，见 API.md） ==========
+  /** 未开通套餐或套餐已失效 */
+  AiNoPlan: 20001,
+  /** 积分不足 */
+  AiInsufficientCredits: 20002,
+  /** 模型不可用 / 已停用 */
+  AiModelUnavailable: 20003,
+  /** 会话不存在或无权访问 */
+  AiConversationNotFound: 20004,
+  /** 上游模型调用失败 */
+  AiUpstreamError: 20005,
+  /** 内容超出模型上下文长度 */
+  AiContentTooLong: 20006,
+  /** 上一段对话进行中（并发流限制） */
+  AiChatInProgress: 20007,
 } as const
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode]
