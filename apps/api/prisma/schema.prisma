@@ -1,0 +1,228 @@
+// iplat 数据库模型（第一期 system 域，表名全部 sys_ 前缀）
+// 约定：model PascalCase + @@map，字段 camelCase + @map snake_case
+// 说明：使用 relationMode="prisma"（逻辑外键），不生成物理外键约束——
+//   sys_menu/sys_dept 自关联以 parent_id=0 表示根，物理 FK 无法满足；
+//   软删除场景下物理 FK 会阻碍删除。关联完整性由 Service 层保证。
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider     = "mysql"
+  url          = env("DATABASE_URL")
+  relationMode = "prisma"
+}
+
+// ========== 用户与权限 ==========
+
+/// 用户
+model SysUser {
+  id          BigInt    @id @default(autoincrement())
+  username    String    @unique @map("username") @db.VarChar(50)
+  password    String    @map("password") @db.VarChar(100)
+  nickname    String    @map("nickname") @db.VarChar(50)
+  email       String?   @map("email") @db.VarChar(100)
+  phone       String?   @map("phone") @db.VarChar(20)
+  avatar      String?   @map("avatar") @db.VarChar(255)
+  /// 0 未知 1 男 2 女
+  gender      Int       @default(0) @map("gender") @db.TinyInt
+  deptId      BigInt?   @map("dept_id")
+  /// 1 启用 0 禁用
+  status      Int       @default(1) @map("status") @db.TinyInt
+  remark      String?   @map("remark") @db.VarChar(255)
+  lastLoginAt DateTime? @map("last_login_at")
+  lastLoginIp String?   @map("last_login_ip") @db.VarChar(50)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  dept      SysDept?      @relation(fields: [deptId], references: [id])
+  userRoles SysUserRole[]
+
+  @@index([deptId])
+  @@map("sys_user")
+}
+
+/// 角色
+model SysRole {
+  id        BigInt    @id @default(autoincrement())
+  name      String    @map("name") @db.VarChar(50)
+  /// 角色标识，如 admin、common
+  code      String    @unique @map("code") @db.VarChar(50)
+  sort      Int       @default(0) @map("sort")
+  status    Int       @default(1) @map("status") @db.TinyInt
+  remark    String?   @map("remark") @db.VarChar(255)
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  userRoles SysUserRole[]
+  roleMenus SysRoleMenu[]
+
+  @@map("sys_role")
+}
+
+/// 用户-角色
+model SysUserRole {
+  id     BigInt @id @default(autoincrement())
+  userId BigInt @map("user_id")
+  roleId BigInt @map("role_id")
+
+  user SysUser @relation(fields: [userId], references: [id])
+  role SysRole @relation(fields: [roleId], references: [id])
+
+  @@unique([userId, roleId])
+  @@index([roleId])
+  @@map("sys_user_role")
+}
+
+/// 菜单（目录/菜单/按钮三级）
+model SysMenu {
+  id        BigInt   @id @default(autoincrement())
+  /// 0 为根
+  parentId  BigInt   @default(0) @map("parent_id")
+  name      String   @map("name") @db.VarChar(50)
+  /// 1 目录 2 菜单 3 按钮
+  type      Int      @map("type") @db.TinyInt
+  /// 路由地址（type 1/2）
+  path      String?  @map("path") @db.VarChar(200)
+  /// 前端组件路径，如 system/user/index（type 2）
+  component String?  @map("component") @db.VarChar(200)
+  /// 权限标识，如 system:user:create（type 3 必填）
+  perms     String?  @map("perms") @db.VarChar(100)
+  icon      String?  @map("icon") @db.VarChar(50)
+  sort      Int      @default(0) @map("sort")
+  /// 1 显示 0 隐藏
+  visible   Int      @default(1) @map("visible") @db.TinyInt
+  /// 1 启用 0 禁用
+  status    Int      @default(1) @map("status") @db.TinyInt
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  roleMenus SysRoleMenu[]
+
+  @@index([parentId])
+  @@map("sys_menu")
+}
+
+/// 角色-菜单
+model SysRoleMenu {
+  id     BigInt @id @default(autoincrement())
+  roleId BigInt @map("role_id")
+  menuId BigInt @map("menu_id")
+
+  role SysRole @relation(fields: [roleId], references: [id])
+  menu SysMenu @relation(fields: [menuId], references: [id])
+
+  @@unique([roleId, menuId])
+  @@index([menuId])
+  @@map("sys_role_menu")
+}
+
+// ========== 组织与字典 ==========
+
+/// 部门
+model SysDept {
+  id        BigInt    @id @default(autoincrement())
+  /// 0 为根
+  parentId  BigInt    @default(0) @map("parent_id")
+  name      String    @map("name") @db.VarChar(50)
+  sort      Int       @default(0) @map("sort")
+  status    Int       @default(1) @map("status") @db.TinyInt
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  users SysUser[]
+
+  @@index([parentId])
+  @@map("sys_dept")
+}
+
+/// 字典类型
+model SysDictType {
+  id        BigInt   @id @default(autoincrement())
+  name      String   @map("name") @db.VarChar(50)
+  /// 类型标识，如 sys_common_status
+  type      String   @unique @map("type") @db.VarChar(100)
+  status    Int      @default(1) @map("status") @db.TinyInt
+  remark    String?  @map("remark") @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  dataList SysDictData[]
+
+  @@map("sys_dict_type")
+}
+
+/// 字典数据
+model SysDictData {
+  id        BigInt   @id @default(autoincrement())
+  typeId    BigInt   @map("type_id")
+  label     String   @map("label") @db.VarChar(50)
+  value     String   @map("value") @db.VarChar(50)
+  sort      Int      @default(0) @map("sort")
+  status    Int      @default(1) @map("status") @db.TinyInt
+  remark    String?  @map("remark") @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  dictType SysDictType @relation(fields: [typeId], references: [id])
+
+  @@index([typeId])
+  @@map("sys_dict_data")
+}
+
+// ========== 日志与文件 ==========
+
+/// 登录日志
+model SysLoginLog {
+  id        BigInt   @id @default(autoincrement())
+  username  String   @map("username") @db.VarChar(50)
+  ip        String?  @map("ip") @db.VarChar(50)
+  browser   String?  @map("browser") @db.VarChar(100)
+  os        String?  @map("os") @db.VarChar(100)
+  /// 1 成功 0 失败
+  status    Int      @map("status") @db.TinyInt
+  message   String?  @map("message") @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([username])
+  @@map("sys_login_log")
+}
+
+/// 操作日志
+model SysOperationLog {
+  id        BigInt   @id @default(autoincrement())
+  userId    BigInt?  @map("user_id")
+  username  String?  @map("username") @db.VarChar(50)
+  module    String?  @map("module") @db.VarChar(50)
+  action    String?  @map("action") @db.VarChar(50)
+  method    String?  @map("method") @db.VarChar(10)
+  url       String?  @map("url") @db.VarChar(255)
+  params    String?  @map("params") @db.Text
+  ip        String?  @map("ip") @db.VarChar(50)
+  status    Int?     @map("status") @db.TinyInt
+  errorMsg  String?  @map("error_msg") @db.Text
+  /// 耗时（毫秒）
+  duration  Int?     @map("duration")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("sys_operation_log")
+}
+
+/// 文件记录
+model SysFile {
+  id           BigInt   @id @default(autoincrement())
+  originalName String   @map("original_name") @db.VarChar(255)
+  storageName  String   @map("storage_name") @db.VarChar(255)
+  path         String   @map("path") @db.VarChar(255)
+  url          String   @map("url") @db.VarChar(255)
+  size         BigInt   @map("size")
+  mimeType     String?  @map("mime_type") @db.VarChar(100)
+  uploaderId   BigInt?  @map("uploader_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("sys_file")
+}

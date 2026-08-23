@@ -1,0 +1,37 @@
+{
+  "name": "_auto_0d0e3309aeed41cdaeebfe313ee1600a",
+  "mainConversationId": "0d0e3309aeed41cdaeebfe313ee1600a",
+  "workspacePath": "f:\\开发学习\\ai项目\\第二版\\iplat",
+  "createdAt": "2026-08-17T08:25:16.476Z",
+  "options": {
+    "workspacePath": "f:\\开发学习\\ai项目\\第二版\\iplat",
+    "isAutoTeam": true
+  },
+  "isAutoTeam": true,
+  "members": [
+    {
+      "memberId": "dev-user-page@_auto_0d0e3309aeed41cdaeebfe313ee1600a",
+      "name": "dev-user-page",
+      "role": "开发用户管理页",
+      "sessionId": "4edd2d88a5b14a8a932c8a9c6193f67d"
+    },
+    {
+      "memberId": "dev-role-page@_auto_0d0e3309aeed41cdaeebfe313ee1600a",
+      "name": "dev-role-page",
+      "role": "开发角色管理页",
+      "sessionId": "950e5e4edfdb4abbaf93f06c1f948313"
+    },
+    {
+      "memberId": "dev-menu-page@_auto_0d0e3309aeed41cdaeebfe313ee1600a",
+      "name": "dev-menu-page",
+      "role": "开发菜单管理页",
+      "sessionId": "8a647389a9314f6b9e2f2004e1febd78"
+    },
+    {
+      "memberId": "dev-dict-log-pages@_auto_0d0e3309aeed41cdaeebfe313ee1600a",
+      "name": "dev-dict-log-pages",
+      "role": "开发字典+日志页面",
+      "sessionId": "bfdf0533bf5e4b6bbf40bb597ca0862f"
+    }
+  ]
+}

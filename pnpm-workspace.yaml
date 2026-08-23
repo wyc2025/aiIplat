@@ -1,0 +1,10 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# pnpm 10 默认不执行依赖的构建脚本，这里显式放行
+onlyBuiltDependencies:
+  - '@prisma/engines'
+  - bcrypt
+  - esbuild
+  - prisma

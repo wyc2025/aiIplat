@@ -1,0 +1,64 @@
+import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import { ensurePermissionLoaded } from './guard'
+
+/**
+ * 静态路由：不需要权限即可访问（登录页、404）。
+ * 业务页面全部由 userinfo 返回的菜单树动态注册（见 dynamic.ts）。
+ */
+export const staticRoutes: RouteRecordRaw[] = [
+  {
+    path: '/login',
+    name: 'login',
+    component: () => import('@/views/login/index.vue'),
+    meta: { title: '登录', hidden: true },
+  },
+  {
+    // 布局容器：dashboard 作为静态落地页（所有登录用户可见，不依赖权限注册），
+    // 保证 redirect 到 /dashboard 必然命中，不会落到 catch-all 404；
+    // 其余业务页（system/* 等）由 beforeEnter 拉取 userinfo 后动态注册。
+    path: '/',
+    name: 'layout',
+    component: () => import('@/layout/index.vue'),
+    redirect: '/dashboard',
+    beforeEnter: ensurePermissionLoaded,
+    children: [
+      {
+        path: 'dashboard',
+        name: 'dashboard',
+        component: () => import('@/views/dashboard/index.vue'),
+        meta: { title: '首页工作台', icon: 'Odometer' },
+      },
+      {
+        // 个人中心是登录用户的基本功能（PRD F11，顶栏下拉固定入口），
+        // 与 dashboard 同理静态注册，不依赖后端菜单分配，否则未分配该菜单的角色无法访问
+        path: 'profile',
+        name: 'profile',
+        component: () => import('@/views/profile/index.vue'),
+        meta: { title: '个人中心', hidden: true },
+      },
+    ],
+  },
+  {
+    path: '/404',
+    name: 'not-found',
+    component: () => import('@/views/error/404.vue'),
+    meta: { title: '404', hidden: true },
+  },
+  {
+    // 兜底：匹配所有未注册路径。直接渲染 404 组件而非 redirect——
+    // redirect 会在全局守卫之前把导航劫持到 /404，导致整页刷新直达深层路径
+    // （动态路由尚未注册）时守卫拿不到原始 path 而永远 404；
+    // 改为渲染组件后，守卫可先注册动态路由再 replace 重走，命中已注册路由。
+    // 注意：不给此路由命名，避免守卫用 {...to} 重放时 name 优先劫持导航。
+    path: '/:pathMatch(.*)*',
+    component: () => import('@/views/error/404.vue'),
+    meta: { title: '404', hidden: true },
+  },
+]
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes: staticRoutes,
+})
+
+export default router

@@ -1,0 +1,8 @@
+// 全局 CSS 变量与 SCSS 变量（布局尺寸以 ARCHITECTURE.md 第 7 节为准）
+:root {
+  --v-sidebar-width: 210px;
+  --v-sidebar-collapsed-width: 64px;
+  --v-navbar-height: 50px;
+  --v-tabsbar-height: 40px;
+  --v-content-bg: #f0f2f5;
+}

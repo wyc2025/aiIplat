@@ -1,0 +1,31 @@
+{
+  "name": "iplat",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "dev:web": "pnpm -C apps/web dev",
+    "dev:api": "pnpm -C apps/api start:dev",
+    "db:migrate": "pnpm -C apps/api prisma migrate dev",
+    "db:seed": "pnpm -C apps/api seed",
+    "infra:up": "docker-compose up -d",
+    "infra:down": "docker-compose down",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.19.0",
+    "eslint": "^9.19.0",
+    "eslint-plugin-vue": "^10.0.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.4.3",
+    "prettier": "^3.4.2",
+    "typescript-eslint": "^8.22.0"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,vue}": "eslint --fix",
+    "*.{json,md,scss,css,yml,yaml}": "prettier --write"
+  }
+}
