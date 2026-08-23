@@ -8,37 +8,42 @@
 
 ### 1.1 前端（apps/web）
 
-| 类别   | 选型                                      | 约束                                                                |
-| ------ | ----------------------------------------- | ------------------------------------------------------------------- |
-| 框架   | Vue 3.5 + TypeScript                      | 全部 `<script setup>`，禁止 Options API                             |
-| 构建   | Vite 7                                    | dev 代理 `/api` → `http://localhost:3000`                           |
-| 组件库 | Element Plus 2.x                          | unplugin-vue-components 按需自动引入，禁止全量 import               |
-| 图标   | @element-plus/icons-vue                   | 菜单图标选择器使用                                                  |
-| 路由   | Vue Router 4                              | 静态路由 + 动态路由（后端菜单驱动）                                 |
-| 状态   | Pinia                                     | 固定四个 store：user / permission / tabs / settings                 |
-| HTTP   | Axios                                     | 业务代码只允许使用 `src/utils/request.ts` 的封装实例                |
-| 样式   | Tailwind CSS 4 + SCSS + CSS 变量          | Tailwind 只做布局/间距/对齐工具类；组件风格、主题用 SCSS + CSS 变量 |
-| 图表   | ECharts 5                                 | 按需引入                                                            |
-| 工具库 | VueUse、dayjs、lodash-es                  | 时间格式化统一用 dayjs                                              |
-| 规范   | ESLint 9 + Prettier + husky + lint-staged | 提交时自动校验                                                      |
-| 环境   | Node ≥ 20，pnpm 9                         |                                                                     |
+| 类别          | 选型                                      | 约束                                                                |
+| ------------- | ----------------------------------------- | ------------------------------------------------------------------- |
+| 框架          | Vue 3.5 + TypeScript                      | 全部 `<script setup>`，禁止 Options API                             |
+| 构建          | Vite 7                                    | dev 代理 `/api` → `http://localhost:3000`                           |
+| 组件库        | Element Plus 2.x                          | unplugin-vue-components 按需自动引入，禁止全量 import               |
+| 图标          | @element-plus/icons-vue                   | 菜单图标选择器使用                                                  |
+| 路由          | Vue Router 4                              | 静态路由 + 动态路由（后端菜单驱动）                                 |
+| 状态          | Pinia                                     | 固定四个 store：user / permission / tabs / settings                 |
+| HTTP          | Axios                                     | 业务代码只允许使用 `src/utils/request.ts` 的封装实例                |
+| 样式          | Tailwind CSS 4 + SCSS + CSS 变量          | Tailwind 只做布局/间距/对齐工具类；组件风格、主题用 SCSS + CSS 变量 |
+| 图表          | ECharts 5                                 | 按需引入                                                            |
+| 工具库        | VueUse、dayjs、lodash-es                  | 时间格式化统一用 dayjs                                              |
+| 规范          | ESLint 9 + Prettier + husky + lint-staged | 提交时自动校验                                                      |
+| 环境          | Node ≥ 20，pnpm 9                         |                                                                     |
+| Markdown 渲染 | markdown-it                               | 仅用于 AI 回复渲染；渲染输出必须防 XSS（不允许 raw HTML）           |
 
 ### 1.2 后端（apps/api）
 
-| 类别     | 选型                                   | 约束                                                     |
-| -------- | -------------------------------------- | -------------------------------------------------------- |
-| 框架     | NestJS 11 + TypeScript                 | 严格分层 Controller → Service → Prisma                   |
-| ORM      | Prisma 6                               | model 用 PascalCase，数据库字段用 `@map` 映射 snake_case |
-| 数据库   | MySQL 8（utf8mb4）                     | docker-compose 启动                                      |
-| 缓存     | Redis 7（ioredis）                     | token 黑名单、登录失败计数、热点缓存                     |
-| 认证     | @nestjs/jwt + @nestjs/passport         | access + refresh 双 token                                |
-| 密码     | bcrypt（salt 10）                      | 任何接口不得返回 password 字段                           |
-| 校验     | class-validator + class-transformer    | 所有入参走 DTO，禁止在 Controller 里裸取 body            |
-| 接口文档 | @nestjs/swagger                        | 路径 `/api/docs`，带 JWT 调试按钮                        |
-| 安全     | @nestjs/throttler、helmet、CORS 白名单 | 全局限流 300 次/分/IP；登录接口 10 次/分                 |
-| 文件     | Multer + 本地磁盘                      | 通过 StorageService 抽象访问，预留二期切换 MinIO/OSS     |
-| 日志     | winston（运行日志）+ 操作日志落库      |                                                          |
-| 配置     | @nestjs/config + .env 多环境           | 配置项集中定义在 `src/config/`                           |
+| 类别       | 选型                                   | 约束                                                                    |
+| ---------- | -------------------------------------- | ----------------------------------------------------------------------- |
+| 框架       | NestJS 11 + TypeScript                 | 严格分层 Controller → Service → Prisma                                  |
+| ORM        | Prisma 6                               | model 用 PascalCase，数据库字段用 `@map` 映射 snake_case                |
+| 数据库     | MySQL 8（utf8mb4）                     | docker-compose 启动                                                     |
+| 缓存       | Redis 7（ioredis）                     | token 黑名单、登录失败计数、热点缓存                                    |
+| 认证       | @nestjs/jwt + @nestjs/passport         | access + refresh 双 token                                               |
+| 密码       | bcrypt（salt 10）                      | 任何接口不得返回 password 字段                                          |
+| 校验       | class-validator + class-transformer    | 所有入参走 DTO，禁止在 Controller 里裸取 body                           |
+| 接口文档   | @nestjs/swagger                        | 路径 `/api/docs`，带 JWT 调试按钮                                       |
+| 安全       | @nestjs/throttler、helmet、CORS 白名单 | 全局限流 300 次/分/IP；登录接口 10 次/分                                |
+| 文件       | Multer + 本地磁盘                      | 通过 StorageService 抽象访问，预留二期切换 MinIO/OSS                    |
+| 日志       | winston（运行日志）+ 操作日志落库      |                                                                         |
+| 配置       | @nestjs/config + .env 多环境           | 配置项集中定义在 `src/config/`                                          |
+| 定时任务   | @nestjs/schedule                       | P2a 起启用（月度额度重置），新增 cron 统一放各域 `*.task.ts`            |
+| 大模型接入 | openai（官方 SDK）                     | 用 `baseURL` 指向各家 OpenAI 兼容端点，**禁止**为单一厂商引入其专属 SDK |
+
+**P2a 新依赖白名单（仅此 3 个，已在 PRD-P2A D3 批准）**：`@nestjs/schedule`、`openai`、`markdown-it`。
 
 ### 1.3 基础设施与端口
 
@@ -113,7 +118,20 @@ apps/web/src/
     ├── error/              #   404
     ├── cloud/              #   （二期）
     ├── site/               #   （三期）
-    └── ai/                 #   （四期）
+    └── ai/                 #   P2a 新增域
+```
+
+`views/ai/` 目录结构：
+
+```
+views/ai/
+├── chat/          # AI 对话页（含组件：会话列表侧栏、消息气泡、确认预留位）
+├── plan/          # 开通套餐页
+├── usage/         # 我的用量页
+├── provider/      # 厂商模型管理（admin，左右布局复用字典页模式）
+├── admin/plan/    # 套餐管理（admin）
+├── admin/usage/   # 用量明细（admin）
+└── utils/sse.ts   # SSE 客户端（fetch + ReadableStream，见 §10）
 ```
 
 ### 3.2 权限链路（核心机制，不得偏离）
@@ -179,8 +197,18 @@ apps/api/src/
         ├── menu/
         ├── dept/
         ├── dict/
-        └── log/            #   操作日志、登录日志的查询接口
-    # 二期新增 modules/cloud/，三期 modules/site/，四期 modules/ai/
+        ├── log/            #   操作日志、登录日志的查询接口
+        └── online/         #   P2a 新增：在线用户（controller + service）
+    └── ai/                 # ★ P2a 新增域
+        ├── provider/       #   厂商与模型配置（admin CRUD + 用户侧模型列表）
+        ├── conversation/   #   会话与消息（会话懒创建于 chat 首条消息流程，无独立新建接口）
+        ├── chat/           #   SSE 对话（controller 原生写流 + service 编排）
+        ├── engine/         #   引擎层：provider.service.ts（OpenAI 兼容适配器，
+        │                   #   按 provider 配置创建 client、发起流式调用、解析 usage）
+        ├── credit/         #   CreditService：预检 / 结算（幂等）/ 余额查询
+        ├── plan/           #   套餐：admin CRUD + 指派 + 用户侧开通/切换
+        │   └── plan.task.ts #  月度重置 cron（每日 00:30 扫描过期周期）
+        └── usage/          #   用量明细（用户侧 + admin 侧查询）
 ```
 
 ### 4.2 请求生命周期（守卫链，全局注册顺序固定）
@@ -242,7 +270,7 @@ apps/api/src/
 
 ---
 
-## 5. 数据库设计（第一期，全部 sys_ 前缀）
+## 5. 数据库设计（sys_ 前缀为 P1 底座；P2a 新增 7 张 ai_ 表）
 
 > Prisma model 用 PascalCase + `@@map("sys_user")`，字段 camelCase + `@map("user_name")`。以下为数据库层结构。时间字段统一 `created_at / updated_at`，软删除用 `deleted_at`。
 >
@@ -327,6 +355,104 @@ apps/api/src/
 
 `id / original_name / storage_name / path / url / size(bigint) / mime_type / uploader_id / created_at`
 
+### ai_provider —— 大模型厂商
+
+| 字段                    | 类型               | 说明                           |
+| ----------------------- | ------------------ | ------------------------------ |
+| id                      | bigint PK          |                                |
+| name                    | varchar(50)        | 显示名，如 DeepSeek            |
+| code                    | varchar(30) unique | deepseek / kimi / qwen / zhipu |
+| base_url                | varchar(200)       | OpenAI 兼容端点                |
+| api_key                 | varchar(255)       | 接口返回一律掩码               |
+| status                  | tinyint            | 1 启用 0 禁用                  |
+| sort                    | int                |                                |
+| remark                  | varchar(255)       |                                |
+| created_at / updated_at | datetime           |                                |
+
+### ai_model —— 模型
+
+| 字段                    | 类型          | 说明                                 |
+| ----------------------- | ------------- | ------------------------------------ |
+| id                      | bigint PK     |                                      |
+| provider_id             | bigint        | 关联 ai_provider                     |
+| display_name            | varchar(50)   | 显示名                               |
+| model                   | varchar(100)  | API 模型名，如 deepseek-chat         |
+| input_price             | decimal(8,4)  | 输入单价（积分/千 tokens）           |
+| output_price            | decimal(8,4)  | 输出单价（积分/千 tokens）           |
+| max_context             | int           | 上下文长度（tokens），用于消息截取   |
+| support_tool            | tinyint       | 是否支持工具调用（P2b 用，本期存值） |
+| status / sort           | tinyint / int |                                      |
+| created_at / updated_at | datetime      |                                      |
+|                         |               | unique(provider_id, model)           |
+
+### ai_conversation —— 会话
+
+| 字段                                 | 类型         | 说明                                 |
+| ------------------------------------ | ------------ | ------------------------------------ |
+| id                                   | bigint PK    |                                      |
+| user_id                              | bigint       | 归属用户                             |
+| title                                | varchar(100) | 首条消息前 20 字自动生成，可改       |
+| model_id                             | bigint       | 当前选用模型（切换模型即更新此字段） |
+| created_at / updated_at / deleted_at | datetime     | 软删                                 |
+
+索引：(user_id, updated_at)
+
+### ai_message —— 消息
+
+| 字段                         | 类型        | 说明                                            |
+| ---------------------------- | ----------- | ----------------------------------------------- |
+| id                           | bigint PK   |                                                 |
+| conversation_id              | bigint      |                                                 |
+| role                         | varchar(20) | user / assistant（system 不持久化，由后端拼装） |
+| content                      | longtext    |                                                 |
+| model_id                     | bigint      | assistant 消息记录所用模型，可空                |
+| tokens_input / tokens_output | int         | assistant 消息记录实际用量                      |
+| credits                      | int         | 本条消息扣减积分（user 消息为 0）               |
+| status                       | tinyint     | 1 正常 2 失败（流中断/上游错误）                |
+| created_at / deleted_at      | datetime    |                                                 |
+
+索引：(conversation_id, created_at)
+
+### ai_plan —— 套餐
+
+| 字段                                 | 类型               | 说明                     |
+| ------------------------------------ | ------------------ | ------------------------ |
+| id                                   | bigint PK          |                          |
+| name                                 | varchar(50)        |                          |
+| code                                 | varchar(50) unique |                          |
+| monthly_credits                      | bigint             | 每月积分额度             |
+| price                                | decimal(10,2)      | 展示用（本期无真实支付） |
+| description                          | varchar(500)       |                          |
+| status / sort                        | tinyint / int      |                          |
+| created_at / updated_at / deleted_at | datetime           |                          |
+
+### ai_user_plan —— 用户订阅（每用户一行生效记录）
+
+| 字段                    | 类型          | 说明                               |
+| ----------------------- | ------------- | ---------------------------------- |
+| id                      | bigint PK     |                                    |
+| user_id                 | bigint unique |                                    |
+| plan_id                 | bigint        |                                    |
+| cycle_start / cycle_end | datetime      | 当前计费周期（开通日起一个自然月） |
+| total_credits           | bigint        | 本周期总额度（快照，换套餐即更新） |
+| used_credits            | bigint        | 本周期已用                         |
+| created_at / updated_at | datetime      |                                    |
+
+### ai_usage_log —— 用量明细
+
+| 字段                         | 类型      | 说明                                                 |
+| ---------------------------- | --------- | ---------------------------------------------------- |
+| id                           | bigint PK |                                                      |
+| user_id                      | bigint    |                                                      |
+| conversation_id / message_id | bigint    | message_id 用于结算幂等（unique）                    |
+| model_id                     | bigint    |                                                      |
+| tokens_input / tokens_output | int       |                                                      |
+| estimated                    | tinyint   | 1 = usage 为字符数估算（上游未返回），0 = 上游真实值 |
+| credits                      | int       |                                                      |
+| created_at                   | datetime  |                                                      |
+
+索引：(user_id, created_at)、unique(message_id)
+
 ### 索引约定
 
 - 唯一键：sys_user.username、sys_role.code、sys_dict_type.type、两张关联表的联合唯一
@@ -357,6 +483,13 @@ apps/api/src/
    └─ 操作日志    system/log/operation  system/log/operation/index  system:log:operation
 个人中心          /profile              profile/index            （hidden，不进菜单）
 ```
+
+### seed 增补（P2a AI 模块）
+
+- ai_provider 四行（DeepSeek / Kimi / 通义千问 / 智谱 GLM，baseUrl 按各家兼容端点预填，apiKey 空）
+- 每家 1~2 个示例模型（status=0 停用，填 key 后管理员启用）
+- ai_plan 两个示例：体验版（月 10,000 积分）、标准版（月 100,000 积分）
+- AI 菜单树 + 权限标识（见 PRD-P2A 第 3 节），common 角色分配"AI 助手"目录三页
 
 ---
 
@@ -398,6 +531,8 @@ CORS_ORIGINS=http://localhost:5173
 
 `apps/web/.env.development`：`VITE_API_BASE_URL=/api`
 
+P2a 增补：无新增环境变量（apiKey 存 ai_provider 表）。`.env` 增补可选项：`AI_CHAT_THROTTLE_LIMIT=20`（聊天限流，默认 20 次/分）。
+
 ---
 
 ## 9. 公共资产表（优先复用，禁止重复造；新增后必须回写登记）
@@ -430,3 +565,36 @@ CORS_ORIGINS=http://localhost:5173
 | 配置模块组                                                  | api/src/config                            | database/redis/jwt/upload 配置 + validate.ts 启动环境变量校验 | 已建（T2）                        |
 | PrismaService / RedisService                                | api/src/infra/prisma、api/src/infra/redis | 基础设施服务（全局模块，懒连接）                              | 已建（T2）                        |
 | StorageService                                              | api/src/infra/storage                     | 文件存储抽象（预留 MinIO/OSS 切换）                           | 待建（T9）                        |
+| ProviderService                                             | api/src/modules/ai/engine                 | OpenAI 兼容适配器（流式调用 + usage 解析）                    | 待建（T12）                       |
+| CreditService                                               | api/src/modules/ai/credit                 | 积分预检/结算/余额                                            | 待建（T14）                       |
+| @SkipTransform                                              | api/src/gateway/decorators                | SSE 接口跳过统一响应                                          | 待建（T14）                       |
+| sse                                                         | web/src/views/ai/utils/sse.ts             | 前端 SSE 客户端                                               | 待建（T17）                       |
+| MarkdownView                                                | web/src/views/ai/components               | markdown-it 渲染封装（禁 raw HTML）                           | 待建（T17）                       |
+
+### Redis Key 增补约定（写入 RedisKey 常量）
+
+| Key                    | 类型/TTL                                                 | 用途                                                                                         |
+| ---------------------- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `online:{userId}`      | hash，30min 滑动                                         | 在线用户（username/nickname/ip/loginAt/lastActiveAt），JwtAuthGuard 校验通过时刷新，登出删除 |
+| `ai:chatting:{userId}` | string，TTL 300s（兜底防进程崩溃残留），流结束时主动删除 | 单用户并发流限制（存在即拒绝新流，20007）                                                    |
+
+---
+
+## 10. SSE 接口特例约定（P2a 新增）
+
+1. SSE 是统一响应格式的**唯一例外**，仅限 `POST /api/ai/chat`：
+   - 前置校验失败 → 统一 JSON 错误响应（走 GlobalExceptionFilter）
+   - 进入流式 → `@Res()` 原生写流，Controller 标记 `@SkipTransform()`（新增装饰器），TransformInterceptor 与 OperationLogInterceptor 识别后跳过
+2. 前端 SSE 客户端 `views/ai/utils/sse.ts`：
+   - 用 `fetch` + `response.body.getReader()` 手动解析 `data:` 行（EventSource 不支持自定义请求头，禁用）
+   - 40100 时先调 refresh 再重试一次（复用 token.ts，与 request.ts 同策略）
+   - 维护 AbortController 支持"停止生成"
+3. 聊天接口限流 20 次/分/用户；同用户并发流式对话数 = 1
+
+## 11. AI 域内部协作约定（P2a 新增）
+
+1. **引擎层单向依赖**：chat → engine/provider.service → 上游；engine 不感知会话、积分
+2. **CreditService 接口**：`precheck(userId)`（无套餐 20001 / 余额不足 20002）、`settle(messageId, usage)`（按 message_id 幂等，事务内写 usage_log + 扣 used_credits）
+3. **上下文截取**：发送前按模型 max_context 从最新消息往回装，装不下的老消息丢弃；system prompt 固定放最前（P2a 的 system prompt：简洁的助手设定即可）。token 估算口径：不引入分词库，按字符数保守估算（1 token ≈ 1 字符，宁可多截不可超限）；usage 兜底估算同口径
+4. **价格换算口径**：1 积分 = 内部计量单位，模型单价由运营按"厂商定价 × 加价率"换算后人工录入 ai_model 表，系统不做实时汇率
+5. 所有 AI 域写操作（开通/切换/指派/踢人）挂 @OperationLog
