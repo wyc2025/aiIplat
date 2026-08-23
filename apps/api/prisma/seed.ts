@@ -146,6 +146,108 @@ const menuTree: MenuSeed[] = [
           },
         ],
       },
+      {
+        name: '在线用户',
+        type: 2,
+        path: 'system/online',
+        component: 'system/online/index',
+        perms: 'system:online:list',
+        icon: 'Connection',
+        sort: 7,
+        children: [
+          { name: '在线用户查询', type: 3, perms: 'system:online:list', sort: 1 },
+          { name: '踢下线', type: 3, perms: 'system:online:kick', sort: 2 },
+        ],
+      },
+    ],
+  },
+  // AI 助手：登录可见目录（三页不挂按钮权限，接口层用套餐校验兜底）
+  {
+    name: 'AI 助手',
+    type: 1,
+    path: '/ai',
+    icon: 'MagicStick',
+    sort: 3,
+    children: [
+      {
+        name: 'AI 对话',
+        type: 2,
+        path: 'ai/chat',
+        component: 'ai/chat/index',
+        icon: 'ChatDotRound',
+        sort: 1,
+      },
+      {
+        name: '开通套餐',
+        type: 2,
+        path: 'ai/plan',
+        component: 'ai/plan/index',
+        icon: 'Wallet',
+        sort: 2,
+      },
+      {
+        name: '我的用量',
+        type: 2,
+        path: 'ai/usage',
+        component: 'ai/usage/index',
+        icon: 'DataLine',
+        sort: 3,
+      },
+    ],
+  },
+  // AI 管理：admin 专属（走正常 RBAC，ai:* 权限标识）
+  {
+    name: 'AI 管理',
+    type: 1,
+    path: '/ai-admin',
+    icon: 'Monitor',
+    sort: 4,
+    children: [
+      {
+        name: '厂商模型',
+        type: 2,
+        path: 'ai-admin/provider',
+        component: 'ai/provider/index',
+        perms: 'ai:provider:list',
+        icon: 'Cpu',
+        sort: 1,
+        children: [
+          { name: '厂商查询', type: 3, perms: 'ai:provider:list', sort: 1 },
+          { name: '厂商新增', type: 3, perms: 'ai:provider:create', sort: 2 },
+          { name: '厂商修改', type: 3, perms: 'ai:provider:update', sort: 3 },
+          { name: '厂商删除', type: 3, perms: 'ai:provider:delete', sort: 4 },
+          { name: '模型查询', type: 3, perms: 'ai:model:list', sort: 5 },
+          { name: '模型新增', type: 3, perms: 'ai:model:create', sort: 6 },
+          { name: '模型修改', type: 3, perms: 'ai:model:update', sort: 7 },
+          { name: '模型删除', type: 3, perms: 'ai:model:delete', sort: 8 },
+        ],
+      },
+      {
+        name: '套餐管理',
+        type: 2,
+        path: 'ai-admin/plan',
+        component: 'ai/admin/plan/index',
+        perms: 'ai:plan:list',
+        icon: 'PriceTag',
+        sort: 2,
+        children: [
+          { name: '套餐查询', type: 3, perms: 'ai:plan:list', sort: 1 },
+          { name: '套餐新增', type: 3, perms: 'ai:plan:create', sort: 2 },
+          { name: '套餐修改', type: 3, perms: 'ai:plan:update', sort: 3 },
+          { name: '套餐删除', type: 3, perms: 'ai:plan:delete', sort: 4 },
+          { name: '指派用户', type: 3, perms: 'ai:plan:assign', sort: 5 },
+        ],
+      },
+      {
+        name: '用量明细',
+        type: 2,
+        path: 'ai-admin/usage',
+        component: 'ai/admin/usage/index',
+        perms: 'ai:usage:list',
+        icon: 'Histogram',
+        sort: 3,
+        children: [{ name: '用量查询', type: 3, perms: 'ai:usage:list', sort: 1 }],
+      },
     ],
   },
   // 个人中心：路由存在但不进侧边栏菜单（visible=0）
@@ -155,7 +257,7 @@ const menuTree: MenuSeed[] = [
     path: '/profile',
     component: 'profile/index',
     icon: 'Postcard',
-    sort: 3,
+    sort: 5,
     visible: 0,
   },
 ]
@@ -200,7 +302,7 @@ async function main() {
   const createdMenuIds: bigint[] = []
   await seedMenus(menuTree, BigInt(0), createdMenuIds)
 
-  // 3. common 角色仅关联「首页工作台」
+  // 3. common 角色关联「首页工作台」+「AI 助手」目录下三页（AI 管理三页不给 common）
   const dashboardMenu = await prisma.sysMenu.findFirst({
     where: { parentId: BigInt(0), name: '首页工作台' },
   })
@@ -210,6 +312,27 @@ async function main() {
       update: {},
       create: { roleId: commonRole.id, menuId: dashboardMenu.id },
     })
+  }
+  const aiAssistantDir = await prisma.sysMenu.findFirst({
+    where: { parentId: BigInt(0), name: 'AI 助手' },
+  })
+  if (aiAssistantDir) {
+    await prisma.sysRoleMenu.upsert({
+      where: { roleId_menuId: { roleId: commonRole.id, menuId: aiAssistantDir.id } },
+      update: {},
+      create: { roleId: commonRole.id, menuId: aiAssistantDir.id },
+    })
+    // AI 助手目录下三页（按名称精确查找）
+    const aiChildMenus = await prisma.sysMenu.findMany({
+      where: { parentId: aiAssistantDir.id, name: { in: ['AI 对话', '开通套餐', '我的用量'] } },
+    })
+    for (const menu of aiChildMenus) {
+      await prisma.sysRoleMenu.upsert({
+        where: { roleId_menuId: { roleId: commonRole.id, menuId: menu.id } },
+        update: {},
+        create: { roleId: commonRole.id, menuId: menu.id },
+      })
+    }
   }
 
   // 4. admin 用户（已存在则不重置密码）并关联 admin 角色
@@ -276,7 +399,118 @@ async function main() {
     }
   }
 
-  console.log(`seed 完成：角色 2 个，菜单新增 ${createdMenuIds.length} 条，admin 用户就绪，内置字典 2 组`)
+  // 6. AI 厂商 + 示例模型（apiKey 空待管理员填写，示例模型默认停用）
+  const providerSeeds: Array<{
+    name: string
+    code: string
+    baseUrl: string
+    models: Array<{
+      displayName: string
+      model: string
+      inputPrice: number
+      outputPrice: number
+      maxContext: number
+    }>
+  }> = [
+    {
+      name: 'DeepSeek',
+      code: 'deepseek',
+      baseUrl: 'https://api.deepseek.com/v1',
+      models: [
+        { displayName: 'DeepSeek Chat', model: 'deepseek-chat', inputPrice: 2, outputPrice: 8, maxContext: 64000 },
+        { displayName: 'DeepSeek Reasoner', model: 'deepseek-reasoner', inputPrice: 4, outputPrice: 16, maxContext: 64000 },
+      ],
+    },
+    {
+      name: 'Kimi',
+      code: 'kimi',
+      baseUrl: 'https://api.moonshot.cn/v1',
+      models: [
+        { displayName: 'Kimi 8K', model: 'moonshot-v1-8k', inputPrice: 12, outputPrice: 12, maxContext: 8192 },
+      ],
+    },
+    {
+      name: '通义千问',
+      code: 'qwen',
+      baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      models: [
+        { displayName: '通义千问 Plus', model: 'qwen-plus', inputPrice: 0.8, outputPrice: 2, maxContext: 131072 },
+        { displayName: '通义千问 Turbo', model: 'qwen-turbo', inputPrice: 0.3, outputPrice: 0.6, maxContext: 131072 },
+      ],
+    },
+    {
+      name: '智谱 GLM',
+      code: 'zhipu',
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+      models: [
+        { displayName: 'GLM-4-Plus', model: 'glm-4-plus', inputPrice: 50, outputPrice: 50, maxContext: 128000 },
+      ],
+    },
+  ]
+  for (const providerSeed of providerSeeds) {
+    const provider = await prisma.aiProvider.upsert({
+      where: { code: providerSeed.code },
+      update: {},
+      create: {
+        name: providerSeed.name,
+        code: providerSeed.code,
+        baseUrl: providerSeed.baseUrl,
+        status: 1,
+        sort: 0,
+      },
+    })
+    for (const modelSeed of providerSeed.models) {
+      const exists = await prisma.aiModel.findUnique({
+        where: { providerId_model: { providerId: provider.id, model: modelSeed.model } },
+      })
+      if (!exists) {
+        await prisma.aiModel.create({
+          data: {
+            providerId: provider.id,
+            displayName: modelSeed.displayName,
+            model: modelSeed.model,
+            inputPrice: modelSeed.inputPrice,
+            outputPrice: modelSeed.outputPrice,
+            maxContext: modelSeed.maxContext,
+            supportTool: 0,
+            status: 0,
+            sort: 0,
+          },
+        })
+      }
+    }
+  }
+
+  // 7. AI 套餐：体验版（月 10,000 积分）、标准版（月 100,000 积分）
+  const planSeeds = [
+    {
+      name: '体验版',
+      code: 'trial',
+      monthlyCredits: BigInt(10000),
+      price: 0,
+      description: '免费体验，每月 10,000 积分',
+      sort: 1,
+    },
+    {
+      name: '标准版',
+      code: 'standard',
+      monthlyCredits: BigInt(100000),
+      price: 19.9,
+      description: '每月 100,000 积分',
+      sort: 2,
+    },
+  ]
+  for (const planSeed of planSeeds) {
+    await prisma.aiPlan.upsert({
+      where: { code: planSeed.code },
+      update: {},
+      create: planSeed,
+    })
+  }
+
+  console.log(
+    `seed 完成：角色 2 个，菜单新增 ${createdMenuIds.length} 条，admin 用户就绪，内置字典 2 组，AI 厂商 4 家、示例模型 6 个、套餐 2 个`,
+  )
 }
 
 main()

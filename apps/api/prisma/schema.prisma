@@ -226,3 +226,160 @@ model SysFile {
 
   @@map("sys_file")
 }
+
+// ========== AI 域（P2a） ==========
+
+/// 大模型厂商
+model AiProvider {
+  id        BigInt   @id @default(autoincrement())
+  name      String   @map("name") @db.VarChar(50)
+  /// 厂商标识：deepseek / kimi / qwen / zhipu
+  code      String   @unique @map("code") @db.VarChar(30)
+  /// OpenAI 兼容端点
+  baseUrl   String   @map("base_url") @db.VarChar(200)
+  /// 接口返回一律掩码
+  apiKey    String?  @map("api_key") @db.VarChar(255)
+  /// 1 启用 0 禁用
+  status    Int      @default(1) @map("status") @db.TinyInt
+  sort      Int      @default(0) @map("sort")
+  remark    String?  @map("remark") @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  models AiModel[]
+
+  @@map("ai_provider")
+}
+
+/// 模型
+model AiModel {
+  id          BigInt   @id @default(autoincrement())
+  providerId  BigInt   @map("provider_id")
+  displayName String   @map("display_name") @db.VarChar(50)
+  /// API 模型名，如 deepseek-chat
+  model       String   @map("model") @db.VarChar(100)
+  /// 输入单价（积分/千 tokens）
+  inputPrice  Decimal  @map("input_price") @db.Decimal(8, 4)
+  /// 输出单价（积分/千 tokens）
+  outputPrice Decimal  @map("output_price") @db.Decimal(8, 4)
+  /// 上下文长度（tokens），用于消息截取
+  maxContext  Int      @map("max_context")
+  /// 是否支持工具调用（P2b 用，本期存值）
+  supportTool Int      @default(0) @map("support_tool") @db.TinyInt
+  /// 1 启用 0 禁用
+  status      Int      @default(1) @map("status") @db.TinyInt
+  sort        Int      @default(0) @map("sort")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  provider AiProvider @relation(fields: [providerId], references: [id])
+
+  @@unique([providerId, model])
+  @@index([providerId])
+  @@map("ai_model")
+}
+
+/// 会话
+model AiConversation {
+  id        BigInt    @id @default(autoincrement())
+  userId    BigInt    @map("user_id")
+  /// 首条消息前 20 字自动生成，可改
+  title     String    @map("title") @db.VarChar(100)
+  /// 当前选用模型（切换模型即更新此字段）
+  modelId   BigInt?   @map("model_id")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  messages AiMessage[]
+
+  @@index([userId, updatedAt])
+  @@map("ai_conversation")
+}
+
+/// 消息
+model AiMessage {
+  id             BigInt    @id @default(autoincrement())
+  conversationId BigInt    @map("conversation_id")
+  /// user / assistant（system 不持久化，由后端拼装）
+  role           String    @map("role") @db.VarChar(20)
+  content        String    @map("content") @db.LongText
+  /// assistant 消息记录所用模型，可空
+  modelId        BigInt?   @map("model_id")
+  /// assistant 消息记录实际用量
+  tokensInput    Int?      @map("tokens_input")
+  tokensOutput   Int?      @map("tokens_output")
+  /// 本条消息扣减积分（user 消息为 0）
+  credits       Int       @default(0) @map("credits")
+  /// 1 正常 2 失败（流中断/上游错误）
+  status        Int       @default(1) @map("status") @db.TinyInt
+  createdAt     DateTime  @default(now()) @map("created_at")
+  deletedAt     DateTime? @map("deleted_at")
+
+  conversation AiConversation @relation(fields: [conversationId], references: [id])
+
+  @@index([conversationId, createdAt])
+  @@map("ai_message")
+}
+
+/// 套餐
+model AiPlan {
+  id             BigInt    @id @default(autoincrement())
+  name           String    @map("name") @db.VarChar(50)
+  code           String    @unique @map("code") @db.VarChar(50)
+  /// 每月积分额度
+  monthlyCredits BigInt    @map("monthly_credits")
+  /// 展示用（本期无真实支付）
+  price          Decimal   @map("price") @db.Decimal(10, 2)
+  description    String?   @map("description") @db.VarChar(500)
+  /// 1 启用 0 禁用
+  status         Int       @default(1) @map("status") @db.TinyInt
+  sort           Int       @default(0) @map("sort")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  deletedAt      DateTime? @map("deleted_at")
+
+  userPlans AiUserPlan[]
+
+  @@map("ai_plan")
+}
+
+/// 用户订阅（每用户一行生效记录）
+model AiUserPlan {
+  id           BigInt   @id @default(autoincrement())
+  userId       BigInt   @unique @map("user_id")
+  planId       BigInt   @map("plan_id")
+  /// 当前计费周期（开通日起一个自然月）
+  cycleStart   DateTime @map("cycle_start")
+  cycleEnd     DateTime @map("cycle_end")
+  /// 本周期总额度（快照，换套餐即更新）
+  totalCredits BigInt   @map("total_credits")
+  /// 本周期已用
+  usedCredits  BigInt   @default(0) @map("used_credits")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  plan AiPlan @relation(fields: [planId], references: [id])
+
+  @@index([planId])
+  @@map("ai_user_plan")
+}
+
+/// 用量明细
+model AiUsageLog {
+  id             BigInt   @id @default(autoincrement())
+  userId         BigInt   @map("user_id")
+  conversationId BigInt   @map("conversation_id")
+  /// message_id 用于结算幂等（unique）
+  messageId      BigInt   @unique @map("message_id")
+  modelId        BigInt   @map("model_id")
+  tokensInput    Int      @map("tokens_input")
+  tokensOutput   Int      @map("tokens_output")
+  /// 1 = usage 为字符数估算（上游未返回），0 = 上游真实值
+  estimated      Int      @default(0) @map("estimated") @db.TinyInt
+  credits        Int      @map("credits")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@map("ai_usage_log")
+}

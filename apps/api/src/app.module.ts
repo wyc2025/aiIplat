@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 import { ConfigModule } from '@nestjs/config'
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core'
+import { ScheduleModule } from '@nestjs/schedule'
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler'
 import { configLoaders } from './config'
 import { validateEnv } from './config/validate'
@@ -12,6 +13,7 @@ import { OperationLogInterceptor } from './gateway/interceptors/operation-log.in
 import { TransformInterceptor } from './gateway/interceptors/transform.interceptor'
 import { PrismaModule } from './infra/prisma/prisma.module'
 import { RedisModule } from './infra/redis/redis.module'
+import { AiModule } from './modules/ai/ai.module'
 import { AuthModule } from './modules/system/auth/auth.module'
 import { DashboardModule } from './modules/system/dashboard/dashboard.module'
 import { DeptModule } from './modules/system/dept/dept.module'
@@ -26,8 +28,11 @@ import { UserModule } from './modules/system/user/user.module'
     ConfigModule.forRoot({ isGlobal: true, load: configLoaders, validate: validateEnv }),
     // 全局限流 300 次/分/IP；登录接口 10 次/分在 AuthController 单独配置
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),
+    // 定时任务（P2a 起启用，月度额度重置 cron 在 ai/plan/plan.task.ts）
+    ScheduleModule.forRoot(),
     PrismaModule,
     RedisModule,
+    AiModule,
     AuthModule,
     DashboardModule,
     UserModule,

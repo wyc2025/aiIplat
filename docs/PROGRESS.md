@@ -16,16 +16,16 @@
 
 ## P2a 任务拆解（AI 模块）
 
-| 编号 | 任务                                                                                                                   | 状态 |
-| ---- | ---------------------------------------------------------------------------------------------------------------------- | ---- |
-| T11  | ai 域骨架 + 数据库（7 张 ai_ 表 + 迁移 + seed：厂商配置/示例模型/默认套餐/AI 菜单树及权限标识）+ 引入 @nestjs/schedule | 待办 |
-| T12  | 引擎层：ProviderService（OpenAI 兼容适配器）+ 用户侧模型列表接口                                                       | 待办 |
-| T13  | 会话与消息 CRUD 接口（建会话/列表/重命名/删除/消息列表/自动生成标题）                                                  | 待办 |
-| T14  | SSE 对话接口 + CreditService（预检/结算/幂等）+ 限流 + 上下文截取                                                      | 待办 |
-| T15  | 套餐体系：plan CRUD、开通/切换/指派、我的套餐与用量接口、月度重置 cron                                                 | 待办 |
-| T16  | system 域增量：在线用户跟踪 + 在线列表接口 + 踢下线接口                                                                | 待办 |
-| T17  | 前端 AI 对话页（SSE 流式渲染、markdown-it、会话管理、模型切换、停止生成）                                              | 待办 |
-| T18  | 前端 开通套餐页 + 我的用量页 + 管理端三页 + 在线用户页 + 联调验收（对照 PRD-P2A 第 7 节）                              | 待办 |
+| 编号 | 任务                                                                                                                   | 状态   |
+| ---- | ---------------------------------------------------------------------------------------------------------------------- | ------ |
+| T11  | ai 域骨架 + 数据库（7 张 ai_ 表 + 迁移 + seed：厂商配置/示例模型/默认套餐/AI 菜单树及权限标识）+ 引入 @nestjs/schedule | 已完成 |
+| T12  | 引擎层：ProviderService（OpenAI 兼容适配器）+ 用户侧模型列表接口                                                       | 待办   |
+| T13  | 会话与消息 CRUD 接口（建会话/列表/重命名/删除/消息列表/自动生成标题）                                                  | 待办   |
+| T14  | SSE 对话接口 + CreditService（预检/结算/幂等）+ 限流 + 上下文截取                                                      | 待办   |
+| T15  | 套餐体系：plan CRUD、开通/切换/指派、我的套餐与用量接口、月度重置 cron                                                 | 待办   |
+| T16  | system 域增量：在线用户跟踪 + 在线列表接口 + 踢下线接口                                                                | 待办   |
+| T17  | 前端 AI 对话页（SSE 流式渲染、markdown-it、会话管理、模型切换、停止生成）                                              | 待办   |
+| T18  | 前端 开通套餐页 + 我的用量页 + 管理端三页 + 在线用户页 + 联调验收（对照 PRD-P2A 第 7 节）                              | 待办   |
 
 ## 第一期任务拆解（P1 底座）
 
@@ -44,7 +44,7 @@
 
 ## 进行中
 
-- T11：ai 域骨架 + 数据库（7 张 ai_ 表 + 迁移 + seed）+ 引入 @nestjs/schedule
+（空，下一个待办 T12：引擎层 ProviderService + 用户侧模型列表接口）
 
 ## 遗留问题
 
@@ -57,6 +57,7 @@
 7. CodeBuddy execute_command 会把命令写入临时 .ps1 执行，PowerShell 以 GBK 解析导致**命令中显式书写的中文路径/字符串乱码**；规避：命令一律用相对路径、避免命令行内嵌中文字符串
 8. （验收发现）AppMain 页面切换的 `<Transition>` 多根节点警告：T10 已给 user/role/menu/dept 四页补单根包裹，但修复后未在浏览器专门复验警告是否消除（低风险，功能不受影响）；P2 新页面开发注意保持单根节点
 9. （运维建议）admin 初始密码仍为 seed 值 `Admin@123`，生产部署前务必通过个人中心修改；`.env` 中 JWT 双密钥亦为本地开发值，上线需替换
+10. （P2a 环境）`prisma generate` / `migrate dev` 末尾会报 `EPERM: rename query_engine-windows.dll.node.tmp* -> query_engine-windows.dll.node`——原因是运行中的 api 进程（`node dist/main.js`）占用该 dll；**类型生成与迁移本身均成功**（index.d.ts 已含新模型、迁移已应用），仅最后一步引擎 dll 替换失败，残留 `.tmp*` 文件在 node_modules 内无害。规避：如需完全干净可先停 api 服务再 generate，或忽略该告警
 
 ## 完成记录
 
@@ -71,6 +72,7 @@
 - 2026-08-23 T9：系统管理 7 个页面完成并通过浏览器联调（并行子代理开发 + 主线程修复验证）。公共资产：`hooks/useTable`（列表页通用：分页/查询/重置/加载态）、`components/ProTable`（工具栏+表格+分页封装）、`components/FormDialog`（弹窗表单封装）、`hooks/useDict`（字典缓存）；后端补 `GET /system/dict/data/:type` 免权限字典数据接口。页面：用户（含分配角色/重置密码）、角色（含菜单树勾选）、菜单（树形表格）、部门（树形）、字典（左右布局类型+数据）、登录日志、操作日志，全部处理加载中/空数据/失败三态。**联调修复关键 bug**：catch-all 路由用 `redirect: '/404'` 时 vue-router 在全局守卫之前完成重定向，守卫拿到 `to.path=/404`（白名单放行），`routesLoaded` 检查永远不触发——整页刷新直达 `/system/user` 等深层路径必 404；改为直接渲染 404 组件 + 守卫重放改用 `path/query` 重建（不用 spread to，避免携带 catch-all 的 name/matched 劫持导航）。联调验证（agent-browser）：登录 ✓、7 页面数据渲染 ✓（含树形菜单 34 条、日志 19+2 条）、整页刷新直达深层路径 ✓、新增用户（弹窗表单+角色下拉+提交+列表刷新）✓、删除用户（确认框+列表刷新）✓、权限按钮显隐（admin 行无删除按钮）✓、退出登录（确认框样式正常）✓；vue-tsc/eslint/vite build 均 0 错误。safe-delete 规避：dev 服务由用户在自有 PowerShell 窗口启动（api 直接 `node dist/main.js` 无需构建）
 - 2026-08-23 T10：Dashboard + 个人中心 + P1 整体验收完成，**PRD 12 条验收标准全部通过**。后端：`modules/system/dashboard/`（GET stats 四项统计 + login-trend 近 7 天 $queryRaw 按日聚合补零，登录即可访问）；`user/profile.controller.ts`（PUT /system/user/profile 改基本信息、PUT /system/user/profile/password 改密码，@OperationLog）；**改密码全端踢下线**：Redis `user:pwd:changed:{userId}` 记录时间戳（TTL=access 有效期），JwtAuthGuard 校验 token iat 早于它即拒绝（40100"密码已修改"），同时 SCAN 删除该用户全部 refresh + 清权限缓存；错误码 10203 旧密码错误；`parseDurationToSeconds` 抽到 common/utils。前端：Dashboard 重写（统计卡片/ECharts 按需折线图含 resize/快捷入口按菜单权限过滤/三态）；个人中心页（左卡片+基本信息/修改密码 Tab，改密成功清会话回登录）；tabs store localStorage 持久化；user/role/menu/dept 四页根级包 div 修复 Transition 警告；ESLint 修 .vue 文件 no-undef 误报。**联调修复 3 个关键 bug**：① request.ts 只在 HTTP 200 分支处理 40100，而无效 token 走 HTTP 401 error 分支 → 静默刷新从未触发；统一两分支到 handleTokenInvalid（并修复触发刷新的请求本身不重放的问题）② `PUT /system/user/profile/password` 被 UserController 的 `PUT /system/user/:id/password` 抢先匹配（Express 按注册顺序）→ ProfileController 注册到 UserController 之前 ③ 个人中心依赖后端菜单分配动态路由，未分配该菜单的角色 404 → profile 移入静态路由（与 dashboard 同理）。验收实测：登录/锁定（5×10101→10102 锁 600s，Redis 计数验证）/菜单渲染刷新不丢/测试角色仅见用户管理/无 delete 权限按钮隐藏+接口 40300/CRUD 前置校验（10501/10302）/双日志记录（改密含 3 条历史失败记录）/静默刷新+双 token 失效跳登录/改密后旧 access 40100+旧 refresh 10104+页面自动踢出/Swagger/TabsBar 持久化恢复/三态。测试数据已清理（tester3/QA Role/测试部门已删，登录失败锁已清）
 - 2026-08-23 补充修复（用户反馈）：菜单管理"新增子级/编辑"弹框中父级菜单反显数字而非名称——根因是 `Number(parent.id)` 把字符串 id 转 number，与 el-tree-select 选项 value（字符串 id）类型不匹配导致选不中；部门管理页存在同款问题。修复：menu/dept 两页表单 parentId 全程保持字符串，仅在提交时转 number（`openCreate`/`openEdit`/`handleSubmit` 三处）。已验证：新增子级反显父级中文名、编辑回填正常、无变化提交成功，vue-tsc/eslint 0 错误
+- 2026-08-24 T11：ai 域骨架 + 数据库完成。① `prisma/schema.prisma` 追加 7 张 ai_ 表（AiProvider/AiModel/AiConversation/AiMessage/AiPlan/AiUserPlan/AiUsageLog，延续 `relationMode="prisma"` 逻辑外键，decimal(8,4)/decimal(10,2) 价格、longtext 消息体、unique(provider_id,model)、unique(message_id) 结算幂等、索引 (user_id,updated_at)/(conversation_id,created_at)/(user_id,created_at)）；迁移 `20260823173222_add_ai_domain` 已创建并应用。② 引入 `@nestjs/schedule@6.1.3`，`app.module.ts` 注册 `ScheduleModule.forRoot()`（月度重置 cron 归 T15 实现）；同步补回 `@types/express@5.0.6` devDependency（T2 曾添加但未落盘，本次 pnpm 重装暴露缺失导致 nest build 报 TS2307，已修复）。③ 建立 `modules/ai/ai.module.ts` 聚合模块（空骨架，子模块随 T12~T15 挂载）+ provider/conversation/chat/engine/credit/plan/usage 七子目录 .gitkeep 占位，并注册进 app.module。④ seed 增补：AI 厂商 4 家（deepseek/kimi/qwen/zhipu，baseUrl 按各家 OpenAI 兼容端点预填，apiKey 空）+ 示例模型 6 个（status=0 停用）+ 套餐 2 个（体验版 10000/标准版 100000 积分）；菜单树新增"AI 助手"目录（AI 对话/开通套餐/我的用量三页，无按钮权限，接口层用套餐校验兜底）、"AI 管理"目录（厂商模型/套餐管理/用量明细三页，含 13 个 `ai:*` 权限标识）、"系统管理"下"在线用户"（system:online:list/kick）；common 角色分配"AI 助手"三页，admin 拥有全部。验证：`prisma validate` ✓、`prisma generate` ✓（7 张 ai_ 模型类型已生成）、`migrate` ✓、seed 幂等（重跑菜单新增 0 条）✓、数据核查（4 厂商/6 模型/2 套餐/菜单树/common 角色 5 菜单）✓、`eslint` 0 错误 ✓、`nest build` ✓
 
 ### P1 最终状态总结（三句话）
 
