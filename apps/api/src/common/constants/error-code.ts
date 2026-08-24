@@ -76,6 +76,14 @@ export const ErrorCode = {
   AiPlanInUse: 20008,
   /** 套餐标识已存在 */
   AiPlanCodeExists: 20009,
+  /** 厂商标识已存在 */
+  AiProviderCodeExists: 20010,
+  /** 厂商下有模型，不可删除 */
+  AiProviderHasModels: 20011,
+  /** 模型（厂商内 API 模型名）已存在 */
+  AiModelExists: 20012,
+  /** 模型存在引用（会话/用量记录），不可删除，仅可停用 */
+  AiModelInUse: 20013,
 } as const
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode]
