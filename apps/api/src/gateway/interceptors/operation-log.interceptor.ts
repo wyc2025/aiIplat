@@ -10,6 +10,7 @@ import type { Request, Response } from 'express'
 import { catchError, tap, throwError, type Observable } from 'rxjs'
 import { PrismaService } from '../../infra/prisma/prisma.service'
 import { OPERATION_LOG_KEY, type OperationLogMeta } from '../decorators/operation-log.decorator'
+import { SKIP_TRANSFORM_KEY } from '../decorators/skip-transform.decorator'
 import type { AuthUser } from '../guards/jwt.strategy'
 
 /** 操作日志：仅对挂了 @OperationLog 的接口生效；响应后异步写库，不阻塞主流程，失败只记运行日志 */
@@ -28,6 +29,13 @@ export class OperationLogInterceptor implements NestInterceptor {
       context.getClass(),
     ])
     if (!meta) return next.handle()
+
+    // SSE 接口（@SkipTransform）跳过统一操作日志，由业务层自定义记录
+    const skipTransform = this.reflector.getAllAndOverride<boolean>(SKIP_TRANSFORM_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ])
+    if (skipTransform) return next.handle()
 
     const request = context.switchToHttp().getRequest<Request & { user?: AuthUser }>()
     const start = Date.now()

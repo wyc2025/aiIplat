@@ -10,4 +10,8 @@ export const RedisKey = {
   pwdChanged: (userId: string) => `user:pwd:changed:${userId}`,
   /** 用户权限标识集合缓存（JSON 数组，超管为 ['*']）：user:perms:{userId} */
   userPerms: (userId: string) => `user:perms:${userId}`,
+  /** 单用户并发流限制：ai:chatting:{userId}，存在即拒绝新流（20007），流结束时主动删除，TTL 兜底 */
+  aiChatting: (userId: string) => `ai:chatting:${userId}`,
+  /** 聊天限流计数（20 次/分/用户）：ai:chat:rate:{userId}，INCR + 首次设置 60s TTL */
+  aiChatRate: (userId: string) => `ai:chat:rate:${userId}`,
 } as const

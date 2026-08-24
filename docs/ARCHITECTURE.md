@@ -566,8 +566,8 @@ P2a 增补：无新增环境变量（apiKey 存 ai_provider 表）。`.env` 增�
 | PrismaService / RedisService                                | api/src/infra/prisma、api/src/infra/redis | 基础设施服务（全局模块，懒连接）                              | 已建（T2）                        |
 | StorageService                                              | api/src/infra/storage                     | 文件存储抽象（预留 MinIO/OSS 切换）                           | 待建（T9）                        |
 | ProviderService                                             | api/src/modules/ai/engine                 | OpenAI 兼容适配器（流式调用 + usage 解析）                    | 已建（T12）                       |
-| CreditService                                               | api/src/modules/ai/credit                 | 积分预检/结算/余额                                            | 待建（T14）                       |
-| @SkipTransform                                              | api/src/gateway/decorators                | SSE 接口跳过统一响应                                          | 待建（T14）                       |
+| CreditService                                               | api/src/modules/ai/credit                 | 积分预检/结算/余额                                            | 已建（T14）                       |
+| @SkipTransform                                              | api/src/gateway/decorators                | SSE 接口跳过统一响应                                          | 已建（T14）                       |
 | sse                                                         | web/src/views/ai/utils/sse.ts             | 前端 SSE 客户端                                               | 待建（T17）                       |
 | MarkdownView                                                | web/src/views/ai/components               | markdown-it 渲染封装（禁 raw HTML）                           | 待建（T17）                       |
 
