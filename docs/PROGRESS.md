@@ -20,7 +20,7 @@
 | ---- | ---------------------------------------------------------------------------------------------------------------------- | ------ |
 | T11  | ai 域骨架 + 数据库（7 张 ai_ 表 + 迁移 + seed：厂商配置/示例模型/默认套餐/AI 菜单树及权限标识）+ 引入 @nestjs/schedule | 已完成 |
 | T12  | 引擎层：ProviderService（OpenAI 兼容适配器）+ 用户侧模型列表接口                                                       | 已完成 |
-| T13  | 会话与消息 CRUD 接口（建会话/列表/重命名/删除/消息列表/自动生成标题）                                                  | 待办   |
+| T13  | 会话与消息 CRUD 接口（建会话/列表/重命名/删除/消息列表/自动生成标题）                                                  | 已完成 |
 | T14  | SSE 对话接口 + CreditService（预检/结算/幂等）+ 限流 + 上下文截取                                                      | 待办   |
 | T15  | 套餐体系：plan CRUD、开通/切换/指派、我的套餐与用量接口、月度重置 cron                                                 | 待办   |
 | T16  | system 域增量：在线用户跟踪 + 在线列表接口 + 踢下线接口                                                                | 待办   |
@@ -44,7 +44,7 @@
 
 ## 进行中
 
-（空，下一个待办 T13：会话与消息 CRUD 接口）
+（空，下一个待办 T14：SSE 对话接口 + CreditService + 限流 + 上下文截取）
 
 ## 遗留问题
 
@@ -74,6 +74,7 @@
 - 2026-08-23 补充修复（用户反馈）：菜单管理"新增子级/编辑"弹框中父级菜单反显数字而非名称——根因是 `Number(parent.id)` 把字符串 id 转 number，与 el-tree-select 选项 value（字符串 id）类型不匹配导致选不中；部门管理页存在同款问题。修复：menu/dept 两页表单 parentId 全程保持字符串，仅在提交时转 number（`openCreate`/`openEdit`/`handleSubmit` 三处）。已验证：新增子级反显父级中文名、编辑回填正常、无变化提交成功，vue-tsc/eslint 0 错误
 - 2026-08-24 T11：ai 域骨架 + 数据库完成。① `prisma/schema.prisma` 追加 7 张 ai_ 表（AiProvider/AiModel/AiConversation/AiMessage/AiPlan/AiUserPlan/AiUsageLog，延续 `relationMode="prisma"` 逻辑外键，decimal(8,4)/decimal(10,2) 价格、longtext 消息体、unique(provider_id,model)、unique(message_id) 结算幂等、索引 (user_id,updated_at)/(conversation_id,created_at)/(user_id,created_at)）；迁移 `20260823173222_add_ai_domain` 已创建并应用。② 引入 `@nestjs/schedule@6.1.3`，`app.module.ts` 注册 `ScheduleModule.forRoot()`（月度重置 cron 归 T15 实现）；同步补回 `@types/express@5.0.6` devDependency（T2 曾添加但未落盘，本次 pnpm 重装暴露缺失导致 nest build 报 TS2307，已修复）。③ 建立 `modules/ai/ai.module.ts` 聚合模块（空骨架，子模块随 T12~T15 挂载）+ provider/conversation/chat/engine/credit/plan/usage 七子目录 .gitkeep 占位，并注册进 app.module。④ seed 增补：AI 厂商 4 家（deepseek/kimi/qwen/zhipu，baseUrl 按各家 OpenAI 兼容端点预填，apiKey 空）+ 示例模型 6 个（status=0 停用）+ 套餐 2 个（体验版 10000/标准版 100000 积分）；菜单树新增"AI 助手"目录（AI 对话/开通套餐/我的用量三页，无按钮权限，接口层用套餐校验兜底）、"AI 管理"目录（厂商模型/套餐管理/用量明细三页，含 13 个 `ai:*` 权限标识）、"系统管理"下"在线用户"（system:online:list/kick）；common 角色分配"AI 助手"三页，admin 拥有全部。验证：`prisma validate` ✓、`prisma generate` ✓（7 张 ai_ 模型类型已生成）、`migrate` ✓、seed 幂等（重跑菜单新增 0 条）✓、数据核查（4 厂商/6 模型/2 套餐/菜单树/common 角色 5 菜单）✓、`eslint` 0 错误 ✓、`nest build` ✓
 - 2026-08-24 T12：引擎层 + 用户侧模型列表接口完成。引入 `openai@7.5.0`（PRD D3 批准白名单）。① 引擎层 `modules/ai/engine/`：`engine.types.ts`（EngineChatMessage/EngineUsage/EngineStreamEvent/EngineStreamParams 类型）、`provider.service.ts`（ProviderService 适配器：`createClient(baseUrl, apiKey)` 用 openai SDK 构造兼容 client；`streamChat()` 以 async generator 产出 `{type:'delta'}`/`{type:'done', usage}` 事件，`stream_options.include_usage=true` 使上游末 chunk 携带 usage，`done.usage` 为 null 时表示上游未返回需上层兜底估算；上游异常向上抛出由 chat 层转 SSE error；支持 AbortSignal 中断用于"停止生成"；不缓存 client、apiKey 变更即时生效）、`engine.module.ts`（导出 ProviderService）。② provider 域 `modules/ai/provider/`：`provider.service.ts`（AiProviderService：`availableModels()` 查 status=1 且厂商 status=1 的模型，按厂商/模型 sort 升序，price 转 string 返回）、`provider.controller.ts`（`GET /api/ai/models`，登录即可不挂 @RequirePermission）、`provider.module.ts`。③ `ai.module.ts` 挂载 AiProviderModule + EngineModule。④ 错误码 20001~20007 补入 error-code.ts。验证：`nest build` ✓、`eslint` ✓；冒烟（临时 3001 端口实例 + tsx 脚本）：登录 ✓、`/api/ai/models` 返回 code 0（6 个示例模型均 status=0 故空列表属预期，临时启用 1 个模型后接口正确返回该模型）✓、未登录 40100 ✓
+- 2026-08-24 T13：会话与消息 CRUD 接口完成（`modules/ai/conversation/`）。① schema 增补：给 AiConversation/AiMessage 增加与 AiModel 的 relation（`model`，可选）+ `@@index([modelId])`，迁移 `20260824052413_add_ai_model_relations` 已应用（relationMode=prisma 逻辑外键，不生成物理 FK）。② `conversation.service.ts`：`page()`（分页列表，updatedAt 倒序，含 modelDisplayName）、`update()`（重命名 title / 切换 modelId，切换时校验模型存在→40400、停用→20003，归属校验→20004）、`remove()`（软删会话 + 消息级联软删，事务）、`messages()`（不分页，最近 50 条按 createdAt 正序，含 modelDisplayName）；`assertOwned` 统一归属校验（id + userId + deletedAt=null）。③ `conversation.controller.ts`：GET /ai/conversation、PUT /ai/conversation/:id、DELETE /ai/conversation/:id、GET /ai/conversation/:id/messages，均用 @CurrentUser('userId') 拿登录态，不挂 @RequirePermission（用户自服务），PUT/DELETE 挂 @OperationLog。④ dto：ConversationQueryDto（继承 PageQueryDto）、UpdateConversationDto（title 1~50 字 / modelId 至少一项）。验证：`prisma validate` ✓、`migrate` ✓（含 generate，因 api 服务未运行无 dll 占用）、`nest build` ✓、`eslint` ✓；冒烟（临时 3001 实例 + 造数脚本）：列表含 modelDisplayName ✓、重命名 ✓、切换不存在模型 40400 ✓、切换停用模型 20003 ✓、消息列表 3 条正序 ✓、不存在会话 20004 ✓、删除后列表不含 ✓。注：本次因 Docker daemon 停止，已重新启动 Docker Desktop + docker compose up -d（MySQL/Redis 恢复 healthy）
 
 ### P1 最终状态总结（三句话）
 

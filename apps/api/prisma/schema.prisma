@@ -274,6 +274,9 @@ model AiModel {
 
   provider AiProvider @relation(fields: [providerId], references: [id])
 
+  conversations AiConversation[]
+  messages      AiMessage[]
+
   @@unique([providerId, model])
   @@index([providerId])
   @@map("ai_model")
@@ -292,8 +295,10 @@ model AiConversation {
   deletedAt DateTime? @map("deleted_at")
 
   messages AiMessage[]
+  model    AiModel?    @relation(fields: [modelId], references: [id])
 
   @@index([userId, updatedAt])
+  @@index([modelId])
   @@map("ai_conversation")
 }
 
@@ -317,8 +322,10 @@ model AiMessage {
   deletedAt     DateTime? @map("deleted_at")
 
   conversation AiConversation @relation(fields: [conversationId], references: [id])
+  model        AiModel?       @relation(fields: [modelId], references: [id])
 
   @@index([conversationId, createdAt])
+  @@index([modelId])
   @@map("ai_message")
 }
 
