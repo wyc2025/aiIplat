@@ -417,8 +417,9 @@ async function main() {
       code: 'deepseek',
       baseUrl: 'https://api.deepseek.com/v1',
       models: [
-        { displayName: 'DeepSeek Chat', model: 'deepseek-chat', inputPrice: 2, outputPrice: 8, maxContext: 64000 },
-        { displayName: 'DeepSeek Reasoner', model: 'deepseek-reasoner', inputPrice: 4, outputPrice: 16, maxContext: 64000 },
+        { displayName: 'DeepSeek V4 Flash', model: 'deepseek-v4-flash', inputPrice: 1, outputPrice: 3, maxContext: 128000 },
+        { displayName: 'DeepSeek V4 Pro', model: 'deepseek-v4-pro', inputPrice: 4, outputPrice: 12, maxContext: 128000 },
+        { displayName: 'DeepSeek V4 Flash Vision Exp', model: 'deepseek-v4-flash-vision-exp', inputPrice: 2, outputPrice: 6, maxContext: 128000 },
       ],
     },
     {
@@ -509,7 +510,7 @@ async function main() {
   }
 
   console.log(
-    `seed 完成：角色 2 个，菜单新增 ${createdMenuIds.length} 条，admin 用户就绪，内置字典 2 组，AI 厂商 4 家、示例模型 6 个、套餐 2 个`,
+    `seed 完成：角色 2 个，菜单新增 ${createdMenuIds.length} 条，admin 用户就绪，内置字典 2 组，AI 厂商 4 家、示例模型 7 个、套餐 2 个`,
   )
 }
 
