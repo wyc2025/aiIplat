@@ -369,7 +369,7 @@ import {
   createProvider,
   deleteModel,
   deleteProvider,
-  getModelPage,
+  getModelList,
   getProviderPage,
   updateModel,
   updateProvider,
@@ -414,8 +414,7 @@ async function loadModels() {
   modelLoading.value = true
   modelLoadError.value = false
   try {
-    const result = await getModelPage(Number(currentProvider.value.id), { pageNo: 1, pageSize: 100 })
-    modelList.value = result.list
+    modelList.value = await getModelList(Number(currentProvider.value.id))
   } catch {
     modelList.value = []
     modelLoadError.value = true

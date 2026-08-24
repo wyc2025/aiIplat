@@ -63,9 +63,9 @@ export const deleteProvider = (id: string) => del(`/ai/admin/provider/${id}`)
 
 // ========== 模型 ==========
 
-/** 模型分页（按厂商） */
-export const getModelPage = (providerId: number, params: PageQuery) =>
-  get<PageResult<ModelItem>>('/ai/admin/model', { ...params, providerId })
+/** 按厂商查模型列表（不分页，直接返回数组） */
+export const getModelList = (providerId: number) =>
+  get<ModelItem[]>('/ai/admin/model', { providerId })
 
 /** 新增模型 */
 export const createModel = (data: {
