@@ -354,10 +354,10 @@ async function sendMessage() {
   const content = inputText.value.trim()
   inputText.value = ''
 
-  // 本地插入 user 消息 + assistant 占位
+  // 本地插入 user 消息 + assistant 占位（通过数组索引访问 Proxy 对象，确保响应式更新）
   messages.value.push({ id: `u-${Date.now()}`, role: 'user', content })
-  const assistantMsg: LocalMessage = { id: `a-${Date.now()}`, role: 'assistant', content: '', streaming: true }
-  messages.value.push(assistantMsg)
+  messages.value.push({ id: `a-${Date.now()}`, role: 'assistant', content: '', streaming: true })
+  const assistantIndex = messages.value.length - 1
   scrollToBottom()
 
   streaming.value = true
@@ -366,15 +366,14 @@ async function sendMessage() {
     ...(currentConversationId.value ? { conversationId: Number(currentConversationId.value) } : { modelId: Number(selectedModelId.value) }),
   }
 
-  let newConversationId: string | null = null
-
   currentSession = sendChatMessage(payload, {
     onEvent: (event) => {
+      const assistantMsg = messages.value[assistantIndex]
+      if (!assistantMsg) return
       if (event.type === 'meta') {
-        newConversationId = event.conversationId as string
         // 新会话：meta 返回的 conversationId 即创建成功的会话
-        if (!currentConversationId.value && newConversationId) {
-          currentConversationId.value = newConversationId
+        if (!currentConversationId.value && event.conversationId) {
+          currentConversationId.value = event.conversationId as string
         }
       } else if (event.type === 'delta') {
         assistantMsg.content += (event.content as string) ?? ''
@@ -393,8 +392,11 @@ async function sendMessage() {
     },
     onError: (code, message) => {
       streaming.value = false
-      assistantMsg.streaming = false
-      assistantMsg.failed = true
+      const assistantMsg = messages.value[assistantIndex]
+      if (assistantMsg) {
+        assistantMsg.streaming = false
+        assistantMsg.failed = true
+      }
       handleChatError(code, message)
     },
   })
