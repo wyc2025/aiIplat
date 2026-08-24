@@ -128,6 +128,16 @@ export class CreditService {
     })
   }
 
+  /** 批量重置所有已过期周期（cron 兜底，供 plan.task.ts 调用） */
+  async resetExpiredCycles(): Promise<number> {
+    const now = new Date()
+    const expired = await this.prisma.aiUserPlan.findMany({ where: { cycleEnd: { lte: now } } })
+    for (const userPlan of expired) {
+      await this.rollCycle(userPlan)
+    }
+    return expired.length
+  }
+
   /** 积分换算：ceil(输入tokens/1000×输入单价 + 输出tokens/1000×输出单价) */
   private calcCredits(inputTokens: number, outputTokens: number, inputPrice: number, outputPrice: number): number {
     const raw = (inputTokens / 1000) * inputPrice + (outputTokens / 1000) * outputPrice

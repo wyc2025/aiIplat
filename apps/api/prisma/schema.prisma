@@ -38,6 +38,7 @@ model SysUser {
 
   dept      SysDept?      @relation(fields: [deptId], references: [id])
   userRoles SysUserRole[]
+  usageLogs AiUsageLog[]
 
   @@index([deptId])
   @@map("sys_user")
@@ -276,6 +277,7 @@ model AiModel {
 
   conversations AiConversation[]
   messages      AiMessage[]
+  usageLogs     AiUsageLog[]
 
   @@unique([providerId, model])
   @@index([providerId])
@@ -296,6 +298,7 @@ model AiConversation {
 
   messages AiMessage[]
   model    AiModel?    @relation(fields: [modelId], references: [id])
+  usageLogs AiUsageLog[]
 
   @@index([userId, updatedAt])
   @@index([modelId])
@@ -387,6 +390,12 @@ model AiUsageLog {
   credits        Int      @map("credits")
   createdAt      DateTime @default(now()) @map("created_at")
 
+  conversation AiConversation @relation(fields: [conversationId], references: [id])
+  model        AiModel        @relation(fields: [modelId], references: [id])
+  user         SysUser        @relation(fields: [userId], references: [id])
+
   @@index([userId, createdAt])
+  @@index([conversationId])
+  @@index([modelId])
   @@map("ai_usage_log")
 }

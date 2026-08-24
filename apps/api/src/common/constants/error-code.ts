@@ -72,6 +72,10 @@ export const ErrorCode = {
   AiContentTooLong: 20006,
   /** 上一段对话进行中（并发流限制） */
   AiChatInProgress: 20007,
+  /** 套餐下有生效订阅，不可删除 */
+  AiPlanInUse: 20008,
+  /** 套餐标识已存在 */
+  AiPlanCodeExists: 20009,
 } as const
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode]
