@@ -2,14 +2,14 @@
 
 > 本文件由 AI 在每完成一个任务后更新。开工前先读本文件，从"进行中 / 下一个待办"继续。
 
-## 当前状态：P1 底座全部完成（T1~T10），P2a AI 模块（对话 + 套餐积分）进行中
+## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18）
 
 ## 里程碑总览
 
 | 阶段 | 目标                              | 状态   |
 | ---- | --------------------------------- | ------ |
 | P1   | 后台管理底座                      | 已完成 |
-| P2a  | AI 模块：对话 + 套餐积分（ai 域） | 进行中 |
+| P2a  | AI 模块：对话 + 套餐积分（ai 域） | 已完成 |
 | P2b  | AI 模块：工具调用 Agent 化        | 未开始 |
 | P3   | 云盘模块（cloud 域）              | 未开始 |
 | P4   | 个人网站模块（site 域）           | 未开始 |
@@ -25,7 +25,7 @@
 | T15  | 套餐体系：plan CRUD、开通/切换/指派、我的套餐与用量接口、月度重置 cron                                                 | 已完成 |
 | T16  | system 域增量：在线用户跟踪 + 在线列表接口 + 踢下线接口                                                                | 已完成 |
 | T17  | 前端 AI 对话页（SSE 流式渲染、markdown-it、会话管理、模型切换、停止生成）                                              | 已完成 |
-| T18  | 前端 开通套餐页 + 我的用量页 + 管理端三页 + 在线用户页 + 联调验收（对照 PRD-P2A 第 7 节）                              | 待办   |
+| T18  | 前端 开通套餐页 + 我的用量页 + 管理端三页 + 在线用户页 + 联调验收（对照 PRD-P2A 第 7 节）                              | 已完成 |
 
 ## 第一期任务拆解（P1 底座）
 
@@ -44,7 +44,7 @@
 
 ## 进行中
 
-（空，下一个待办 T18：前端开通套餐页 + 我的用量页 + 管理端三页 + 在线用户页 + 联调验收）
+（空，P2a 全部完成）
 
 ## 遗留问题
 
@@ -79,6 +79,7 @@
 - 2026-08-24 T15：套餐体系完成（`plan/` + `usage/`）。① schema 增补：AiUsageLog 增加 conversation/model/user 三个 relation（Prisma 逻辑外键，relationMode=prisma 无物理迁移，仅 regenerate client），简化用量查询的 modelDisplayName/conversationTitle/username 关联。② 错误码新增 20008（套餐有生效订阅不可删除）、20009（套餐标识已存在）。③ CreditService 新增 `resetExpiredCycles()`（批量重置过期周期，供 cron 复用 rollCycle 逻辑）。④ `plan/`：PlanService（`availablePlans` 启用套餐列表 / `myPlan` 我的套餐含懒重置 / `subscribe` 开通切换立即按新套餐重置 / adminPage 含 activeSubscribers / create/update/remove 删除校验有订阅 20008 / assign 指派；私有 applyPlan upsert 订阅、assertPlanUsable 只认启用未删套餐）；PlanController（用户侧 GET list/mine + POST subscribe，登录即可）；PlanAdminController（GET/POST/PUT/:id/DELETE/:id/POST assign，挂 ai:plan:* 权限 + @OperationLog）；plan.task.ts（@Cron('0 30 0 * * *') 每日 00:30 调 resetExpiredCycles 兜底）。⑤ `usage/`：UsageService（`mine` 分页按时间倒序含模型/会话标题 / `adminPage` 用户名模糊+模型+时间范围筛选 + summary 聚合 totalTokensInput/Output/Credits）；UsageController（GET /ai/usage/mine）；UsageAdminController（GET /ai/admin/usage，ai:usage:list）。⑥ ai.module.ts 挂载 PlanModule + UsageModule。验证：`nest build` ✓、`eslint` ✓、`prisma migrate`（逻辑外键无物理迁移）✓；冒烟（临时 3001 实例）：套餐列表 2 个 ✓、未开通 plan=null ✓、开通 total=10000 ✓、切换 total=100000 ✓、admin 列表 activeSubscribers=1 ✓、创建/删除 ✓、删除有订阅套餐 20008 ✓、指派 ✓、用量与 summary 聚合 ✓。测试数据已清理
 - 2026-08-24 T16：system 域增量在线用户完成（`modules/system/online/`）。① RedisKey 增补 `online(userId)`（online:{userId} hash）。② RedisService 新增通用 `scanDel(pattern)`（SCAN 按前缀批量删除，返回删除数），user.service 的 deleteAllRefreshTokens 改为复用 scanDel（消除重复）。③ 在线跟踪：AuthService.login 成功写 online hash（username/nickname/ip/loginAt/lastActiveAt，TTL 30min 滑动）；logout 删除 online；JwtAuthGuard 注入 PrismaService，校验通过后刷新在线状态（key 存在则 HSET lastActiveAt + EXPIRE；不存在则查库补写完整字段）。④ online.service.ts：`list()`（SCAN online:* 聚合，按 lastActiveAt 倒序）、`kick()`（复用 T10 改密码全端下线机制：写 pwdChanged 时间戳 + scanDel refresh + 清 perms + 删 online；先校验不能踢自己 40001、再校验 admin 不可踢 10202）；online.controller.ts（GET 挂 system:online:list、DELETE :userId 挂 system:online:kick + @OperationLog）。⑤ app.module 注册 OnlineModule。验证：`nest build` ✓、`eslint` ✓；冒烟（临时 3001 实例）：在线列表含 admin+tester ✓、踢自己 40001 ✓、踢 tester 成功 ✓、被踢用户下一请求 40100（密码已修改）✓、踢后列表只剩 admin ✓、Redis online key 正确增删 ✓、登出后 online 删除 ✓。测试数据已清理
 - 2026-08-24 T17：前端 AI 对话页完成。引入 `markdown-it@15.0.0` + `@types/markdown-it@14.2.0`（PRD D3 批准白名单）。① `views/ai/utils/sse.ts`（SSE 客户端，见 ARCHITECTURE §10）：fetch + response.body.getReader() 手动解析 `data:` 行（EventSource 不支持自定义请求头禁用）；按 \n\n 分块、忽略 `: ping` 注释行、JSON.parse 事件；40100 先调 /auth/refresh 再重试一次（复用 token.ts setTokens），失败清 token 跳登录；AbortController 支持 stop() 中断（停止生成）。② `views/ai/components/MarkdownView.vue`（markdown-it 渲染封装）：`html:false` 禁 raw HTML 防 XSS + `linkify` + `breaks`，带代码块/表格/引用样式；v-html 的 vue/no-v-html 规则用区域 disable 注释说明安全性。③ `api/ai/chat.ts`（AI 域 API + 类型：AvailableModel/ConversationItem/MessageItem/ChatPayload/ChatDoneUsage/PlanInfo/MyPlanResult；getModels/getConversationPage/updateConversation/deleteConversation/getMessages/sendChatMessage/getMyPlan，并 re-export SseSession）。④ `views/ai/chat/index.vue`（AI 对话页）：左侧会话列表（新建/重命名/删除/按 updatedAt 倒序/点击切换）+ 右侧对话区（顶部模型选择器按厂商分组含单价展示 + 中间消息列表 user 靠右 assistant 靠左 markdown 渲染 + 底部多行输入 Enter 发送 Shift+Enter 换行）；流式逐字追加带闪烁光标，流式期间显示"停止生成"并禁用输入/发送；发送后清空输入；懒创建会话（新会话 conversationId 为空、meta 事件返回 conversationId 后回填，done 后刷新会话列表）；套餐状态检测（plan/mine 无套餐整体显示开通引导卡片跳 /ai/plan）；错误处理 20001 引导开通、20002 积分不足提示、20005 上游失败标消息 failed 态。验证：`vue-tsc --noEmit` ✓、`eslint` ✓（0 error 0 warning）、`vite build` ✓（2420 modules transformed，MarkdownView 与 chat 页面正确打包；dist 清空被 safe-delete 拦截时先手动 Remove-Item 再 build）
+- 2026-08-24 T18：前端套餐/用量/管理端/在线用户页完成。① API 层：`api/ai/plan.ts`（套餐 list/mine/subscribe + admin CRUD/assign，PlanInfo/PlanAdminItem）、`api/ai/usage.ts`（mine + admin 含 summary，MyUsageItem/AdminUsageItem/UsageSummary/AdminUsageResult）、`api/ai/provider.ts`（厂商/模型 CRUD，ProviderItem/ModelItem）、`api/system/online.ts`（在线列表/踢下线）；chat.ts 的 getMyPlan 改为从 plan.ts re-export 消除重复；修复 provider.ts 的 getModelPage 参数类型（providerId 独立参数避免 Record 转换报错）。② `views/ai/plan/index.vue`（开通套餐页）：当前套餐卡片（套餐名/周期/总额度/已用/剩余/进度条）+ 套餐卡片网格（名称/月积分/价格/说明，当前套餐标记+边框高亮，开通/切换确认弹窗提示周期重置）。③ `views/ai/usage/index.vue`（我的用量页）：顶部套餐卡片（总额度/已用/剩余/重置日期/进度条，未开通显示空态引导）+ ProTable 用量明细（时间/模型/会话/输入输出 tokens/扣减积分，模型筛选）。④ `views/ai/provider/index.vue`（厂商模型管理）：左右布局复用字典页模式，左厂商 ProTable（CRUD 弹窗，apiKey 编辑时 placeholder 显示掩码留空不修改）+ 右模型 ProTable（CRUD 弹窗含单价/上下文/工具调用/状态）。⑤ `views/ai/admin/plan/index.vue`（套餐管理）：ProTable（名称/月积分/价格/状态/生效订阅/操作）+ CRUD 弹窗 + 指派用户弹窗（el-select 远程搜索用户）。⑥ `views/ai/admin/usage/index.vue`（用量明细）：顶部汇总卡片（总输入/输出 tokens、总积分）+ ProTable（用户名/模型/时间范围筛选）。⑦ `views/system/online/index.vue`（在线用户）：ProTable（用户名/昵称/IP/登录/最后活跃时间，admin 行不显示踢下线按钮，踢下线二次确认）。所有页面均处理加载/空/失败三态。验证：`vue-tsc --noEmit` ✓、`eslint --fix` 后 0 error 0 warning ✓、`vite build` ✓（2442 modules transformed）
 
 ### P1 最终状态总结（三句话）
 

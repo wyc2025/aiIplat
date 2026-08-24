@@ -78,25 +78,6 @@ export const getMessages = (id: string) => get<MessageItem[]>(`/ai/conversation/
 export const sendChatMessage = (payload: ChatPayload, callbacks: SseCallbacks): SseSession =>
   sseRequest('/ai/chat', payload, callbacks)
 
-/** 套餐信息（我的套餐） */
-export interface PlanInfo {
-  id: string
-  name: string
-  code: string
-  monthlyCredits: string
-  price: string
-  description: string | null
-}
-
-/** 我的套餐与额度（plan 为 null 表示未开通） */
-export interface MyPlanResult {
-  plan: PlanInfo | null
-  cycleStart: string | null
-  cycleEnd: string | null
-  totalCredits: string
-  usedCredits: string
-  remainingCredits: string
-}
-
-/** 我的套餐（检测是否开通，用于对话页开通引导） */
-export const getMyPlan = () => get<MyPlanResult>('/ai/plan/mine')
+/** 套餐信息：从 plan.ts re-export，避免重复定义 */
+export { getMyPlan } from './plan'
+export type { PlanInfo, MyPlanResult } from './plan'
