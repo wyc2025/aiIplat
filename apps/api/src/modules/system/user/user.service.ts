@@ -166,15 +166,7 @@ export class UserService {
 
   /** SCAN 删除该用户的全部 refresh token（改密码强制全端下线） */
   private async deleteAllRefreshTokens(userId: bigint) {
-    const pattern = `refresh:${userId}:*`
-    let cursor = '0'
-    do {
-      const [next, keys] = await this.redis.client.scan(cursor, 'MATCH', pattern, 'COUNT', 100)
-      cursor = next
-      if (keys.length > 0) {
-        await this.redis.client.del(...keys)
-      }
-    } while (cursor !== '0')
+    await this.redis.scanDel(`refresh:${userId}:*`)
   }
 
   /** 覆盖式写入用户-角色关联 */

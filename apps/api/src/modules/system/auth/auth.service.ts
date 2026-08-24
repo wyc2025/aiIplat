@@ -17,6 +17,8 @@ import { MenuTreeNode, type UserInfoResult } from './vo/userinfo.vo'
 /** 登录失败锁定规则（PRD 6.7）：连续失败 5 次锁定 10 分钟 */
 const LOGIN_FAIL_LIMIT = 5
 const LOGIN_LOCK_SECONDS = 600
+/** 在线状态滑动过期时间（30 分钟，见 ARCHITECTURE §H） */
+const ONLINE_TTL_SECONDS = 1800
 
 interface RefreshPayload {
   sub: string
@@ -61,13 +63,14 @@ export class AuthService {
       throw new BusinessException(ErrorCode.AccountDisabled, '账号已禁用，请联系管理员')
     }
 
-    // 3. 登录成功：清失败计数、记录登录信息、签发 token、刷新权限缓存
+    // 3. 登录成功：清失败计数、记录登录信息、写在线状态、签发 token、刷新权限缓存
     await this.redis.client.del(failKey)
     await this.prisma.sysUser.update({
       where: { id: user.id },
       data: { lastLoginAt: new Date(), lastLoginIp: ip ?? null },
     })
     void this.writeLoginLog(username, ip, 1, '登录成功', userAgent)
+    await this.markOnline(user.id.toString(), user.username, user.nickname, ip)
     const activeRoles = this.filterActiveRoles(user.userRoles.map((ur) => ur.role))
     await this.refreshPermsCache(user.id, activeRoles)
     return this.issueTokenPair(user.id.toString(), user.username)
@@ -102,7 +105,7 @@ export class AuthService {
     return this.issueTokenPair(payload.sub, payload.username)
   }
 
-  /** 登出：access jti 加入黑名单（TTL = 剩余有效期）+ 删除对应 refresh token */
+  /** 登出：access jti 加入黑名单（TTL = 剩余有效期）+ 删除对应 refresh token + 删除在线状态 */
   async logout(user: AuthUser): Promise<void> {
     const blacklistTtl = user.exp - Math.floor(Date.now() / 1000)
     const pipeline = this.redis.client.pipeline()
@@ -110,6 +113,7 @@ export class AuthService {
       pipeline.set(RedisKey.tokenBlacklist(user.jti), '1', 'EX', blacklistTtl)
     }
     pipeline.del(RedisKey.refresh(user.userId, user.jti))
+    pipeline.del(RedisKey.online(user.userId))
     await pipeline.exec()
   }
 
@@ -281,5 +285,24 @@ export class AuthService {
     if (!match) return Number(duration) || 0
     const multipliers: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400 }
     return Number(match[1]) * multipliers[match[2]]
+  }
+
+  /** 写在线状态（登录时）：online:{userId} hash，30 分钟滑动过期 */
+  private async markOnline(userId: string, username: string, nickname: string, ip?: string): Promise<void> {
+    const now = new Date()
+    await this.redis.client.hset(
+      RedisKey.online(userId),
+      'username',
+      username,
+      'nickname',
+      nickname,
+      'ip',
+      ip ?? '',
+      'loginAt',
+      now.toISOString(),
+      'lastActiveAt',
+      now.toISOString(),
+    )
+    await this.redis.client.expire(RedisKey.online(userId), ONLINE_TTL_SECONDS)
   }
 }

@@ -537,39 +537,39 @@ P2a 增补：无新增环境变量（apiKey 存 ai_provider 表）。`.env` 增�
 
 ## 9. 公共资产表（优先复用，禁止重复造；新增后必须回写登记）
 
-| 名称                                                        | 位置                                      | 用途                                                          | 状态                              |
-| ----------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------- | --------------------------------- |
-| request                                                     | web/src/utils/request.ts                  | Axios 封装（双 token 静默刷新）                               | 已建（T7）                        |
-| v-permission                                                | web/src/directives/permission.ts          | 按钮权限指令                                                  | 已建（T7）                        |
-| useTable                                                    | web/src/hooks/useTable.ts                 | 列表页通用逻辑（分页/查询/加载态）                            | 已建（T9）                        |
-| token                                                       | web/src/utils/token.ts                    | 双 token localStorage 读写                                    | 已建（T7）                        |
-| tree                                                        | web/src/utils/tree.ts                     | 平铺列表组树（dept/menu 通用）                                | 已建（T7）                        |
-| validate                                                    | web/src/utils/validate.ts                 | 密码/手机号/邮箱校验规则                                      | 已建（T7）                        |
-| useUserStore 等四 store                                     | web/src/stores                            | user/permission/tabs/settings                                 | 已建（T7）                        |
-| useDict                                                     | web/src/hooks/useDict.ts                  | 字典取值与渲染（带缓存）                                      | 已建（T9）                        |
-| ProTable                                                    | web/src/components/ProTable               | 搜索+表格+分页+操作列                                         | 已建（T9）                        |
-| FormDialog                                                  | web/src/components/FormDialog             | 新增/编辑表单弹窗                                             | 已建（T9）                        |
-| IconSelect                                                  | web/src/components/IconSelect             | 图标选择器                                                    | 待建（T9）                        |
-| Upload                                                      | web/src/components/Upload                 | 文件上传                                                      | 待建（T9）                        |
-| JwtAuthGuard                                                | api/src/gateway/guards                    | 全局认证守卫                                                  | 已建（T2）                        |
-| PermissionGuard                                             | api/src/gateway/guards                    | 全局权限守卫                                                  | 已建（T2）                        |
-| TransformInterceptor                                        | api/src/gateway/interceptors              | 统一响应 + bigint 转字符串                                    | 已建（T2）                        |
-| OperationLogInterceptor                                     | api/src/gateway/interceptors              | 操作日志异步落库（配 @OperationLog）                          | 已建（T6）                        |
-| GlobalExceptionFilter                                       | api/src/gateway/filters                   | 全局异常兜底                                                  | 已建（T2）                        |
-| @Public / @RequirePermission / @CurrentUser / @OperationLog | api/src/gateway/decorators                | 装饰器组                                                      | 已建（T2）                        |
-| PageQueryDto / PageResultDto                                | api/src/common/dto                        | 分页基类                                                      | 已建（T2）                        |
-| BusinessException                                           | api/src/common/exceptions                 | 业务异常（code + message）                                    | 已建（T2）                        |
-| ErrorCode                                                   | api/src/common/constants/error-code.ts    | 统一错误码常量                                                | 已建（T2）                        |
-| RedisKey                                                    | api/src/common/constants/redis-key.ts     | Redis Key 生成约定                                            | 已建（T2）                        |
-| parseDurationToSeconds                                      | api/src/common/utils/duration.ts          | '2h'/'7d' 时长解析为秒                                        | 已建（T10，自 auth.service 抽出） |
-| 配置模块组                                                  | api/src/config                            | database/redis/jwt/upload 配置 + validate.ts 启动环境变量校验 | 已建（T2）                        |
-| PrismaService / RedisService                                | api/src/infra/prisma、api/src/infra/redis | 基础设施服务（全局模块，懒连接）                              | 已建（T2）                        |
-| StorageService                                              | api/src/infra/storage                     | 文件存储抽象（预留 MinIO/OSS 切换）                           | 待建（T9）                        |
-| ProviderService                                             | api/src/modules/ai/engine                 | OpenAI 兼容适配器（流式调用 + usage 解析）                    | 已建（T12）                       |
-| CreditService                                               | api/src/modules/ai/credit                 | 积分预检/结算/余额                                            | 已建（T14）                       |
-| @SkipTransform                                              | api/src/gateway/decorators                | SSE 接口跳过统一响应                                          | 已建（T14）                       |
-| sse                                                         | web/src/views/ai/utils/sse.ts             | 前端 SSE 客户端                                               | 待建（T17）                       |
-| MarkdownView                                                | web/src/views/ai/components               | markdown-it 渲染封装（禁 raw HTML）                           | 待建（T17）                       |
+| 名称                                                        | 位置                                      | 用途                                                                     | 状态                              |
+| ----------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------ | --------------------------------- |
+| request                                                     | web/src/utils/request.ts                  | Axios 封装（双 token 静默刷新）                                          | 已建（T7）                        |
+| v-permission                                                | web/src/directives/permission.ts          | 按钮权限指令                                                             | 已建（T7）                        |
+| useTable                                                    | web/src/hooks/useTable.ts                 | 列表页通用逻辑（分页/查询/加载态）                                       | 已建（T9）                        |
+| token                                                       | web/src/utils/token.ts                    | 双 token localStorage 读写                                               | 已建（T7）                        |
+| tree                                                        | web/src/utils/tree.ts                     | 平铺列表组树（dept/menu 通用）                                           | 已建（T7）                        |
+| validate                                                    | web/src/utils/validate.ts                 | 密码/手机号/邮箱校验规则                                                 | 已建（T7）                        |
+| useUserStore 等四 store                                     | web/src/stores                            | user/permission/tabs/settings                                            | 已建（T7）                        |
+| useDict                                                     | web/src/hooks/useDict.ts                  | 字典取值与渲染（带缓存）                                                 | 已建（T9）                        |
+| ProTable                                                    | web/src/components/ProTable               | 搜索+表格+分页+操作列                                                    | 已建（T9）                        |
+| FormDialog                                                  | web/src/components/FormDialog             | 新增/编辑表单弹窗                                                        | 已建（T9）                        |
+| IconSelect                                                  | web/src/components/IconSelect             | 图标选择器                                                               | 待建（T9）                        |
+| Upload                                                      | web/src/components/Upload                 | 文件上传                                                                 | 待建（T9）                        |
+| JwtAuthGuard                                                | api/src/gateway/guards                    | 全局认证守卫                                                             | 已建（T2）                        |
+| PermissionGuard                                             | api/src/gateway/guards                    | 全局权限守卫                                                             | 已建（T2）                        |
+| TransformInterceptor                                        | api/src/gateway/interceptors              | 统一响应 + bigint 转字符串                                               | 已建（T2）                        |
+| OperationLogInterceptor                                     | api/src/gateway/interceptors              | 操作日志异步落库（配 @OperationLog）                                     | 已建（T6）                        |
+| GlobalExceptionFilter                                       | api/src/gateway/filters                   | 全局异常兜底                                                             | 已建（T2）                        |
+| @Public / @RequirePermission / @CurrentUser / @OperationLog | api/src/gateway/decorators                | 装饰器组                                                                 | 已建（T2）                        |
+| PageQueryDto / PageResultDto                                | api/src/common/dto                        | 分页基类                                                                 | 已建（T2）                        |
+| BusinessException                                           | api/src/common/exceptions                 | 业务异常（code + message）                                               | 已建（T2）                        |
+| ErrorCode                                                   | api/src/common/constants/error-code.ts    | 统一错误码常量                                                           | 已建（T2）                        |
+| RedisKey                                                    | api/src/common/constants/redis-key.ts     | Redis Key 生成约定                                                       | 已建（T2）                        |
+| parseDurationToSeconds                                      | api/src/common/utils/duration.ts          | '2h'/'7d' 时长解析为秒                                                   | 已建（T10，自 auth.service 抽出） |
+| 配置模块组                                                  | api/src/config                            | database/redis/jwt/upload 配置 + validate.ts 启动环境变量校验            | 已建（T2）                        |
+| PrismaService / RedisService                                | api/src/infra/prisma、api/src/infra/redis | 基础设施服务（全局模块，懒连接；RedisService 含 scanDel 按前缀批量清理） | 已建（T2）                        |
+| StorageService                                              | api/src/infra/storage                     | 文件存储抽象（预留 MinIO/OSS 切换）                                      | 待建（T9）                        |
+| ProviderService                                             | api/src/modules/ai/engine                 | OpenAI 兼容适配器（流式调用 + usage 解析）                               | 已建（T12）                       |
+| CreditService                                               | api/src/modules/ai/credit                 | 积分预检/结算/余额                                                       | 已建（T14）                       |
+| @SkipTransform                                              | api/src/gateway/decorators                | SSE 接口跳过统一响应                                                     | 已建（T14）                       |
+| sse                                                         | web/src/views/ai/utils/sse.ts             | 前端 SSE 客户端                                                          | 待建（T17）                       |
+| MarkdownView                                                | web/src/views/ai/components               | markdown-it 渲染封装（禁 raw HTML）                                      | 待建（T17）                       |
 
 ### Redis Key 增补约定（写入 RedisKey 常量）
 

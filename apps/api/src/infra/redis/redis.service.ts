@@ -20,4 +20,18 @@ export class RedisService implements OnModuleDestroy {
   async onModuleDestroy() {
     await this.client.quit()
   }
+
+  /** SCAN 匹配 key 并批量删除（用于按前缀清理，如某用户全部 refresh token），返回删除数量 */
+  async scanDel(pattern: string): Promise<number> {
+    let cursor = '0'
+    let deleted = 0
+    do {
+      const [next, keys] = await this.client.scan(cursor, 'MATCH', pattern, 'COUNT', 100)
+      cursor = next
+      if (keys.length > 0) {
+        deleted += await this.client.del(...keys)
+      }
+    } while (cursor !== '0')
+    return deleted
+  }
 }

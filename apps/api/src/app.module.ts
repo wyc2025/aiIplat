@@ -20,6 +20,7 @@ import { DeptModule } from './modules/system/dept/dept.module'
 import { DictModule } from './modules/system/dict/dict.module'
 import { LogModule } from './modules/system/log/log.module'
 import { MenuModule } from './modules/system/menu/menu.module'
+import { OnlineModule } from './modules/system/online/online.module'
 import { RoleModule } from './modules/system/role/role.module'
 import { UserModule } from './modules/system/user/user.module'
 
@@ -41,6 +42,7 @@ import { UserModule } from './modules/system/user/user.module'
     DeptModule,
     DictModule,
     LogModule,
+    OnlineModule,
   ],
   providers: [
     JwtStrategy,

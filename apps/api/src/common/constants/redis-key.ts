@@ -14,4 +14,6 @@ export const RedisKey = {
   aiChatting: (userId: string) => `ai:chatting:${userId}`,
   /** 聊天限流计数（20 次/分/用户）：ai:chat:rate:{userId}，INCR + 首次设置 60s TTL */
   aiChatRate: (userId: string) => `ai:chat:rate:${userId}`,
+  /** 在线用户 hash：online:{userId}，字段 username/nickname/ip/loginAt/lastActiveAt，30min 滑动过期 */
+  online: (userId: string) => `online:${userId}`,
 } as const
