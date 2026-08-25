@@ -314,6 +314,8 @@ model AiMessage {
   /// user / assistant（system 不持久化，由后端拼装）
   role           String    @map("role") @db.VarChar(20)
   content        String    @map("content") @db.LongText
+  /// DeepSeek 思考模式的 reasoning_content（多轮工具调用回喂需原样回传）
+  reasoningContent String? @map("reasoning_content") @db.LongText
   /// assistant 消息记录所用模型，可空
   modelId        BigInt?   @map("model_id")
   /// assistant 消息记录实际用量

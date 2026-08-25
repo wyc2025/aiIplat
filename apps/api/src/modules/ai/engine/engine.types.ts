@@ -11,6 +11,8 @@ export interface EngineChatMessage {
   tool_calls?: EngineToolCall[]
   /** tool 消息关联的 tool_call_id */
   tool_call_id?: string
+  /** DeepSeek 思考模式：assistant 消息需回传 reasoning_content（否则多轮工具调用 400） */
+  reasoning_content?: string
 }
 
 /** 工具调用（聚合完成后的完整结构） */
@@ -43,7 +45,7 @@ export interface EngineUsage {
 export type EngineStreamEvent =
   | { type: 'delta'; content: string }
   | { type: 'tool_calls'; toolCalls: EngineToolCall[] }
-  | { type: 'done'; usage: EngineUsage | null }
+  | { type: 'done'; usage: EngineUsage | null; reasoningContent: string | null }
 
 /** 流式调用参数 */
 export interface EngineStreamParams {

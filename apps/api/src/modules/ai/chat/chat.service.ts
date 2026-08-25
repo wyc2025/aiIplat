@@ -45,6 +45,8 @@ interface RoundResult {
   toolCalls: EngineToolCall[]
   usage: EngineUsage | null
   failed: boolean
+  /** DeepSeek 思考模式的 reasoning_content（多轮工具调用回喂需回传） */
+  reasoningContent: string
 }
 
 /**
@@ -214,6 +216,7 @@ export class ChatService {
     let totalOutputTokens = 0
     let hasUpstreamUsage = false
     let streamFailed = false
+    let reasoningContent = ''
 
     let roundMessages = messages
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -224,6 +227,7 @@ export class ChatService {
       }
 
       fullContent += roundResult.content
+      if (roundResult.reasoningContent) reasoningContent = roundResult.reasoningContent
       if (roundResult.usage) {
         totalInputTokens += roundResult.usage.inputTokens
         totalOutputTokens += roundResult.usage.outputTokens
@@ -236,7 +240,12 @@ export class ChatService {
       if (processed.stop) break
       roundMessages = [
         ...roundMessages,
-        { role: 'assistant' as const, content: roundResult.content, tool_calls: roundResult.toolCalls },
+        {
+          role: 'assistant' as const,
+          content: roundResult.content,
+          tool_calls: roundResult.toolCalls,
+          ...(roundResult.reasoningContent ? { reasoning_content: roundResult.reasoningContent } : {}),
+        },
         ...processed.toolMessages,
       ]
     }
@@ -252,6 +261,7 @@ export class ChatService {
       inputChars,
       hasUpstreamUsage ? { inputTokens: totalInputTokens, outputTokens: totalOutputTokens } : null,
       !streamFailed,
+      reasoningContent,
     )
 
     if (streamFailed) {
@@ -313,7 +323,7 @@ export class ChatService {
     const messages: EngineChatMessage[] = [
       { role: 'system', content: systemPrompt },
       ...history.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
-      // 原 assistant 消息带 tool_calls（用 ai_tool_call.id 作为 tool_call_id）
+      // 原 assistant 消息带 tool_calls（用 ai_tool_call.id 作为 tool_call_id）+ reasoning_content 回传
       {
         role: 'assistant',
         content: originalMessage.content,
@@ -324,6 +334,7 @@ export class ChatService {
             arguments: JSON.stringify(paramsObj),
           },
         ],
+        ...(originalMessage.reasoningContent ? { reasoning_content: originalMessage.reasoningContent } : {}),
       },
       { role: 'tool', tool_call_id: record.messageId.toString(), content: toolResult },
     ]
@@ -391,6 +402,7 @@ export class ChatService {
     let totalOutputTokens = 0
     let hasUpstreamUsage = false
     let streamFailed = false
+    let reasoningContent = ''
 
     let roundMessages = messages
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -401,6 +413,7 @@ export class ChatService {
       }
 
       fullContent += roundResult.content
+      if (roundResult.reasoningContent) reasoningContent = roundResult.reasoningContent
       if (roundResult.usage) {
         totalInputTokens += roundResult.usage.inputTokens
         totalOutputTokens += roundResult.usage.outputTokens
@@ -423,10 +436,15 @@ export class ChatService {
       // write 工具：发确认卡片后本轮结束
       if (processed.stop) break
 
-      // read 工具结果回喂：追加 assistant（含 tool_calls）+ tool 消息，进入下一轮
+      // read 工具结果回喂：追加 assistant（含 tool_calls + reasoning）+ tool 消息，进入下一轮
       roundMessages = [
         ...roundMessages,
-        { role: 'assistant' as const, content: roundResult.content, tool_calls: roundResult.toolCalls },
+        {
+          role: 'assistant' as const,
+          content: roundResult.content,
+          tool_calls: roundResult.toolCalls,
+          ...(roundResult.reasoningContent ? { reasoning_content: roundResult.reasoningContent } : {}),
+        },
         ...processed.toolMessages,
       ]
     }
@@ -441,6 +459,7 @@ export class ChatService {
       inputChars,
       hasUpstreamUsage ? { inputTokens: totalInputTokens, outputTokens: totalOutputTokens } : null,
       !streamFailed,
+      reasoningContent,
     )
 
     // 13. 收尾事件
@@ -471,6 +490,7 @@ export class ChatService {
     const toolCalls: EngineToolCall[] = []
     let usage: EngineUsage | null = null
     let failed = false
+    let reasoningContent = ''
 
     let heartbeat: NodeJS.Timeout | null = null
     const resetHeartbeat = () => {
@@ -496,15 +516,27 @@ export class ChatService {
           toolCalls.push(...event.toolCalls)
         } else if (event.type === 'done') {
           usage = event.usage
+          if (event.reasoningContent) reasoningContent = event.reasoningContent
         }
       }
-    } catch {
+    } catch (error) {
       failed = true
+      this.logger.error(`上游调用失败（模型 ${model.model}）：${this.describeError(error)}`)
     } finally {
       if (heartbeat) clearInterval(heartbeat)
     }
 
-    return { content, toolCalls, usage, failed }
+    return { content, toolCalls, usage, failed, reasoningContent }
+  }
+
+  /** 提取上游错误的关键信息（便于日志定位） */
+  private describeError(error: unknown): string {
+    if (error && typeof error === 'object') {
+      const e = error as { status?: number; message?: string; error?: unknown }
+      const detail = e.error ? JSON.stringify(e.error).slice(0, 500) : ''
+      return `[status=${e.status ?? '?'}] ${e.message ?? '未知错误'} ${detail}`
+    }
+    return String(error)
   }
 
   /**
@@ -790,6 +822,7 @@ export class ChatService {
     inputChars: number,
     upstreamUsage: { inputTokens: number; outputTokens: number } | null,
     success: boolean,
+    reasoningContent = '',
   ): Promise<{ credits: number; remainingCredits: bigint }> {
     const inputTokens = upstreamUsage?.inputTokens ?? inputChars
     const outputTokens = upstreamUsage?.outputTokens ?? fullContent.length
@@ -813,6 +846,7 @@ export class ChatService {
         tokensOutput: outputTokens,
         credits,
         status: success ? 1 : 2,
+        ...(reasoningContent ? { reasoningContent } : {}),
       },
     })
 

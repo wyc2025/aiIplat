@@ -40,10 +40,15 @@ export class ProviderService {
             type: 'function' as const,
             function: { name: tc.name, arguments: tc.arguments },
           })),
+          // DeepSeek 思考模式：必须回传 reasoning_content，否则多轮工具调用 400
+          ...(m.reasoning_content ? { reasoning_content: m.reasoning_content } : {}),
         }
       }
       if (m.role === 'tool') {
         return { role: 'tool', content: m.content, tool_call_id: m.tool_call_id ?? '' }
+      }
+      if (m.role === 'assistant' && m.reasoning_content) {
+        return { role: 'assistant', content: m.content, reasoning_content: m.reasoning_content } as ChatCompletionMessageParam
       }
       return { role: m.role, content: m.content } as ChatCompletionMessageParam
     })
@@ -75,6 +80,8 @@ export class ProviderService {
 
     // 工具调用分片累积器：index -> { id, name, arguments }
     const toolCallBuffer = new Map<number, { id: string; name: string; arguments: string }>()
+    // DeepSeek 思考模式：累积 reasoning_content（分片下发）
+    let reasoningContent = ''
 
     for await (const chunk of stream) {
       const choice = chunk.choices[0]
@@ -91,6 +98,10 @@ export class ProviderService {
           toolCallBuffer.set(idx, existing)
         }
       }
+
+      // 累积 reasoning_content（DeepSeek 扩展字段）
+      const deltaReasoning = (choice?.delta as { reasoning_content?: string } | undefined)?.reasoning_content
+      if (deltaReasoning) reasoningContent += deltaReasoning
 
       const delta = choice?.delta?.content
       if (delta) {
@@ -114,6 +125,7 @@ export class ProviderService {
             inputTokens: chunk.usage.prompt_tokens,
             outputTokens: chunk.usage.completion_tokens,
           },
+          reasoningContent: reasoningContent || null,
         }
       }
     }
