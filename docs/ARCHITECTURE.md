@@ -605,8 +605,8 @@ P2a 增补：无新增环境变量（apiKey 存 ai_provider 表）。`.env` 增�
 | PermissionService                                           | api/src/gateway/services                  | 权限判定共用服务（PermissionGuard 与工具层同源）                         | 已建（T19）                       |
 | PLATFORM-GUIDE                                              | docs/PLATFORM-GUIDE.md                    | AI 平台手册，注入 system prompt；功能变更必须同步更新                    | 已建（T23）                       |
 | SystemPromptService                                         | api/src/modules/ai/chat                   | system prompt 拼装（手册缓存 + 用户上下文 + 工具原则）                   | 已建（T23）                       |
-| ToolConfirmCard                                             | web/src/views/ai/components               | 确认卡片组件（参数摘要 + 确认/取消 + 过期态）                            | 待建（T24）                       |
-| ToolResultTag                                               | web/src/views/ai/components               | 工具结果折叠标签                                                         | 待建（T24）                       |
+| ToolConfirmCard                                             | web/src/views/ai/components               | 确认卡片组件（参数摘要 + 确认/取消 + 过期态）                            | 已建（T24）                       |
+| ToolResultTag                                               | web/src/views/ai/components               | 工具结果折叠标签                                                         | 已建（T24）                       |
 
 ### Redis Key 增补约定（写入 RedisKey 常量）
 

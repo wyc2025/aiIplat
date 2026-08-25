@@ -16,6 +16,8 @@ export interface AvailableModel {
   maxContext: number
   inputPrice: string
   outputPrice: string
+  /** 是否支持工具调用（1 支持 0 不支持） */
+  supportTool: number
 }
 
 /** 会话列表项 */
@@ -25,6 +27,18 @@ export interface ConversationItem {
   modelId: string | null
   modelDisplayName: string | null
   updatedAt: string
+}
+
+/** 工具调用记录（消息内嵌，用于恢复卡片/标签） */
+export interface ToolCallItem {
+  toolCallId: string
+  toolName: string
+  title: string
+  summary: string
+  params: Record<string, unknown>
+  status: string
+  /** read / write */
+  risk: string
 }
 
 /** 消息项 */
@@ -38,6 +52,7 @@ export interface MessageItem {
   modelDisplayName: string | null
   status: number
   createdAt: string
+  toolCalls: ToolCallItem[]
 }
 
 /** 发送消息入参 */
@@ -77,6 +92,10 @@ export const getMessages = (id: string) => get<MessageItem[]>(`/ai/conversation/
 /** 发送消息（SSE 流式），返回会话句柄供停止生成 */
 export const sendChatMessage = (payload: ChatPayload, callbacks: SseCallbacks): SseSession =>
   sseRequest('/ai/chat', payload, callbacks)
+
+/** 确认工具调用（SSE 流式返回总结），返回会话句柄 */
+export const confirmToolCall = (payload: { toolCallId: number; approved: boolean }, callbacks: SseCallbacks): SseSession =>
+  sseRequest('/ai/tool/confirm', payload, callbacks)
 
 /** 套餐信息：从 plan.ts re-export，避免重复定义 */
 export { getMyPlan } from './plan'

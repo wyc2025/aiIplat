@@ -5,6 +5,7 @@ import type { AiTool } from '../tool.types'
 export function createUpdateMyProfileTool(userService: UserService): AiTool {
   return {
     name: 'update_my_profile',
+    title: '修改我的资料',
     description: '修改当前登录用户自己的资料，仅限昵称、邮箱、手机号、性别四项',
     parameters: {
       type: 'object',

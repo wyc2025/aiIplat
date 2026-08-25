@@ -2,7 +2,7 @@ import { Injectable, Logger, type OnModuleInit } from '@nestjs/common'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AuthUser } from '../../../gateway/guards/jwt.strategy'
-import type { UserService } from '../../system/user/user.service'
+import { UserService } from '../../system/user/user.service'
 
 /** 助手设定（固定文案，见 ARCHITECTURE §12.4） */
 const ASSISTANT_IDENTITY = '你是 iplat 平台内置 AI 助手，可使用提供的工具帮助用户查询信息、操作系统。'

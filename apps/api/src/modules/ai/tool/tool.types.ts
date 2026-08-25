@@ -15,6 +15,8 @@ export interface ToolContext {
 export interface AiTool {
   /** 工具名，蛇形命名，如 get_online_users（模型据此选择工具） */
   name: string
+  /** 中文动作名（给人看，用于确认卡片标题 / 工具结果标签） */
+  title: string
   /** 给模型看的中文功能描述（决定模型能否选对工具的关键） */
   description: string
   /** JSON Schema（OpenAI tools 的 function.parameters 格式） */

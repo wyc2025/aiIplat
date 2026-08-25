@@ -5,6 +5,7 @@ import type { AiTool } from '../tool.types'
 export function createListRolesTool(roleService: RoleService): AiTool {
   return {
     name: 'list_roles',
+    title: '查询角色列表',
     description: '查询系统中的角色列表（含角色名、标识、状态、排序）',
     parameters: {
       type: 'object',

@@ -5,9 +5,9 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api'
 const CODE_SUCCESS = 0
 const CODE_TOKEN_INVALID = 40100
 
-/** SSE 事件结构（与后端 POST /api/ai/chat 下发一致） */
+/** SSE 事件结构（与后端下发一致，P2b 起新增 tool_result / tool_confirm） */
 export interface SseEvent {
-  type: 'meta' | 'delta' | 'done' | 'error'
+  type: 'meta' | 'delta' | 'done' | 'error' | 'tool_result' | 'tool_confirm'
   [key: string]: unknown
 }
 

@@ -581,6 +581,7 @@ export class ChatService {
       this.writeEvent(res, 'tool_result', {
         toolCallId: tc.id,
         toolName: tool.name,
+        title: tool.title,
         status: 'executed',
         summary: this.truncate(JSON.stringify(result), 200),
       })
@@ -603,6 +604,7 @@ export class ChatService {
       this.writeEvent(res, 'tool_result', {
         toolCallId: tc.id,
         toolName: tool.name,
+        title: tool.title,
         status: 'failed',
         summary: '工具执行失败',
       })
@@ -650,7 +652,7 @@ export class ChatService {
     this.writeEvent(res, 'tool_confirm', {
       toolCallId: record.id.toString(),
       toolName: tool.name,
-      title: `${tool.description}`,
+      title: tool.title,
       summary: this.truncate(JSON.stringify(params), 200),
       params,
     })

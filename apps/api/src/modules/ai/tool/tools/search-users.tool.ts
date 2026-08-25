@@ -6,6 +6,7 @@ import type { AiTool } from '../tool.types'
 export function createSearchUsersTool(userService: UserService): AiTool {
   return {
     name: 'search_users',
+    title: '查询用户',
     description: '按用户名或状态模糊查询用户列表，返回前 20 条摘要（用户名、昵称、状态）',
     parameters: {
       type: 'object',

@@ -23,6 +23,8 @@ export interface AvailableModel {
   maxContext: number
   inputPrice: string
   outputPrice: string
+  /** 是否支持工具调用（1 支持 0 不支持） */
+  supportTool: number
 }
 
 /** apiKey 掩码：`sk-****` + 后 4 位 */
@@ -64,6 +66,7 @@ export class AiProviderService {
       maxContext: m.maxContext,
       inputPrice: m.inputPrice.toString(),
       outputPrice: m.outputPrice.toString(),
+      supportTool: m.supportTool,
     }))
   }
 

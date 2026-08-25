@@ -79,7 +79,17 @@
                 :key="m.id"
                 :label="m.displayName"
                 :value="m.id"
-              />
+              >
+                <span>{{ m.displayName }}</span>
+                <el-tag
+                  v-if="m.supportTool === 1"
+                  type="success"
+                  size="small"
+                  class="v-tool-tag"
+                >
+                  工具
+                </el-tag>
+              </el-option>
             </el-option-group>
           </el-select>
           <span
@@ -87,6 +97,13 @@
             class="v-model-price"
           >
             输入 {{ currentModel.inputPrice }} / 输出 {{ currentModel.outputPrice }} 积分·千 tokens
+            <el-tag
+              v-if="currentModel.supportTool !== 1"
+              type="info"
+              size="small"
+            >
+              不支持工具调用
+            </el-tag>
           </span>
         </div>
 
@@ -124,6 +141,26 @@
                 >
                   {{ msg.content }}
                 </div>
+                <!-- 工具调用记录（read 结果标签 / write 确认卡片） -->
+                <template v-if="msg.role === 'assistant' && msg.toolCalls?.length">
+                  <ToolResultTag
+                    v-for="tc in msg.toolCalls.filter((t) => t.kind === 'result')"
+                    :key="tc.toolCallId"
+                    :title="tc.title"
+                    :summary="tc.summary"
+                    :status="tc.status"
+                  />
+                  <ToolConfirmCard
+                    v-for="tc in msg.toolCalls.filter((t) => t.kind === 'confirm')"
+                    :key="tc.toolCallId"
+                    :tool-call-id="tc.toolCallId"
+                    :title="tc.title"
+                    :summary="tc.summary"
+                    :status="tc.status"
+                    :expired="tc.status === 'pending' && isConfirmExpired(tc.toolCallId)"
+                    @confirm="(approved) => handleToolConfirm(tc, approved)"
+                  />
+                </template>
                 <span
                   v-if="msg.streaming"
                   class="v-cursor"
@@ -180,6 +217,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, EditPen, Delete } from '@element-plus/icons-vue'
 import type { ElScrollbar } from 'element-plus'
 import {
+  confirmToolCall,
   deleteConversation,
   getConversationPage,
   getMessages,
@@ -190,10 +228,18 @@ import {
   type AvailableModel,
   type ConversationItem,
   type SseSession,
+  type ToolCallItem,
 } from '@/api/ai/chat'
 import MarkdownView from '../components/MarkdownView.vue'
+import ToolConfirmCard from '../components/ToolConfirmCard.vue'
+import ToolResultTag from '../components/ToolResultTag.vue'
 
 const router = useRouter()
+
+/** 本地工具记录（read 结果 / write 确认） */
+interface LocalToolCall extends ToolCallItem {
+  kind: 'result' | 'confirm'
+}
 
 /** 本地消息（流式状态） */
 interface LocalMessage {
@@ -202,6 +248,7 @@ interface LocalMessage {
   content: string
   streaming?: boolean
   failed?: boolean
+  toolCalls?: LocalToolCall[]
 }
 
 // ========== 套餐状态 ==========
@@ -300,6 +347,10 @@ async function selectConversation(c: ConversationItem) {
       role: m.role,
       content: m.content,
       failed: m.status === 2,
+      toolCalls: (m.toolCalls ?? []).map((tc) => ({
+        ...tc,
+        kind: tc.risk === 'write' ? 'confirm' : 'result',
+      })),
     }))
     scrollToBottom()
   } catch {
@@ -378,6 +429,32 @@ async function sendMessage() {
       } else if (event.type === 'delta') {
         assistantMsg.content += (event.content as string) ?? ''
         scrollToBottom()
+      } else if (event.type === 'tool_result') {
+        // read 工具结果 → 折叠标签
+        pushToolCall(assistantMsg, {
+          toolCallId: event.toolCallId as string,
+          toolName: event.toolName as string,
+          title: event.title as string,
+          summary: event.summary as string,
+          params: {},
+          status: event.status as string,
+          risk: 'read',
+          kind: 'result',
+        })
+        scrollToBottom()
+      } else if (event.type === 'tool_confirm') {
+        // write 工具待确认 → 确认卡片
+        pushToolCall(assistantMsg, {
+          toolCallId: event.toolCallId as string,
+          toolName: event.toolName as string,
+          title: event.title as string,
+          summary: event.summary as string,
+          params: (event.params as Record<string, unknown>) ?? {},
+          status: 'pending',
+          risk: 'write',
+          kind: 'confirm',
+        })
+        scrollToBottom()
       } else if (event.type === 'done') {
         streaming.value = false
         assistantMsg.streaming = false
@@ -410,6 +487,88 @@ function stopGenerate() {
     last.streaming = false
   }
   loadConversations()
+}
+
+/** 向 assistant 消息追加工具记录（确保响应式） */
+function pushToolCall(msg: LocalMessage, tc: LocalToolCall) {
+  if (!msg.toolCalls) msg.toolCalls = []
+  msg.toolCalls.push(tc)
+}
+
+/** 确认卡片按钮：调 confirm 接口，SSE 渲染为新 AI 气泡（不续接） */
+function handleToolConfirm(tc: LocalToolCall, approved: boolean) {
+  if (streaming.value) return
+  // 立即把卡片置为已处理状态（避免重复点击）
+  tc.status = approved ? 'executed' : 'rejected'
+
+  // 追加新 assistant 占位气泡
+  messages.value.push({ id: `c-${Date.now()}`, role: 'assistant', content: '', streaming: true })
+  const newIndex = messages.value.length - 1
+  scrollToBottom()
+  streaming.value = true
+
+  confirmToolCall({ toolCallId: Number(tc.toolCallId), approved }, {
+    onEvent: (event) => {
+      const assistantMsg = messages.value[newIndex]
+      if (!assistantMsg) return
+      if (event.type === 'delta') {
+        assistantMsg.content += (event.content as string) ?? ''
+        scrollToBottom()
+      } else if (event.type === 'tool_result') {
+        pushToolCall(assistantMsg, {
+          toolCallId: event.toolCallId as string,
+          toolName: event.toolName as string,
+          title: event.title as string,
+          summary: event.summary as string,
+          params: {},
+          status: event.status as string,
+          risk: 'read',
+          kind: 'result',
+        })
+        scrollToBottom()
+      } else if (event.type === 'tool_confirm') {
+        pushToolCall(assistantMsg, {
+          toolCallId: event.toolCallId as string,
+          toolName: event.toolName as string,
+          title: event.title as string,
+          summary: event.summary as string,
+          params: (event.params as Record<string, unknown>) ?? {},
+          status: 'pending',
+          risk: 'write',
+          kind: 'confirm',
+        })
+        scrollToBottom()
+      } else if (event.type === 'done') {
+        streaming.value = false
+        assistantMsg.streaming = false
+        loadConversations()
+        scrollToBottom()
+      } else if (event.type === 'error') {
+        streaming.value = false
+        assistantMsg.streaming = false
+        assistantMsg.failed = true
+        handleChatError(event.code as number, event.message as string)
+      }
+    },
+    onError: (code, message) => {
+      streaming.value = false
+      const assistantMsg = messages.value[newIndex]
+      if (assistantMsg) {
+        assistantMsg.streaming = false
+        assistantMsg.failed = true
+      }
+      // 20016 确认单过期：恢复卡片为过期态
+      if (code === 20016) {
+        tc.status = 'pending'
+      }
+      handleChatError(code, message)
+    },
+  })
+}
+
+/** 判断确认单是否过期（前端无法精确计时，暂以 false 兜底，后端 20016 校验） */
+function isConfirmExpired(_toolCallId: string): boolean {
+  return false
 }
 
 // ========== 错误处理 ==========
@@ -526,6 +685,12 @@ async function scrollToBottom() {
 .v-model-price {
   font-size: 12px;
   color: #909399;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.v-tool-tag {
+  margin-left: 8px;
 }
 .v-message-list {
   flex: 1;

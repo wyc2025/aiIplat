@@ -5,6 +5,7 @@ import type { AiTool } from '../tool.types'
 export function createGetMyCreditsTool(creditService: CreditService): AiTool {
   return {
     name: 'get_my_credits',
+    title: '查询我的积分',
     description: '查询当前登录用户的 AI 套餐与积分用量（套餐、总额度、已用、剩余、周期）',
     parameters: {
       type: 'object',

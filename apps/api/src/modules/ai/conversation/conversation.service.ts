@@ -3,11 +3,15 @@ import { ErrorCode } from '../../../common/constants/error-code'
 import { PageResultDto } from '../../../common/dto/page-result.dto'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
+import { ToolRegistry } from '../tool/tool.registry'
 import type { ConversationQueryDto, UpdateConversationDto } from './dto/conversation.dto'
 
 @Injectable()
 export class ConversationService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly toolRegistry: ToolRegistry,
+  ) {}
 
   /** 会话分页列表（按 updatedAt 倒序，含当前模型显示名） */
   async page(userId: bigint, query: ConversationQueryDto) {
@@ -72,7 +76,7 @@ export class ConversationService {
     return { success: true }
   }
 
-  /** 消息列表（不分页，最近 50 条、按 createdAt 正序，含模型显示名） */
+  /** 消息列表（不分页，最近 50 条、按 createdAt 正序，含模型显示名与工具调用记录） */
   async messages(userId: bigint, conversationId: bigint) {
     const conversation = await this.assertOwned(userId, conversationId)
 
@@ -83,8 +87,22 @@ export class ConversationService {
       take: 50,
       include: { model: { select: { displayName: true } } },
     })
+    const ordered = recent.reverse()
 
-    return recent.reverse().map((m) => ({
+    // 批量查这些消息关联的工具调用记录（按 messageId 分组）
+    const toolCalls = await this.prisma.aiToolCall.findMany({
+      where: { messageId: { in: ordered.map((m) => m.id) } },
+      orderBy: { id: 'asc' },
+    })
+    const toolCallsByMessage = new Map<string, typeof toolCalls>()
+    for (const tc of toolCalls) {
+      const key = tc.messageId.toString()
+      const list = toolCallsByMessage.get(key) ?? []
+      list.push(tc)
+      toolCallsByMessage.set(key, list)
+    }
+
+    return ordered.map((m) => ({
       id: m.id.toString(),
       role: m.role,
       content: m.content,
@@ -94,7 +112,23 @@ export class ConversationService {
       modelDisplayName: m.model?.displayName ?? null,
       status: m.status,
       createdAt: m.createdAt,
+      toolCalls: (toolCallsByMessage.get(m.id.toString()) ?? []).map((tc) => ({
+        toolCallId: tc.id.toString(),
+        toolName: tc.toolName,
+        title: this.toolRegistry.get(tc.toolName)?.title ?? tc.toolName,
+        summary: this.buildToolSummary(tc),
+        params: tc.params,
+        status: tc.status,
+        risk: tc.risk,
+      })),
     }))
+  }
+
+  /** 工具调用摘要：read 工具用执行结果摘要，write 工具用参数摘要 */
+  private buildToolSummary(tc: { risk: string; params: unknown; result: string | null }): string {
+    const raw = tc.risk === 'read' ? tc.result : JSON.stringify(tc.params)
+    const str = raw ?? ''
+    return str.length > 200 ? `${str.slice(0, 200)}…` : str
   }
 
   /** 校验会话存在且归属当前用户，否则抛 20004 */

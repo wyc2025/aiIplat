@@ -8,6 +8,7 @@ import type { AiTool } from '../tool.types'
 export function createKickUserTool(onlineService: OnlineService, userService: UserService): AiTool {
   return {
     name: 'kick_user',
+    title: '踢用户下线',
     description: '将指定用户踢下线（强制其所有端重新登录）。参数为用户名，admin 与本人不可踢',
     parameters: {
       type: 'object',

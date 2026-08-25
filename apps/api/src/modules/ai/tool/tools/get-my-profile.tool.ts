@@ -5,6 +5,7 @@ import type { AiTool } from '../tool.types'
 export function createGetMyProfileTool(userService: UserService): AiTool {
   return {
     name: 'get_my_profile',
+    title: '查询我的资料',
     description: '查询当前登录用户自己的资料（用户名、昵称、邮箱、手机号、性别、角色）',
     parameters: {
       type: 'object',

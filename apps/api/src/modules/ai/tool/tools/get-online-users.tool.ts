@@ -5,6 +5,7 @@ import type { AiTool } from '../tool.types'
 export function createGetOnlineUsersTool(onlineService: OnlineService): AiTool {
   return {
     name: 'get_online_users',
+    title: '查询在线用户',
     description: '查询当前在线的用户列表与数量（含用户名、昵称、登录 IP、登录时间、最后活跃时间）',
     parameters: {
       type: 'object',
