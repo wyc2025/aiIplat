@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common'
 import OpenAI from 'openai'
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions/completions'
 import type {
+  EngineChatMessage,
   EngineStreamEvent,
   EngineStreamParams,
   EngineToolCall,
@@ -23,6 +24,32 @@ export class ProviderService {
   }
 
   /**
+   * 把引擎层消息转成 OpenAI 兼容的 ChatCompletionMessageParam。
+   * 关键：assistant 消息的 tool_calls 需从扁平结构 { id, name, arguments }
+   * 转成嵌套结构 { id, type: 'function', function: { name, arguments } }，
+   * 否则上游（DeepSeek 等）解析失败（400）。
+   */
+  private toOpenAIMessages(messages: EngineChatMessage[]): ChatCompletionMessageParam[] {
+    return messages.map((m) => {
+      if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) {
+        return {
+          role: 'assistant',
+          content: m.content || null,
+          tool_calls: m.tool_calls.map((tc) => ({
+            id: tc.id,
+            type: 'function' as const,
+            function: { name: tc.name, arguments: tc.arguments },
+          })),
+        }
+      }
+      if (m.role === 'tool') {
+        return { role: 'tool', content: m.content, tool_call_id: m.tool_call_id ?? '' }
+      }
+      return { role: m.role, content: m.content } as ChatCompletionMessageParam
+    })
+  }
+
+  /**
    * 发起流式对话调用，产出增量文本、工具调用与最终用量。
    * - `stream_options.include_usage = true` 使上游在最后一个 chunk 携带 usage（见 API.md）
    * - 工具调用：tool_calls 在流式 delta 中分片下发（function.arguments 逐段追加），
@@ -37,8 +64,7 @@ export class ProviderService {
     const stream = await client.chat.completions.create(
       {
         model,
-        // EngineChatMessage 结构与 ChatCompletionMessageParam 字段兼容，仅判别联合推断需断言
-        messages: messages as ChatCompletionMessageParam[],
+        messages: this.toOpenAIMessages(messages),
         stream: true,
         stream_options: { include_usage: true },
         // 空 tools 数组会触发部分厂商 400，故仅在非空时携带
