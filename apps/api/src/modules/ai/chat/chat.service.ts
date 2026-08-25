@@ -97,6 +97,248 @@ export class ChatService {
     }
   }
 
+  /** write 工具确认链路（POST /api/ai/tool/confirm）：执行/取消工具 → 回喂上游 → SSE 流式返回总结 */
+  async handleToolConfirm(user: AuthUser, dto: { toolCallId: number; approved: boolean }, res: Response): Promise<void> {
+    const userId = BigInt(user.userId)
+    const chatKey = RedisKey.aiChatting(user.userId)
+
+    // 1. 并发流锁（与 /ai/chat 共用）
+    const acquired = await this.redis.client.set(chatKey, '1', 'EX', CHATTING_TTL_SEC, 'NX')
+    if (!acquired) {
+      throw new BusinessException(ErrorCode.AiChatInProgress, '上一段对话仍在生成中，请稍候')
+    }
+
+    const abortController = new AbortController()
+    res.on('close', () => {
+      if (!res.writableEnded) abortController.abort()
+    })
+
+    try {
+      await this.runToolConfirm(user, userId, dto, res, abortController.signal)
+    } catch (error) {
+      if (res.headersSent) {
+        await this.emitError(res, error)
+      } else {
+        throw error
+      }
+    } finally {
+      await this.redis.client.del(chatKey)
+    }
+  }
+
+  /** 确认链路实现 */
+  private async runToolConfirm(
+    user: AuthUser,
+    userId: bigint,
+    dto: { toolCallId: number; approved: boolean },
+    res: Response,
+    signal: AbortSignal,
+  ): Promise<void> {
+    // 2. 套餐预检
+    await this.creditService.precheck(userId)
+
+    const toolCallId = dto.toolCallId
+
+    // 3. 查确认单（一次性：取到即失效，防重放）
+    const confirmKey = RedisKey.aiConfirm(toolCallId.toString())
+    const confirmRaw = await this.redis.client.get(confirmKey)
+    if (!confirmRaw) {
+      throw new BusinessException(ErrorCode.AiToolConfirmExpired, '确认单不存在或已过期')
+    }
+    const confirm = JSON.parse(confirmRaw) as { userId: string; conversationId: string; toolName: string; params: Record<string, unknown> }
+    if (confirm.userId !== user.userId) {
+      throw new BusinessException(ErrorCode.AiToolConfirmExpired, '确认单不存在或已过期')
+    }
+    await this.redis.client.del(confirmKey)
+
+    // 4. 查留痕记录（pending 才可确认）
+    const record = await this.prisma.aiToolCall.findUnique({ where: { id: BigInt(toolCallId) } })
+    if (!record || record.status !== 'pending') {
+      throw new BusinessException(ErrorCode.AiToolConfirmExpired, '确认单不存在或已过期')
+    }
+
+    // 5. 工具权限二次校验
+    const tool = this.toolRegistry.get(record.toolName)
+    if (!tool) {
+      throw new BusinessException(ErrorCode.AiToolNotFound, '工具不存在或未启用')
+    }
+    if (tool.perms && !(await this.permissionService.hasPermission(user.userId, tool.perms))) {
+      throw new BusinessException(ErrorCode.AiToolNoPermission, '无权限使用该工具')
+    }
+
+    // 6. 执行或拒绝
+    let toolResult: string
+    if (dto.approved) {
+      try {
+        const result = await tool.handler({ user }, record.params as Record<string, unknown>)
+        toolResult = JSON.stringify(result)
+        await this.prisma.aiToolCall.update({
+          where: { id: record.id },
+          data: { status: 'executed', result: this.truncate(toolResult, 2000) },
+        })
+      } catch (error) {
+        const errMsg = error instanceof Error ? error.message : '工具执行失败'
+        this.logger.error(`write 工具 ${tool.name} 执行失败：${errMsg}`)
+        toolResult = JSON.stringify({ error: '工具执行失败', message: errMsg })
+        await this.prisma.aiToolCall.update({
+          where: { id: record.id },
+          data: { status: 'failed', errorMsg: errMsg },
+        })
+      }
+    } else {
+      toolResult = JSON.stringify({ status: 'cancelled', message: '用户已取消操作' })
+      await this.prisma.aiToolCall.update({
+        where: { id: record.id },
+        data: { status: 'rejected' },
+      })
+    }
+
+    // 7. 重建上下文（原 assistant 消息带 tool_calls + tool 结果回喂）
+    const { conversationId, model, messages } = await this.buildConfirmContext(record, toolResult)
+
+    // 8. 建新 assistant 消息（总结独立落库 + 独立结算）
+    const assistantMessage = await this.prisma.aiMessage.create({
+      data: { conversationId, role: 'assistant', content: '', modelId: model.id, status: 1 },
+    })
+
+    // 9. 确定可用工具 + SSE 响应头 + meta
+    const { tools } = await this.getAvailableTools(user, model)
+    this.setupSseHeaders(res)
+    this.writeEvent(res, 'meta', {
+      conversationId: conversationId.toString(),
+      assistantMessageId: assistantMessage.id.toString(),
+    })
+
+    // 10. 多轮上游调用（总结后可能再触发工具）
+    let fullContent = ''
+    let totalInputTokens = 0
+    let totalOutputTokens = 0
+    let hasUpstreamUsage = false
+    let streamFailed = false
+
+    let roundMessages = messages
+    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      const roundResult = await this.callUpstream(model, roundMessages, tools, res, signal)
+      if (roundResult.failed) {
+        streamFailed = true
+        break
+      }
+
+      fullContent += roundResult.content
+      if (roundResult.usage) {
+        totalInputTokens += roundResult.usage.inputTokens
+        totalOutputTokens += roundResult.usage.outputTokens
+        hasUpstreamUsage = true
+      }
+
+      if (roundResult.toolCalls.length === 0) break
+
+      const processed = await this.processToolCalls(user, userId, conversationId, assistantMessage.id, roundResult.toolCalls, res)
+      if (processed.stop) break
+      roundMessages = [
+        ...roundMessages,
+        { role: 'assistant' as const, content: roundResult.content, tool_calls: roundResult.toolCalls },
+        ...processed.toolMessages,
+      ]
+    }
+
+    // 11. 结算新消息
+    const inputChars = roundMessages.reduce((sum, m) => sum + m.content.length, 0)
+    const { credits, remainingCredits } = await this.finalizeAssistant(
+      userId,
+      conversationId,
+      assistantMessage.id,
+      model,
+      fullContent,
+      inputChars,
+      hasUpstreamUsage ? { inputTokens: totalInputTokens, outputTokens: totalOutputTokens } : null,
+      !streamFailed,
+    )
+
+    if (streamFailed) {
+      this.writeEvent(res, 'error', { code: ErrorCode.AiUpstreamError, message: '上游模型调用失败' })
+    } else {
+      this.writeEvent(res, 'done', {
+        usage: {
+          inputTokens: hasUpstreamUsage ? totalInputTokens : inputChars,
+          outputTokens: hasUpstreamUsage ? totalOutputTokens : fullContent.length,
+          credits,
+          remainingCredits: remainingCredits.toString(),
+        },
+      })
+    }
+    res.end()
+  }
+
+  /**
+   * 重建确认回喂上下文：历史 user/assistant（排除原 assistant 占位消息）+
+   * 原 assistant 消息带 tool_calls + tool 结果消息。
+   */
+  private async buildConfirmContext(
+    record: {
+      conversationId: bigint
+      messageId: bigint
+      toolName: string
+      params: unknown
+    },
+    toolResult: string,
+  ): Promise<{ conversationId: bigint; model: ChatModel; messages: EngineChatMessage[] }> {
+    // 原 assistant 消息（触发 write 工具的那条）
+    const originalMessage = await this.prisma.aiMessage.findUnique({ where: { id: record.messageId } })
+    if (!originalMessage) {
+      throw new BusinessException(ErrorCode.AiToolConfirmExpired, '原会话消息不存在')
+    }
+
+    // 会话与模型（优先会话绑定模型，回退原消息模型）
+    const conversation = await this.prisma.aiConversation.findUnique({
+      where: { id: record.conversationId },
+      include: { model: { include: { provider: true } } },
+    })
+    let model: ChatModel | null = conversation?.model ?? null
+    if (!model && originalMessage.modelId) {
+      model = await this.loadModel(originalMessage.modelId)
+    }
+    if (!model) {
+      throw new BusinessException(ErrorCode.AiModelUnavailable, '会话未绑定模型')
+    }
+
+    // 历史消息（正序，排除原 assistant 占位消息）
+    const history = await this.prisma.aiMessage.findMany({
+      where: { conversationId: record.conversationId, deletedAt: null, id: { not: record.messageId } },
+      orderBy: { createdAt: 'asc' },
+    })
+
+    const paramsObj = (record.params ?? {}) as Record<string, unknown>
+    const messages: EngineChatMessage[] = [
+      { role: 'system', content: SYSTEM_PROMPT },
+      ...history.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+      // 原 assistant 消息带 tool_calls（用 ai_tool_call.id 作为 tool_call_id）
+      {
+        role: 'assistant',
+        content: originalMessage.content,
+        tool_calls: [
+          {
+            id: record.messageId.toString(),
+            name: record.toolName,
+            arguments: JSON.stringify(paramsObj),
+          },
+        ],
+      },
+      { role: 'tool', tool_call_id: record.messageId.toString(), content: toolResult },
+    ]
+
+    return { conversationId: record.conversationId, model, messages }
+  }
+
+  /** 按 id 加载模型（含厂商） */
+  private async loadModel(modelId: bigint): Promise<ChatModel | null> {
+    const model = await this.prisma.aiModel.findUnique({
+      where: { id: modelId },
+      include: { provider: true },
+    })
+    return model
+  }
+
   /** 主流程实现 */
   private async run(
     user: AuthUser,

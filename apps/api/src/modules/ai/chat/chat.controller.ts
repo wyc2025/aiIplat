@@ -6,6 +6,7 @@ import { SkipTransform } from '../../../gateway/decorators/skip-transform.decora
 import type { AuthUser } from '../../../gateway/guards/jwt.strategy'
 import { ChatService } from './chat.service'
 import { ChatDto } from './dto/chat.dto'
+import { ToolConfirmDto } from './dto/tool-confirm.dto'
 
 /**
  * SSE 对话接口（统一响应格式的唯一例外，见 ARCHITECTURE §10）。
@@ -27,5 +28,16 @@ export class ChatController {
     @Res() res: Response,
   ): Promise<void> {
     await this.chatService.handleChat(user, dto, res)
+  }
+
+  @Post('tool/confirm')
+  @SkipTransform()
+  @ApiOperation({ summary: '工具确认（SSE 流式返回总结）' })
+  async toolConfirm(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ToolConfirmDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    await this.chatService.handleToolConfirm(user, dto, res)
   }
 }
