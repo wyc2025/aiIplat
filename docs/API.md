@@ -35,12 +35,12 @@
 
 ### 1.2 会话管理
 
-| 方法   | 路径                              | 说明                                                                                                                                                           |
-| ------ | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | /api/ai/conversation              | 会话分页列表。入参 pageNo/pageSize，按 updatedAt 倒序，item 含 `{ id, title, modelId, modelDisplayName, updatedAt }`                                           |
-| PUT    | /api/ai/conversation/:id          | 重命名 / 切换模型。入参 `{ title?, modelId? }`（title 1~50 字；modelId 作用于该会话后续消息）                                                                  |
-| DELETE | /api/ai/conversation/:id          | 删除会话（软删，消息级联软删）                                                                                                                                 |
-| GET    | /api/ai/conversation/:id/messages | 消息列表。**不分页**，返回最近 50 条、按 createdAt 正序；item `{ id, role, content, tokensInput, tokensOutput, credits, modelDisplayName, status, createdAt }` |
+| 方法   | 路径                              | 说明                                                                                                                                                                                                                                                                                                                            |
+| ------ | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | /api/ai/conversation              | 会话分页列表。入参 pageNo/pageSize，按 updatedAt 倒序，item 含 `{ id, title, modelId, modelDisplayName, updatedAt }`                                                                                                                                                                                                            |
+| PUT    | /api/ai/conversation/:id          | 重命名 / 切换模型。入参 `{ title?, modelId? }`（title 1~50 字；modelId 作用于该会话后续消息）                                                                                                                                                                                                                                   |
+| DELETE | /api/ai/conversation/:id          | 删除会话（软删，消息级联软删）                                                                                                                                                                                                                                                                                                  |
+| GET    | /api/ai/conversation/:id/messages | 消息列表。**不分页**，返回最近 50 条、按 createdAt 正序；item `{ id, role, content, tokensInput, tokensOutput, credits, modelDisplayName, status, createdAt }`；**P2b 起** item 增加 `toolCalls` 数组（`{ toolCallId, toolName, title, summary, params, status }`，无工具调用则为空数组），用于刷新后恢复确认卡片与工具标签状态 |
 
 **会话为懒创建**：不设"新建会话"接口。前端点"新建会话"仅置本地态，首条消息经 `POST /api/ai/chat`（不带 conversationId、带 modelId）时由后端建会话，meta 事件回传 conversationId；done 事件后前端刷新会话列表获取自动生成的标题。
 
@@ -147,3 +147,48 @@ data: {"type":"done","usage":{"inputTokens":12,"outputTokens":350,"credits":3,"r
 - 实现：写 `user:pwd:changed:{userId}` = 当前时间戳（复用 T10 机制，该用户全部已签发 token 即刻失效）+ SCAN 删除其全部 refresh token + 删除 `user:perms:{userId}` + 删除 `online:{userId}`
 - admin 用户不可踢（返回 10202 同款超管保护）
 - 不能踢自己
+
+---
+
+## 4. P2b 增补：AI 工具调用
+
+### 4.1 错误码新增（续 20xxx 段；20008~20013 已被 P2a 套餐/厂商/模型占用）
+
+| code  | 含义                 | 前端处理                            |
+| ----- | -------------------- | ----------------------------------- |
+| 20014 | 工具不存在或未启用   | 提示该能力暂不可用                  |
+| 20015 | 无权限使用该工具     | AI 消息内自然语言提示（由模型转述） |
+| 20016 | 确认单不存在或已过期 | 卡片置灰显示"已过期"                |
+| 20017 | 工具执行失败         | AI 消息失败态 + 重试                |
+
+### 4.2 POST /api/ai/chat 行为变化
+
+- 模型 `support_tool=1` 且当前用户有可用工具时，后端请求上游携带 tools（按用户权限过滤的子集）
+- SSE 事件序列在 meta / delta / done / error 基础上**新增两种事件**：
+
+```
+data: {"type":"tool_result","toolCallId":"789","toolName":"get_online_users","status":"executed","summary":"已查询在线用户"}
+
+data: {"type":"tool_confirm","toolCallId":"790","toolName":"kick_user","title":"踢用户下线","summary":"将用户 tester（ID: 12）强制下线","params":{"username":"tester"}}
+
+```
+
+- `tool_result`：read 工具自动执行后的结果通知（折叠标签展示）
+- `tool_confirm`：write 工具待确认通知，收到后本轮流结束（done 照常下发并结算本轮；该 assistant 消息 content 允许为空，仅承载卡片）；前端渲染确认卡片
+- 工具回喂引发的多次上游调用，tokens 累加进同一 assistant 消息统一结算；工具调用轮次上限 3
+
+### 4.3 工具确认（SSE）
+
+`POST /api/ai/tool/confirm`
+Content-Type: application/json　Accept: text/event-stream
+
+入参：
+
+```json
+{ "toolCallId": "790", "approved": true }
+```
+
+- 前置校验（失败走统一 JSON 错误码）：登录 → 套餐/积分预检（20001/20002）→ 并发流锁（与 /ai/chat 共用 ai:chatting，冲突返回 20007）→ 确认单存在且未过期（20016）→ 确认单归属当前用户 → 工具权限二次校验（20015）
+- `approved=true`：执行工具 → 结果回喂上游 → **本接口以 SSE 流式返回**模型的后续总结（事件序列同 /ai/chat：meta / delta / done / error，含 15s 心跳）；**总结持久化为新的 assistant 消息并独立结算**，meta 事件携带新的 assistantMessageId，前端追加新气泡（不续接到卡片所在消息）
+- `approved=false`：ai_tool_call 置 rejected，回喂"用户已取消"，同样 SSE 返回模型的回应
+- 确认单为一次性：确认/取消后立即失效，重复提交返回 20016

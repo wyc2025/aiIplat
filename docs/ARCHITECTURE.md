@@ -131,6 +131,9 @@ views/ai/
 ├── provider/      # 厂商模型管理（admin，左右布局复用字典页模式）
 ├── admin/plan/    # 套餐管理（admin）
 ├── admin/usage/   # 用量明细（admin）
+├── components/    # P2b 新增：工具调用组件
+│   ├── ToolConfirmCard.vue   # 确认卡片
+│   └── ToolResultTag.vue     # 工具结果折叠标签
 └── utils/sse.ts   # SSE 客户端（fetch + ReadableStream，见 §10）
 ```
 
@@ -208,7 +211,14 @@ apps/api/src/
         ├── credit/         #   CreditService：预检 / 结算（幂等）/ 余额查询
         ├── plan/           #   套餐：admin CRUD + 指派 + 用户侧开通/切换
         │   └── plan.task.ts #  月度重置 cron（每日 00:30 扫描过期周期）
-        └── usage/          #   用量明细（用户侧 + admin 侧查询）
+        ├── usage/          #   用量明细（用户侧 + admin 侧查询）
+        └── tool/           #   ★ P2b 新增：工具调用
+            ├── tool.types.ts    #   AiTool 接口定义
+            ├── tool.registry.ts #   工具注册表（Map<name, AiTool>，模块启动时收集）
+            └── tools/           #   具体工具实现，一个工具一个文件
+                ├── get-online-users.tool.ts
+                ├── kick-user.tool.ts
+                └── ...
 ```
 
 ### 4.2 请求生命周期（守卫链，全局注册顺序固定）
@@ -453,6 +463,23 @@ apps/api/src/
 
 索引：(user_id, created_at)、unique(message_id)
 
+### ai_tool_call —— 工具调用留痕（P2b 新增）
+
+| 字段                         | 类型         | 说明                                               |
+| ---------------------------- | ------------ | -------------------------------------------------- |
+| id                           | bigint PK    | 即确认单 ID（confirm 接口路径参数）                |
+| conversation_id / message_id | bigint       | 关联会话与 assistant 消息                          |
+| user_id                      | bigint       | 操作人                                             |
+| tool_name                    | varchar(50)  |                                                    |
+| params                       | json         | 模型生成的调用参数                                 |
+| risk                         | varchar(10)  | read / write                                       |
+| status                       | varchar(20)  | pending / confirmed / rejected / executed / failed |
+| result                       | text         | 执行结果摘要（截断存储，最多 2000 字符）           |
+| error_msg                    | varchar(500) | 失败原因                                           |
+| created_at / updated_at      | datetime     |                                                    |
+
+索引：(conversation_id)、(user_id, created_at)
+
 ### 索引约定
 
 - 唯一键：sys_user.username、sys_role.code、sys_dict_type.type、两张关联表的联合唯一
@@ -490,6 +517,10 @@ apps/api/src/
 - 每家 1~2 个示例模型（status=0 停用，填 key 后管理员启用）
 - ai_plan 两个示例：体验版（月 10,000 积分）、标准版（月 100,000 积分）
 - AI 菜单树 + 权限标识（见 PRD-P2A 第 3 节），common 角色分配"AI 助手"目录三页
+
+### seed 增补（P2b 工具调用）
+
+- ai_model 表：将支持 Function Calling 的模型 `support_tool` 置 1（各家主流对话模型均支持，按厂商文档核实后勾选）
 
 ---
 
@@ -570,13 +601,18 @@ P2a 增补：无新增环境变量（apiKey 存 ai_provider 表）。`.env` 增�
 | @SkipTransform                                              | api/src/gateway/decorators                | SSE 接口跳过统一响应                                                     | 已建（T14）                       |
 | sse                                                         | web/src/views/ai/utils/sse.ts             | 前端 SSE 客户端                                                          | 已建（T17）                       |
 | MarkdownView                                                | web/src/views/ai/components               | markdown-it 渲染封装（禁 raw HTML）                                      | 已建（T17）                       |
+| AiTool / ToolRegistry                                       | api/src/modules/ai/tool                   | 工具类型与注册表（新增工具 = tools/ 下加一个文件并注册）                 | 待建（T19）                       |
+| PLATFORM-GUIDE                                              | docs/PLATFORM-GUIDE.md                    | AI 平台手册，注入 system prompt；功能变更必须同步更新                    | 待建（T23）                       |
+| ToolConfirmCard                                             | web/src/views/ai/components               | 确认卡片组件（参数摘要 + 确认/取消 + 过期态）                            | 待建（T24）                       |
+| ToolResultTag                                               | web/src/views/ai/components               | 工具结果折叠标签                                                         | 待建（T24）                       |
 
 ### Redis Key 增补约定（写入 RedisKey 常量）
 
-| Key                    | 类型/TTL                                                 | 用途                                                                                         |
-| ---------------------- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `online:{userId}`      | hash，30min 滑动                                         | 在线用户（username/nickname/ip/loginAt/lastActiveAt），JwtAuthGuard 校验通过时刷新，登出删除 |
-| `ai:chatting:{userId}` | string，TTL 300s（兜底防进程崩溃残留），流结束时主动删除 | 单用户并发流限制（存在即拒绝新流，20007）                                                    |
+| Key                       | 类型/TTL                                                 | 用途                                                                                         |
+| ------------------------- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `online:{userId}`         | hash，30min 滑动                                         | 在线用户（username/nickname/ip/loginAt/lastActiveAt），JwtAuthGuard 校验通过时刷新，登出删除 |
+| `ai:chatting:{userId}`    | string，TTL 300s（兜底防进程崩溃残留），流结束时主动删除 | 单用户并发流限制（存在即拒绝新流，20007）                                                    |
+| `ai:confirm:{toolCallId}` | string（JSON），TTL 600s                                 | write 工具确认单：{ userId, conversationId, toolName, params }，确认/取消/过期即失效         |
 
 ---
 
@@ -598,3 +634,44 @@ P2a 增补：无新增环境变量（apiKey 存 ai_provider 表）。`.env` 增�
 3. **上下文截取**：发送前按模型 max_context 从最新消息往回装，装不下的老消息丢弃；system prompt 固定放最前（P2a 的 system prompt：简洁的助手设定即可）。token 估算口径：不引入分词库，按字符数保守估算（1 token ≈ 1 字符，宁可多截不可超限）；usage 兜底估算同口径
 4. **价格换算口径**：1 积分 = 内部计量单位，模型单价由运营按"厂商定价 × 加价率"换算后人工录入 ai_model 表，系统不做实时汇率
 5. 所有 AI 域写操作（开通/切换/指派/踢人）挂 @OperationLog
+
+## 12. 工具调用架构（P2b 新增）
+
+### 12.1 AiTool 接口（tool.types.ts）
+
+```ts
+export interface AiTool {
+  name: string // 蛇形命名，如 get_online_users
+  description: string // 给模型看的中文功能描述（决定模型选对工具的关键）
+  parameters: Record<string, any> // JSON Schema（OpenAI tools 参数格式）
+  perms?: string // 绑定权限标识；缺省 = 登录即可
+  risk: 'read' | 'write' // read 自动执行 / write 需用户确认
+  handler: (ctx: { user: AuthUser }, params: any) => Promise<any> // 返回值会序列化回喂模型
+}
+```
+
+### 12.2 调用流程（chat.service 编排）
+
+1. 引擎层扩展：ProviderService.streamChat 当前仅传 messages，本期扩展 `tools` 参数透传与上游 `tool_calls` 事件解析（EngineStreamEvent 新增事件类型）。模型 `support_tool=1` 且存在可用工具时携带 `tools`（**按当前用户权限过滤后的子集**，无权限工具不下发；**过滤后为空则不携带 tools 字段**，空数组会触发部分厂商 400）；工具 schema 本身占用上下文，与历史消息共用 max_context 预算（必要时下调历史截取比例）。注意：**tool_calls 在流式 delta 中分片下发**（function.arguments 逐段追加），引擎层需累积分片、聚合至 finish_reason=tool_calls 后再解析执行，禁止读到就解析
+2. 上游返回 tool_calls → 逐个处理：
+   - 执行前再次校验 perms（防缓存间隙），无权限 → 20015 结果回喂模型告知。权限判定逻辑不得复制：从 PermissionGuard 抽出共用的 PermissionService（gateway 层），守卫与工具层都调它
+   - read：执行 handler → 结果作为 `role: "tool"` 消息追加 → 再次调用上游（**最多 3 轮**，超限截断并提示）
+   - write：写 ai_tool_call（status=pending）+ Redis 确认单 → SSE 下发 `tool_confirm` 事件 → 本轮流结束（done 照常下发并结算本轮；该 assistant 消息 content 允许为空，仅承载卡片）
+3. 确认链路：`POST /api/ai/tool/confirm` → 前置校验（套餐/积分预检 20001/20002、并发流锁与 /ai/chat 共用 ai:chatting 冲突 20007、确认单归属与有效期 20016、工具权限二次校验 20015）→ approved=true 执行 handler（status=executed/failed）→ 结果回喂上游 → **本接口同样以 SSE 流式返回**模型的后续自然语言总结（含 15s 心跳），**总结落库为新的 assistant 消息并独立结算**——避免与首轮共用 message_id 撞 ai_usage_log 的 unique 幂等键
+4. 一次用户消息引发的所有上游调用，tokens 累加进同一条 assistant 消息，统一结算一次；**role=tool 的工具消息不持久化**（只在本轮调用链内存中传递），上下文重建仍只用 ai_message 的 user/assistant 消息，工具结果由 assistant 的最终自然语言回答承载
+5. 工具参数校验：handler 入口按 parameters schema 校验（模型可能生成非法参数），失败结果回喂让模型自我修正（计入轮次）
+
+### 12.3 域门面约定（域边界纪律的落地方式）
+
+- ai 域工具需要 system 域能力时，**只允许注入 system 域模块 export 出来的 Service**（如 UserService、OnlineService、RoleService）
+- system 域各模块需在 module 的 `exports` 中显式声明可被外部使用的 Service；未导出 = 私有
+- handler 禁止直接操作其他域的表、禁止绕过 Service 写旁路逻辑
+
+### 12.4 system prompt 结构（chat.service 拼装，顺序固定）
+
+```
+1. 助手设定（固定文案：你是 iplat 平台内置 AI 助手，可使用提供的工具帮助用户操作系统……）
+2. docs/PLATFORM-GUIDE.md 全文（启动时读入内存缓存，文件变更重启生效）
+3. 当前用户上下文：昵称、角色名列表、当前日期（不注入权限标识明细，权限由工具过滤兜底）
+4. 工具使用原则：read 类直接执行；write 类必须先经用户确认；不确定的操作路径引导用户查看菜单，禁止编造
+```
