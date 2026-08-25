@@ -16,4 +16,6 @@ export const RedisKey = {
   aiChatRate: (userId: string) => `ai:chat:rate:${userId}`,
   /** 在线用户 hash：online:{userId}，字段 username/nickname/ip/loginAt/lastActiveAt，30min 滑动过期 */
   online: (userId: string) => `online:${userId}`,
+  /** write 工具确认单：ai:confirm:{toolCallId}，存 JSON，TTL 600s，确认/取消/过期即失效 */
+  aiConfirm: (toolCallId: string) => `ai:confirm:${toolCallId}`,
 } as const

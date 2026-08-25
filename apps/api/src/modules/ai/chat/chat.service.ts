@@ -5,10 +5,13 @@ import { RedisKey } from '../../../common/constants/redis-key'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { RedisService } from '../../../infra/redis/redis.service'
 import type { AuthUser } from '../../../gateway/guards/jwt.strategy'
+import { PermissionService } from '../../../gateway/services/permission.service'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { CreditService } from '../credit/credit.service'
 import { ProviderService } from '../engine/provider.service'
-import type { EngineChatMessage } from '../engine/engine.types'
+import type { EngineChatMessage, EngineTool, EngineToolCall, EngineUsage } from '../engine/engine.types'
+import { ToolRegistry } from '../tool/tool.registry'
+import type { AiTool } from '../tool/tool.types'
 import type { ChatDto } from './dto/chat.dto'
 
 /** P2a system prompt（简洁的助手设定，见 ARCHITECTURE §11） */
@@ -23,20 +26,33 @@ const CHATTING_TTL_SEC = 300
 const HEARTBEAT_MS = 15_000
 /** 输入上下文预算：给输出预留 1/4，按字符数保守估算（1 token ≈ 1 字符） */
 const OUTPUT_RESERVE_RATIO = 0.25
+/** 工具调用轮次上限（一次用户消息最多 3 轮上游调用） */
+const MAX_TOOL_ROUNDS = 3
+/** write 工具确认单 TTL（10 分钟） */
+const CONFIRM_TTL_SEC = 600
 
 /** 模型（含厂商）精简类型 */
 interface ChatModel {
   id: bigint
   model: string
   maxContext: number
+  supportTool: number
   provider: { baseUrl: string; apiKey: string | null; status: number }
   status: number
 }
 
+/** 单轮上游调用结果 */
+interface RoundResult {
+  content: string
+  toolCalls: EngineToolCall[]
+  usage: EngineUsage | null
+  failed: boolean
+}
+
 /**
  * SSE 对话编排（chat 域）。
- * 流程：限流 → 并发流限制 → 预检（套餐/模型/会话/内容）→ 懒建会话 → 存 user 消息 →
- * 拼装上下文（截取）→ 建 assistant 占位 → 发 meta → 流式下发 delta → 结算 → done。
+ * 流程：限流 → 并发流限制 → 预检 → 懒建会话 → 存 user 消息 → 拼装上下文 →
+ * 建 assistant 占位 → 发 meta → 多轮上游调用（工具调用，最多 3 轮）→ 结算 → done。
  */
 @Injectable()
 export class ChatService {
@@ -47,6 +63,8 @@ export class ChatService {
     private readonly redis: RedisService,
     private readonly creditService: CreditService,
     private readonly providerService: ProviderService,
+    private readonly toolRegistry: ToolRegistry,
+    private readonly permissionService: PermissionService,
   ) {}
 
   /** SSE 对话主流程（由 Controller 用 @Res() 传入原生 Response） */
@@ -67,13 +85,11 @@ export class ChatService {
     })
 
     try {
-      await this.run(userId, dto, res, abortController.signal)
+      await this.run(user, userId, dto, res, abortController.signal)
     } catch (error) {
       if (res.headersSent) {
-        // 已进入流式：写 error 事件后自然结束，不再抛给全局过滤器（避免二次写响应）
         await this.emitError(res, error)
       } else {
-        // 前置校验失败：抛给 GlobalExceptionFilter 统一 JSON 错误响应
         throw error
       }
     } finally {
@@ -82,17 +98,21 @@ export class ChatService {
   }
 
   /** 主流程实现 */
-  private async run(userId: bigint, dto: ChatDto, res: Response, signal: AbortSignal): Promise<void> {
-    // 2. 限流：20 次/分/用户
+  private async run(
+    user: AuthUser,
+    userId: bigint,
+    dto: ChatDto,
+    res: Response,
+    signal: AbortSignal,
+  ): Promise<void> {
+    // 2. 限流
     await this.assertRateLimit(userId)
-
-    // 3. 预检套餐（无套餐 20001 / 余额不足 20002，含懒重置）
+    // 3. 预检套餐
     await this.creditService.precheck(userId)
-
     // 4. 确定会话与模型
     const { conversationId, model } = await this.resolveConversationAndModel(userId, dto)
 
-    // 5. 内容长度校验（超模型上下文 20006）
+    // 5. 内容长度校验
     const inputBudget = Math.floor(model.maxContext * (1 - OUTPUT_RESERVE_RATIO))
     if (dto.content.length > inputBudget) {
       throw new BusinessException(ErrorCode.AiContentTooLong, '消息内容超出模型上下文长度，请精简后重试')
@@ -108,10 +128,13 @@ export class ChatService {
       data: { conversationId, role: 'assistant', content: '', modelId: model.id, status: 1 },
     })
 
-    // 8. 拼装上下文（system prompt + 历史消息按 inputBudget 从最新往回截取）
+    // 8. 拼装上下文
     const { messages, inputChars } = await this.buildContext(conversationId, userMessage.id, dto.content, inputBudget)
 
-    // 9. 进入流式：设置 SSE 响应头 + 发 meta
+    // 9. 确定可用工具（模型支持 + 按权限过滤）
+    const { tools } = await this.getAvailableTools(user, model)
+
+    // 10. 进入流式
     this.setupSseHeaders(res)
     this.writeEvent(res, 'meta', {
       conversationId: conversationId.toString(),
@@ -119,40 +142,53 @@ export class ChatService {
       assistantMessageId: assistantMessage.id.toString(),
     })
 
-    // 10. 流式调用 + 心跳 + 累积输出
+    // 11. 多轮上游调用（工具调用循环，最多 MAX_TOOL_ROUNDS 轮）
     let fullContent = ''
-    let upstreamUsage: { inputTokens: number; outputTokens: number } | null = null
-    let heartbeat: NodeJS.Timeout | null = null
-    const resetHeartbeat = () => {
-      if (heartbeat) clearInterval(heartbeat)
-      heartbeat = setInterval(() => this.writeComment(res, 'ping'), HEARTBEAT_MS)
-    }
-    resetHeartbeat()
-
+    let totalInputTokens = 0
+    let totalOutputTokens = 0
+    let hasUpstreamUsage = false
     let streamFailed = false
-    try {
-      for await (const event of this.providerService.streamChat({
-        baseUrl: model.provider.baseUrl,
-        apiKey: model.provider.apiKey ?? '',
-        model: model.model,
-        messages,
-        signal,
-      })) {
-        if (event.type === 'delta') {
-          fullContent += event.content
-          this.writeEvent(res, 'delta', { content: event.content })
-          resetHeartbeat()
-        } else if (event.type === 'done') {
-          upstreamUsage = event.usage
-        }
+
+    let roundMessages = messages
+    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      const roundResult = await this.callUpstream(model, roundMessages, tools, res, signal)
+      if (roundResult.failed) {
+        streamFailed = true
+        break
       }
-    } catch {
-      streamFailed = true
-    } finally {
-      if (heartbeat) clearInterval(heartbeat)
+
+      fullContent += roundResult.content
+      if (roundResult.usage) {
+        totalInputTokens += roundResult.usage.inputTokens
+        totalOutputTokens += roundResult.usage.outputTokens
+        hasUpstreamUsage = true
+      }
+
+      // 无工具调用：正常结束
+      if (roundResult.toolCalls.length === 0) break
+
+      // 处理工具调用
+      const processed = await this.processToolCalls(
+        user,
+        userId,
+        conversationId,
+        assistantMessage.id,
+        roundResult.toolCalls,
+        res,
+      )
+
+      // write 工具：发确认卡片后本轮结束
+      if (processed.stop) break
+
+      // read 工具结果回喂：追加 assistant（含 tool_calls）+ tool 消息，进入下一轮
+      roundMessages = [
+        ...roundMessages,
+        { role: 'assistant' as const, content: roundResult.content, tool_calls: roundResult.toolCalls },
+        ...processed.toolMessages,
+      ]
     }
 
-    // 11. 结算（失败仍结算已产生 tokens）+ 更新 assistant 消息
+    // 12. 结算（合并计费）+ 更新 assistant 消息
     const { credits, remainingCredits } = await this.finalizeAssistant(
       userId,
       conversationId,
@@ -160,24 +196,257 @@ export class ChatService {
       model,
       fullContent,
       inputChars,
-      upstreamUsage,
+      hasUpstreamUsage ? { inputTokens: totalInputTokens, outputTokens: totalOutputTokens } : null,
       !streamFailed,
     )
 
-    // 12. 上游失败 → error 事件；成功 → done 事件
+    // 13. 收尾事件
     if (streamFailed) {
       this.writeEvent(res, 'error', { code: ErrorCode.AiUpstreamError, message: '上游模型调用失败' })
     } else {
       this.writeEvent(res, 'done', {
         usage: {
-          inputTokens: upstreamUsage?.inputTokens ?? inputChars,
-          outputTokens: upstreamUsage?.outputTokens ?? fullContent.length,
+          inputTokens: hasUpstreamUsage ? totalInputTokens : inputChars,
+          outputTokens: hasUpstreamUsage ? totalOutputTokens : fullContent.length,
           credits,
           remainingCredits: remainingCredits.toString(),
         },
       })
     }
     res.end()
+  }
+
+  /** 单轮上游调用：累积 delta 下发、tool_calls 收集、usage 返回 */
+  private async callUpstream(
+    model: ChatModel,
+    messages: EngineChatMessage[],
+    tools: EngineTool[],
+    res: Response,
+    signal: AbortSignal,
+  ): Promise<RoundResult> {
+    let content = ''
+    const toolCalls: EngineToolCall[] = []
+    let usage: EngineUsage | null = null
+    let failed = false
+
+    let heartbeat: NodeJS.Timeout | null = null
+    const resetHeartbeat = () => {
+      if (heartbeat) clearInterval(heartbeat)
+      heartbeat = setInterval(() => this.writeComment(res, 'ping'), HEARTBEAT_MS)
+    }
+    resetHeartbeat()
+
+    try {
+      for await (const event of this.providerService.streamChat({
+        baseUrl: model.provider.baseUrl,
+        apiKey: model.provider.apiKey ?? '',
+        model: model.model,
+        messages,
+        tools,
+        signal,
+      })) {
+        if (event.type === 'delta') {
+          content += event.content
+          this.writeEvent(res, 'delta', { content: event.content })
+          resetHeartbeat()
+        } else if (event.type === 'tool_calls') {
+          toolCalls.push(...event.toolCalls)
+        } else if (event.type === 'done') {
+          usage = event.usage
+        }
+      }
+    } catch {
+      failed = true
+    } finally {
+      if (heartbeat) clearInterval(heartbeat)
+    }
+
+    return { content, toolCalls, usage, failed }
+  }
+
+  /**
+   * 处理工具调用：
+   * - read 工具：执行 handler → 留痕 → 发 tool_result 事件 → 结果回喂
+   * - write 工具：留痕 pending → 写确认单 → 发 tool_confirm 事件 → 标记 stop 结束本轮
+   */
+  private async processToolCalls(
+    user: AuthUser,
+    userId: bigint,
+    conversationId: bigint,
+    assistantMessageId: bigint,
+    toolCalls: EngineToolCall[],
+    res: Response,
+  ): Promise<{ stop: boolean; toolMessages: EngineChatMessage[] }> {
+    const toolMessages: EngineChatMessage[] = []
+    let stop = false
+
+    for (const tc of toolCalls) {
+      const tool = this.toolRegistry.get(tc.name)
+      // 工具不存在
+      if (!tool) {
+        toolMessages.push({ role: 'tool', content: '工具不存在或未启用', tool_call_id: tc.id })
+        continue
+      }
+      // 权限二次校验（防缓存间隙）
+      if (tool.perms && !(await this.permissionService.hasPermission(user.userId, tool.perms))) {
+        toolMessages.push({ role: 'tool', content: '无权限使用该工具', tool_call_id: tc.id })
+        continue
+      }
+
+      const params = this.parseToolArguments(tc.arguments)
+
+      if (tool.risk === 'read') {
+        // read 自动执行
+        const result = await this.executeReadTool(user, userId, conversationId, assistantMessageId, tool, tc, params, res)
+        toolMessages.push({ role: 'tool', content: JSON.stringify(result), tool_call_id: tc.id })
+      } else {
+        // write：留痕 pending + 确认单 + tool_confirm 事件，本轮结束
+        await this.emitWriteToolConfirm(user, userId, conversationId, assistantMessageId, tool, tc, params, res)
+        stop = true
+        break
+      }
+    }
+
+    return { stop, toolMessages }
+  }
+
+  /** 执行 read 工具：handler + 留痕 + tool_result 事件；返回结果（含失败兜底） */
+  private async executeReadTool(
+    user: AuthUser,
+    userId: bigint,
+    conversationId: bigint,
+    assistantMessageId: bigint,
+    tool: AiTool,
+    tc: EngineToolCall,
+    params: Record<string, unknown>,
+    res: Response,
+  ): Promise<unknown> {
+    try {
+      const result = await tool.handler({ user }, params)
+      await this.prisma.aiToolCall.create({
+        data: {
+          conversationId,
+          messageId: assistantMessageId,
+          userId,
+          toolName: tool.name,
+          params: params as object,
+          risk: 'read',
+          status: 'executed',
+          result: this.truncate(JSON.stringify(result), 2000),
+        },
+      })
+      this.writeEvent(res, 'tool_result', {
+        toolCallId: tc.id,
+        toolName: tool.name,
+        status: 'executed',
+        summary: this.truncate(JSON.stringify(result), 200),
+      })
+      return result
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : '工具执行失败'
+      this.logger.error(`read 工具 ${tool.name} 执行失败：${errMsg}`)
+      await this.prisma.aiToolCall.create({
+        data: {
+          conversationId,
+          messageId: assistantMessageId,
+          userId,
+          toolName: tool.name,
+          params: params as object,
+          risk: 'read',
+          status: 'failed',
+          errorMsg: errMsg,
+        },
+      })
+      this.writeEvent(res, 'tool_result', {
+        toolCallId: tc.id,
+        toolName: tool.name,
+        status: 'failed',
+        summary: '工具执行失败',
+      })
+      return { error: '工具执行失败', message: errMsg }
+    }
+  }
+
+  /** write 工具：留痕 pending + 写确认单 + 发 tool_confirm 事件 */
+  private async emitWriteToolConfirm(
+    user: AuthUser,
+    userId: bigint,
+    conversationId: bigint,
+    assistantMessageId: bigint,
+    tool: AiTool,
+    tc: EngineToolCall,
+    params: Record<string, unknown>,
+    res: Response,
+  ): Promise<void> {
+    // 留痕 pending（id 即确认单 ID）
+    const record = await this.prisma.aiToolCall.create({
+      data: {
+        conversationId,
+        messageId: assistantMessageId,
+        userId,
+        toolName: tool.name,
+        params: params as object,
+        risk: 'write',
+        status: 'pending',
+      },
+    })
+
+    // 写确认单（TTL 10 分钟）
+    await this.redis.client.set(
+      RedisKey.aiConfirm(record.id.toString()),
+      JSON.stringify({
+        userId: userId.toString(),
+        conversationId: conversationId.toString(),
+        toolName: tool.name,
+        params,
+      }),
+      'EX',
+      CONFIRM_TTL_SEC,
+    )
+
+    this.writeEvent(res, 'tool_confirm', {
+      toolCallId: record.id.toString(),
+      toolName: tool.name,
+      title: `${tool.description}`,
+      summary: this.truncate(JSON.stringify(params), 200),
+      params,
+    })
+  }
+
+  /** 解析模型生成的 JSON 参数字符串，非法则返回空对象 */
+  private parseToolArguments(argumentsStr: string): Record<string, unknown> {
+    try {
+      const parsed = JSON.parse(argumentsStr || '{}')
+      return parsed && typeof parsed === 'object' ? parsed : {}
+    } catch {
+      return {}
+    }
+  }
+
+  /** 截断字符串到指定长度 */
+  private truncate(str: string, max: number): string {
+    return str.length > max ? `${str.slice(0, max)}…` : str
+  }
+
+  /** 确定可用工具：模型 support_tool=1 且按当前用户权限过滤；过滤后为空则不携带 tools */
+  private async getAvailableTools(
+    user: AuthUser,
+    model: ChatModel,
+  ): Promise<{ tools: EngineTool[] }> {
+    if (model.supportTool !== 1) return { tools: [] }
+
+    const available: AiTool[] = []
+    for (const tool of this.toolRegistry.getAll()) {
+      if (!tool.perms || (await this.permissionService.hasPermission(user.userId, tool.perms))) {
+        available.push(tool)
+      }
+    }
+
+    const tools: EngineTool[] = available.map((t) => ({
+      type: 'function',
+      function: { name: t.name, description: t.description, parameters: t.parameters },
+    }))
+    return { tools }
   }
 
   /** 限流检查：Redis INCR，首次设置 60s 窗口，超 20 次返回 42900 */
@@ -208,7 +477,6 @@ export class ChatService {
       return { conversationId: conversation.id, model: conversation.model }
     }
 
-    // 新会话：modelId 必填
     if (!dto.modelId) {
       throw new BusinessException(ErrorCode.ParamInvalid, '新会话首条消息需指定模型')
     }
@@ -233,8 +501,7 @@ export class ChatService {
   }
 
   /**
-   * 拼装上下文：system prompt 最前 + 历史消息（按 inputBudget 从最新往回截取，超长老消息丢弃）+ 当前消息。
-   * 返回拼装结果与输入总字符数（用于 usage 兜底估算）。
+   * 拼装上下文：system prompt 最前 + 历史消息（按 inputBudget 从最新往回截取）+ 当前消息。
    */
   private async buildContext(
     conversationId: bigint,
@@ -242,7 +509,6 @@ export class ChatService {
     currentContent: string,
     inputBudget: number,
   ): Promise<{ messages: EngineChatMessage[]; inputChars: number }> {
-    // 历史消息（排除刚写入的当前 user 消息），按 createdAt 倒序取最近 50 条
     const history = await this.prisma.aiMessage.findMany({
       where: { conversationId, deletedAt: null, id: { not: excludeMessageId } },
       orderBy: { createdAt: 'desc' },
@@ -252,7 +518,6 @@ export class ChatService {
     const systemMsg: EngineChatMessage = { role: 'system', content: SYSTEM_PROMPT }
     let used = SYSTEM_PROMPT.length + currentContent.length
 
-    // 从最新往回装，装不下的老消息丢弃
     const picked: EngineChatMessage[] = []
     for (const m of history) {
       const cost = m.content.length
@@ -260,7 +525,7 @@ export class ChatService {
       picked.push({ role: m.role as 'user' | 'assistant', content: m.content })
       used += cost
     }
-    picked.reverse() // 倒序（新→旧）翻转为正序
+    picked.reverse()
 
     const currentMsg: EngineChatMessage = { role: 'user', content: currentContent }
     const messages: EngineChatMessage[] = [systemMsg, ...picked, currentMsg]
@@ -268,12 +533,7 @@ export class ChatService {
     return { messages, inputChars }
   }
 
-  /**
-   * 结算并更新 assistant 消息。
-   * - 上游未返回 usage 时按字符数估算（estimated=1）：输入=输入消息字符数，输出=回复字符数
-   * - 失败时 status=2 但仍结算已产生 tokens
-   * 返回 credits 与 remainingCredits。
-   */
+  /** 结算并更新 assistant 消息 */
   private async finalizeAssistant(
     userId: bigint,
     conversationId: bigint,
@@ -288,7 +548,6 @@ export class ChatService {
     const outputTokens = upstreamUsage?.outputTokens ?? fullContent.length
     const estimated = upstreamUsage ? 0 : 1
 
-    // 结算（幂等）
     const { credits, remainingCredits } = await this.creditService.settle({
       userId,
       conversationId,
@@ -299,7 +558,6 @@ export class ChatService {
       estimated,
     })
 
-    // 更新 assistant 消息
     await this.prisma.aiMessage.update({
       where: { id: assistantMessageId },
       data: {

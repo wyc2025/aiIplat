@@ -32,7 +32,7 @@
 | 编号 | 任务                                                                                                                                                                                                                               | 状态   |
 | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
 | T19  | 工具基础设施：ai/tool 目录、AiTool 类型与注册表、ai_tool_call 表迁移、权限判定抽为共用 PermissionService（PermissionGuard 与工具层复用）、system 域模块 exports 补导出                                                             | 已完成 |
-| T20  | chat 流程接入 Function Calling：引擎层 streamChat 扩展 tools 参数透传与 tool_calls 分片累积解析（聚合至 finish_reason 再执行）、过滤后无工具则不携带 tools 字段、tools 按权限过滤下发、read 工具自动执行与回喂、轮次上限、合并计费 | 待办   |
+| T20  | chat 流程接入 Function Calling：引擎层 streamChat 扩展 tools 参数透传与 tool_calls 分片累积解析（聚合至 finish_reason 再执行）、过滤后无工具则不携带 tools 字段、tools 按权限过滤下发、read 工具自动执行与回喂、轮次上限、合并计费 | 已完成 |
 | T21  | write 工具确认链路：tool_confirm 事件、Redis 确认单、POST /ai/tool/confirm（套餐预检 + 并发流锁 + SSE 新消息独立结算 + 心跳）、留痕状态流转                                                                                        | 待办   |
 | T22  | 第一批 7 个工具实现 + 各自权限校验冒烟                                                                                                                                                                                             | 待办   |
 | T23  | docs/PLATFORM-GUIDE.md 定稿 + system prompt 注入（手册全文 + 用户昵称/角色/日期）                                                                                                                                                  | 待办   |
@@ -55,7 +55,7 @@
 
 ## 进行中
 
-（空，下一个待办 T20：chat 流程接入 Function Calling）
+（空，下一个待办 T21：write 工具确认链路）
 
 ## 遗留问题
 
@@ -95,6 +95,7 @@
 - 2026-08-24 修复（用户反馈）：seed 中 DeepSeek 示例模型名更新为 `deepseek-v4-flash`/`deepseek-v4-pro`/`deepseek-v4-flash-vision-exp`（替换旧的 deepseek-chat/deepseek-reasoner，已清旧数据重跑 seed，全库示例模型 7 个）
 - 2026-08-24/25 修复（联调发现，2 个前端 bug）：① 厂商模型管理选中厂商后模型列表空白——根因是后端 `GET /ai/admin/model` 返回裸数组 `[...]`，前端 `getModelPage` 却按 `PageResult`（`result.list`）取值拿到 undefined；改为后端保持数组、前端 `getModelList` 返回 `ModelItem[]` 直接接数组。② AI 对话页发送后回复不显示——根因是 Vue 3 响应式陷阱：`messages.value.push(assistantMsg)` 后数组内对象被 reactive 包装成 Proxy，但代码保存的 `assistantMsg` 原始对象引用再 `.content +=` 修改的是原始对象而非 Proxy，视图不更新；改为保存数组索引、经 `messages.value[assistantIndex]` 访问 Proxy 更新（后端 SSE 已实测正常逐字返回 delta）
 - 2026-08-25 T19：工具基础设施完成（`modules/ai/tool/`）。① schema 增补：新增 `ai_tool_call` 表（id/conversation_id/message_id/user_id/tool_name/params(json)/risk/status/result/error_msg，索引 (conversation_id)/(user_id,created_at)），并在 AiConversation/AiMessage/SysUser 加反向 relation `toolCalls`；迁移 `20260825041537_add_ai_tool_call` 已应用。② gateway 层抽出共用 `PermissionService`（`gateway/services/permission.service.ts`：hasPermission/hasAnyPermission 读 Redis user:perms，超管 '*' 放行）+ `permission.module.ts`（@Global 导出），PermissionGuard 改为复用 PermissionService（消除权限判定复制，工具层同源），app.module 注册 PermissionModule。③ `tool/`：tool.types.ts（AiTool 接口 + ToolContext/ToolRisk/ToolCallStatus）、tool.registry.ts（ToolRegistry：Map 注册表，register 重复名抛错 / get / getAll）、tool.module.ts（导出 ToolRegistry）、tools/ 占位目录（具体工具 T22 实现）。④ system 域 OnlineModule 补 `exports: [OnlineService]`（UserModule/RoleModule 已导出）。⑤ ai.module 挂载 ToolModule。验证：`prisma validate` ✓、`migrate` ✓（含 generate）、`nest build` ✓、`eslint` ✓；冒烟（临时 3001 实例）：admin 访问需权限接口（system/online、ai/admin/provider）code 0 ✓、访问无需权限接口 ai/models code 0 ✓、未登录 40100 ✓（PermissionGuard 改造后权限链路正常）
+- 2026-08-25 T20：chat 流程接入 Function Calling 完成。① 错误码新增 20014（工具不存在）/20015（无权限）/20016（确认单过期）/20017（工具执行失败）。② RedisKey 新增 `aiConfirm`（ai:confirm:{toolCallId}，TTL 600s）。③ 引擎层扩展：engine.types.ts 的 EngineChatMessage 增 `tool` role + `tool_calls`/`tool_call_id` 字段、新增 EngineToolCall/EngineTool 类型、EngineStreamEvent 新增 `tool_calls` 事件、EngineStreamParams 增 `tools` 参数；provider.service.ts 透传 tools（空数组不携带，规避厂商 400）+ tool_calls 分片累积解析（按 index 累积 id/name/arguments，finish_reason=tool_calls 时聚合产出）。④ chat.service.ts 重构为多轮调用循环（MAX_TOOL_ROUNDS=3）：注入 ToolRegistry + PermissionService，`getAvailableTools`（模型 supportTool=1 且按权限过滤，过滤后空则不带 tools）、`callUpstream`（单轮调用含心跳/收集 delta/tool_calls/usage）、`processToolCalls`（read 自动执行 handler + 留痕 + tool_result 事件 + 结果回喂 role=tool；write 留痕 pending + 写确认单 + tool_confirm 事件 + 结束本轮）、`parseToolArguments`（JSON 解析兜底空对象）、`truncate`；多轮 usage 累加进同一 assistant 消息统一结算（合并计费）。⑤ ChatModule import ToolModule。验证：`nest build` ✓、`eslint` ✓；冒烟（临时 3001 实例）：无工具场景（模型 supportTool=0）chat 回归正常 meta→delta→done（含 usage/credits）✓；tools 透传与 tool_calls 解析的端到端触发需待 T22 真实工具 + 模型 support_tool=1 验证
 
 ### P1 最终状态总结（三句话）
 

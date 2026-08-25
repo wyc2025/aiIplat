@@ -84,6 +84,14 @@ export const ErrorCode = {
   AiModelExists: 20012,
   /** 模型存在引用（会话/用量记录），不可删除，仅可停用 */
   AiModelInUse: 20013,
+  /** 工具不存在或未启用 */
+  AiToolNotFound: 20014,
+  /** 无权限使用该工具 */
+  AiToolNoPermission: 20015,
+  /** 确认单不存在或已过期 */
+  AiToolConfirmExpired: 20016,
+  /** 工具执行失败 */
+  AiToolFailed: 20017,
 } as const
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode]
