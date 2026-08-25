@@ -140,6 +140,22 @@ export class UserService {
     return { success: true }
   }
 
+  /** 按 id 查用户资料（含角色，剔除 password；供 AI 工具 get_my_profile 等复用） */
+  async findById(id: bigint) {
+    const user = await this.prisma.sysUser.findUnique({
+      where: { id },
+      include: { userRoles: { include: { role: { select: { id: true, name: true, code: true } } } } },
+    })
+    if (!user || user.deletedAt) throw new BusinessException(ErrorCode.NotFound, '用户不存在')
+    const { password: _p, userRoles, ...rest } = user
+    return { ...rest, roles: userRoles.map((ur) => ur.role) }
+  }
+
+  /** 按 username 精确查用户（供 AI 工具 kick_user 等复用） */
+  async findByUsername(username: string) {
+    return this.prisma.sysUser.findFirst({ where: { username, deletedAt: null } })
+  }
+
   /** 个人中心：修改密码。校验旧密码后更新，并使该用户全部旧会话失效（PRD：改密后强制重新登录） */
   async changePassword(user: AuthUser, dto: ChangePasswordDto) {
     const dbUser = await this.assertExists(BigInt(user.userId))
