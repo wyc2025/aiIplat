@@ -5,5 +5,6 @@ import { OnlineService } from './online.service'
 @Module({
   controllers: [OnlineController],
   providers: [OnlineService],
+  exports: [OnlineService],
 })
 export class OnlineModule {}

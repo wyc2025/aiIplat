@@ -11,6 +11,7 @@ import { JwtStrategy } from './gateway/guards/jwt.strategy'
 import { PermissionGuard } from './gateway/guards/permission.guard'
 import { OperationLogInterceptor } from './gateway/interceptors/operation-log.interceptor'
 import { TransformInterceptor } from './gateway/interceptors/transform.interceptor'
+import { PermissionModule } from './gateway/services/permission.module'
 import { PrismaModule } from './infra/prisma/prisma.module'
 import { RedisModule } from './infra/redis/redis.module'
 import { AiModule } from './modules/ai/ai.module'
@@ -33,6 +34,7 @@ import { UserModule } from './modules/system/user/user.module'
     ScheduleModule.forRoot(),
     PrismaModule,
     RedisModule,
+    PermissionModule,
     AiModule,
     AuthModule,
     DashboardModule,

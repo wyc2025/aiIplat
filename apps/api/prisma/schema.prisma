@@ -39,6 +39,7 @@ model SysUser {
   dept      SysDept?      @relation(fields: [deptId], references: [id])
   userRoles SysUserRole[]
   usageLogs AiUsageLog[]
+  toolCalls AiToolCall[]
 
   @@index([deptId])
   @@map("sys_user")
@@ -299,6 +300,7 @@ model AiConversation {
   messages AiMessage[]
   model    AiModel?    @relation(fields: [modelId], references: [id])
   usageLogs AiUsageLog[]
+  toolCalls AiToolCall[]
 
   @@index([userId, updatedAt])
   @@index([modelId])
@@ -326,6 +328,7 @@ model AiMessage {
 
   conversation AiConversation @relation(fields: [conversationId], references: [id])
   model        AiModel?       @relation(fields: [modelId], references: [id])
+  toolCalls    AiToolCall[]
 
   @@index([conversationId, createdAt])
   @@index([modelId])
@@ -398,4 +401,32 @@ model AiUsageLog {
   @@index([conversationId])
   @@index([modelId])
   @@map("ai_usage_log")
+}
+
+/// 工具调用留痕（P2b）
+model AiToolCall {
+  id             BigInt    @id @default(autoincrement())
+  conversationId BigInt    @map("conversation_id")
+  messageId      BigInt    @map("message_id")
+  userId         BigInt    @map("user_id")
+  toolName       String    @map("tool_name") @db.VarChar(50)
+  /// 模型生成的调用参数
+  params         Json      @map("params")
+  /// read / write
+  risk           String    @map("risk") @db.VarChar(10)
+  /// pending / confirmed / rejected / executed / failed
+  status         String    @map("status") @db.VarChar(20)
+  /// 执行结果摘要（截断存储，最多 2000 字符）
+  result         String?   @map("result") @db.Text
+  errorMsg       String?   @map("error_msg") @db.VarChar(500)
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  conversation AiConversation @relation(fields: [conversationId], references: [id])
+  message      AiMessage      @relation(fields: [messageId], references: [id])
+  user         SysUser        @relation(fields: [userId], references: [id])
+
+  @@index([conversationId])
+  @@index([userId, createdAt])
+  @@map("ai_tool_call")
 }

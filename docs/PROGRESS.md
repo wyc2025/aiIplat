@@ -29,14 +29,14 @@
 
 ## P2b 任务拆解（AI 工具调用 Agent 化）
 
-| 编号 | 任务                                                                                                                                                                                                                               | 状态 |
-| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
-| T19  | 工具基础设施：ai/tool 目录、AiTool 类型与注册表、ai_tool_call 表迁移、权限判定抽为共用 PermissionService（PermissionGuard 与工具层复用）、system 域模块 exports 补导出                                                             | 待办 |
-| T20  | chat 流程接入 Function Calling：引擎层 streamChat 扩展 tools 参数透传与 tool_calls 分片累积解析（聚合至 finish_reason 再执行）、过滤后无工具则不携带 tools 字段、tools 按权限过滤下发、read 工具自动执行与回喂、轮次上限、合并计费 | 待办 |
-| T21  | write 工具确认链路：tool_confirm 事件、Redis 确认单、POST /ai/tool/confirm（套餐预检 + 并发流锁 + SSE 新消息独立结算 + 心跳）、留痕状态流转                                                                                        | 待办 |
-| T22  | 第一批 7 个工具实现 + 各自权限校验冒烟                                                                                                                                                                                             | 待办 |
-| T23  | docs/PLATFORM-GUIDE.md 定稿 + system prompt 注入（手册全文 + 用户昵称/角色/日期）                                                                                                                                                  | 待办 |
-| T24  | 前端：确认卡片、工具结果标签、确认后流式输出为新气泡（不续接）、刷新后按 toolCalls 恢复卡片、模型"支持工具"标记 + 联调验收（对照第 5 节）                                                                                          | 待办 |
+| 编号 | 任务                                                                                                                                                                                                                               | 状态   |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| T19  | 工具基础设施：ai/tool 目录、AiTool 类型与注册表、ai_tool_call 表迁移、权限判定抽为共用 PermissionService（PermissionGuard 与工具层复用）、system 域模块 exports 补导出                                                             | 已完成 |
+| T20  | chat 流程接入 Function Calling：引擎层 streamChat 扩展 tools 参数透传与 tool_calls 分片累积解析（聚合至 finish_reason 再执行）、过滤后无工具则不携带 tools 字段、tools 按权限过滤下发、read 工具自动执行与回喂、轮次上限、合并计费 | 待办   |
+| T21  | write 工具确认链路：tool_confirm 事件、Redis 确认单、POST /ai/tool/confirm（套餐预检 + 并发流锁 + SSE 新消息独立结算 + 心跳）、留痕状态流转                                                                                        | 待办   |
+| T22  | 第一批 7 个工具实现 + 各自权限校验冒烟                                                                                                                                                                                             | 待办   |
+| T23  | docs/PLATFORM-GUIDE.md 定稿 + system prompt 注入（手册全文 + 用户昵称/角色/日期）                                                                                                                                                  | 待办   |
+| T24  | 前端：确认卡片、工具结果标签、确认后流式输出为新气泡（不续接）、刷新后按 toolCalls 恢复卡片、模型"支持工具"标记 + 联调验收（对照第 5 节）                                                                                          | 待办   |
 
 ## 第一期任务拆解（P1 底座）
 
@@ -55,7 +55,7 @@
 
 ## 进行中
 
-（空，P2a 全部完成）
+（空，下一个待办 T20：chat 流程接入 Function Calling）
 
 ## 遗留问题
 
@@ -94,6 +94,7 @@
 - 2026-08-24 修复（联调发现）：AI 管理「厂商模型」页接口发不通——根因是 T12 只实现了用户侧 `GET /ai/models`，管理端厂商/模型 CRUD 接口（API.md 2.1/2.2）遗漏未实现。补齐：① 错误码新增 20010（厂商标识已存在）/20011（厂商下有模型不可删除）/20012（厂商内 API 模型名已存在）/20013（模型有引用不可删除仅可停用）。② `provider.service.ts` 扩展管理端方法：adminPage（apiKey 掩码 `****`+后4位）、createProvider（code 唯一）、updateProvider（apiKey 空串不修改）、removeProvider（下有模型禁止）、modelsByProvider（不分页）、createModel/updateModel、removeModel（会话/用量/消息引用存在则禁止删除）；③ `provider-admin.controller.ts`（GET/POST/PUT/DELETE ai/admin/provider、GET/POST/PUT/DELETE ai/admin/model，挂 ai:provider:* / ai:model:* 权限 + @OperationLog）。验证：`nest build` ✓、`eslint` ✓；冒烟（临时 3001 实例）：厂商分页含掩码 ✓、新增/编辑（apiKey 空串保留原值）✓、重复 code 20010 ✓、模型新增/查列表/重复 20012 ✓、厂商下有模型删除 20011 ✓、删模型后删厂商成功 ✓
 - 2026-08-24 修复（用户反馈）：seed 中 DeepSeek 示例模型名更新为 `deepseek-v4-flash`/`deepseek-v4-pro`/`deepseek-v4-flash-vision-exp`（替换旧的 deepseek-chat/deepseek-reasoner，已清旧数据重跑 seed，全库示例模型 7 个）
 - 2026-08-24/25 修复（联调发现，2 个前端 bug）：① 厂商模型管理选中厂商后模型列表空白——根因是后端 `GET /ai/admin/model` 返回裸数组 `[...]`，前端 `getModelPage` 却按 `PageResult`（`result.list`）取值拿到 undefined；改为后端保持数组、前端 `getModelList` 返回 `ModelItem[]` 直接接数组。② AI 对话页发送后回复不显示——根因是 Vue 3 响应式陷阱：`messages.value.push(assistantMsg)` 后数组内对象被 reactive 包装成 Proxy，但代码保存的 `assistantMsg` 原始对象引用再 `.content +=` 修改的是原始对象而非 Proxy，视图不更新；改为保存数组索引、经 `messages.value[assistantIndex]` 访问 Proxy 更新（后端 SSE 已实测正常逐字返回 delta）
+- 2026-08-25 T19：工具基础设施完成（`modules/ai/tool/`）。① schema 增补：新增 `ai_tool_call` 表（id/conversation_id/message_id/user_id/tool_name/params(json)/risk/status/result/error_msg，索引 (conversation_id)/(user_id,created_at)），并在 AiConversation/AiMessage/SysUser 加反向 relation `toolCalls`；迁移 `20260825041537_add_ai_tool_call` 已应用。② gateway 层抽出共用 `PermissionService`（`gateway/services/permission.service.ts`：hasPermission/hasAnyPermission 读 Redis user:perms，超管 '*' 放行）+ `permission.module.ts`（@Global 导出），PermissionGuard 改为复用 PermissionService（消除权限判定复制，工具层同源），app.module 注册 PermissionModule。③ `tool/`：tool.types.ts（AiTool 接口 + ToolContext/ToolRisk/ToolCallStatus）、tool.registry.ts（ToolRegistry：Map 注册表，register 重复名抛错 / get / getAll）、tool.module.ts（导出 ToolRegistry）、tools/ 占位目录（具体工具 T22 实现）。④ system 域 OnlineModule 补 `exports: [OnlineService]`（UserModule/RoleModule 已导出）。⑤ ai.module 挂载 ToolModule。验证：`prisma validate` ✓、`migrate` ✓（含 generate）、`nest build` ✓、`eslint` ✓；冒烟（临时 3001 实例）：admin 访问需权限接口（system/online、ai/admin/provider）code 0 ✓、访问无需权限接口 ai/models code 0 ✓、未登录 40100 ✓（PermissionGuard 改造后权限链路正常）
 
 ### P1 最终状态总结（三句话）
 
