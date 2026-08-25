@@ -13,9 +13,7 @@ import type { EngineChatMessage, EngineTool, EngineToolCall, EngineUsage } from 
 import { ToolRegistry } from '../tool/tool.registry'
 import type { AiTool } from '../tool/tool.types'
 import type { ChatDto } from './dto/chat.dto'
-
-/** P2a system prompt（简洁的助手设定，见 ARCHITECTURE §11） */
-const SYSTEM_PROMPT = '你是 iplat 平台的 AI 助手，请简洁、准确地回答用户的问题。'
+import { SystemPromptService } from './system-prompt.service'
 
 /** 聊天限流：20 次/分/用户 */
 const RATE_LIMIT = 20
@@ -65,6 +63,7 @@ export class ChatService {
     private readonly providerService: ProviderService,
     private readonly toolRegistry: ToolRegistry,
     private readonly permissionService: PermissionService,
+    private readonly systemPromptService: SystemPromptService,
   ) {}
 
   /** SSE 对话主流程（由 Controller 用 @Res() 传入原生 Response） */
@@ -194,7 +193,7 @@ export class ChatService {
     }
 
     // 7. 重建上下文（原 assistant 消息带 tool_calls + tool 结果回喂）
-    const { conversationId, model, messages } = await this.buildConfirmContext(record, toolResult)
+    const { conversationId, model, messages } = await this.buildConfirmContext(user, record, toolResult)
 
     // 8. 建新 assistant 消息（总结独立落库 + 独立结算）
     const assistantMessage = await this.prisma.aiMessage.create({
@@ -275,6 +274,7 @@ export class ChatService {
    * 原 assistant 消息带 tool_calls + tool 结果消息。
    */
   private async buildConfirmContext(
+    user: AuthUser,
     record: {
       conversationId: bigint
       messageId: bigint
@@ -309,8 +309,9 @@ export class ChatService {
     })
 
     const paramsObj = (record.params ?? {}) as Record<string, unknown>
+    const systemPrompt = await this.systemPromptService.build(user)
     const messages: EngineChatMessage[] = [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: systemPrompt },
       ...history.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
       // 原 assistant 消息带 tool_calls（用 ai_tool_call.id 作为 tool_call_id）
       {
@@ -371,7 +372,7 @@ export class ChatService {
     })
 
     // 8. 拼装上下文
-    const { messages, inputChars } = await this.buildContext(conversationId, userMessage.id, dto.content, inputBudget)
+    const { messages, inputChars } = await this.buildContext(user, conversationId, userMessage.id, dto.content, inputBudget)
 
     // 9. 确定可用工具（模型支持 + 按权限过滤）
     const { tools } = await this.getAvailableTools(user, model)
@@ -746,6 +747,7 @@ export class ChatService {
    * 拼装上下文：system prompt 最前 + 历史消息（按 inputBudget 从最新往回截取）+ 当前消息。
    */
   private async buildContext(
+    user: AuthUser,
     conversationId: bigint,
     excludeMessageId: bigint,
     currentContent: string,
@@ -757,8 +759,9 @@ export class ChatService {
       take: 50,
     })
 
-    const systemMsg: EngineChatMessage = { role: 'system', content: SYSTEM_PROMPT }
-    let used = SYSTEM_PROMPT.length + currentContent.length
+    const systemPrompt = await this.systemPromptService.build(user)
+    const systemMsg: EngineChatMessage = { role: 'system', content: systemPrompt }
+    let used = systemPrompt.length + currentContent.length
 
     const picked: EngineChatMessage[] = []
     for (const m of history) {
