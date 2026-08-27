@@ -69,6 +69,7 @@
 8. （验收发现）AppMain 页面切换的 `<Transition>` 多根节点警告：T10 已给 user/role/menu/dept 四页补单根包裹，但修复后未在浏览器专门复验警告是否消除（低风险，功能不受影响）；P2 新页面开发注意保持单根节点
 9. （运维建议）admin 初始密码仍为 seed 值 `Admin@123`，生产部署前务必通过个人中心修改；`.env` 中 JWT 双密钥亦为本地开发值，上线需替换
 10. （P2a 环境）`prisma generate` / `migrate dev` 末尾会报 `EPERM: rename query_engine-windows.dll.node.tmp* -> query_engine-windows.dll.node`——原因是运行中的 api 进程（`node dist/main.js`）占用该 dll；**类型生成与迁移本身均成功**（index.d.ts 已含新模型、迁移已应用），仅最后一步引擎 dll 替换失败，残留 `.tmp*` 文件在 node_modules 内无害。规避：如需完全干净可先停 api 服务再 generate，或忽略该告警
+11. （P2b 经验）DeepSeek 思考模式（V4 系列，如 deepseek-v4-flash）多轮工具调用有两个硬约束，已处理但后续接新模型/厂商需注意：① 回喂 assistant 消息的 tool_calls 必须用嵌套结构 `{ id, type:'function', function:{ name, arguments } }`（引擎层 `toOpenAIMessages` 已转换）；② 若模型返回了 `reasoning_content`（思考过程），回喂时必须原样回传，否则 400 `The reasoning_content in the thinking mode must be passed back to the API`（ai_message 已加 reasoning_content 字段持久化跨 confirm 请求回传）。接入非思考型模型（如 kimi/qwen/glm 标准版）时不受此约束，但代码已兼容
 
 ## 完成记录
 
@@ -112,6 +113,12 @@
 1. **跑通方式**：`docker compose up -d` 起 MySQL/Redis → `pnpm --filter @iplat/api start:prod`（dist 已构建）+ `pnpm --filter @iplat/web dev`，以 admin/Admin@123 登录后进入「AI 助手」三页（对话/开通套餐/我的用量）与「AI 管理」三页（厂商模型/套餐管理/用量明细）及系统管理「在线用户」；**对话需先在「厂商模型管理」给某厂商填真实 API Key 并把模型状态设为启用**（示例模型 seed 即 status=0 停用、apiKey 空），模型可用后新会话首条消息即可流式对话，积分按 ai_model 单价结算、套餐月度额度在「开通套餐」页自助开通/切换。
 2. **已知瑕疵**：① 模型单价/上下文长度等 ai_model 字段为运营人工录入，无真实厂商定价校验（按 PRD D5 人工换算口径，属预期）；② 上下文截取按「1 token≈1 字符」保守估算、usage 兜底同口径，未引入分词库（PRD 明确不做，多截不超限）；③ 套餐价格为展示字段，本期无真实支付/订单；④ SSE 接口无独立单元测试，仅靠冒烟脚本 + 联调覆盖（并发流 20007 逻辑经代码审查确认未实测并发）；⑤ 前端对话页浏览器交互验证由用户手动完成，AI 已完成 vue-tsc/eslint/vite build 三重静态校验。
 3. **P2b 注意**：P2b 做工具调用 Agent 化，**ai_model.supportTool 字段本期已建且已存值**（是否支持工具调用），但引擎层 `ProviderService.streamChat` 当前只传 messages、未传 tools/tool_choice，P2b 需扩展引擎层支持 tools 参数与 tool_calls 事件解析；system prompt 当前为固定简洁助手设定（`chat.service.ts` SYSTEM_PROMPT），P2b Agent 化需按工具定义动态拼装 system prompt；上下文截取的字符估算口径在 P2b 若引入工具调用（工具定义也占上下文）需重新评估预算比例（现输出预留 25%）；积分结算口径 P2b 可能需计入工具调用往返的 tokens，注意 settle 的幂等与 usage 兜底估算需一并扩展。
+
+### P2b 最终状态总结（三句话）
+
+1. **跑通方式**：起好 MySQL/Redis 与前后端后，进入「AI 助手 → AI 对话」；**工具调用需先在「厂商模型管理」把某模型 `support_tool` 设为 1 并填真实 API Key、状态启用**（模型选择器上带"工具"绿色小标表示支持）。对话中让 AI 做「查询/操作」类请求即可触发：read 类（查在线用户/查用户/查角色/查我的资料/查我的积分）自动执行并在回复上方显示折叠标签；write 类（踢用户下线/改我的资料）先弹「确认卡片」，点「确认执行」后流式返回总结为新的 AI 气泡（不续接）。
+2. **已知瑕疵**：① 工具名称/描述/JSON Schema 为静态编码，模型选错工具的概率靠 description 措辞缓解，未做意图澄清兜底；② 确认单过期态前端未精确计时（`isConfirmExpired` 恒返回 false，靠后端 20016 兜底，点过期卡片才提示"已过期"）；③ `buildConfirmContext` 用 ai_tool_call.id 自造 tool_call_id 回喂（上游原始 call_xxx id 未持久化，见 ARCHITECTURE §12.2 第 4 条"tool 消息不持久化"），各家兼容端点不校验该 id 具体值、实测 DeepSeek 可用；④ 工具调用轮次上限 3 与上下文截取预算（输出预留 25%）未随工具 schema 占用动态下调，工具多时可能超限；⑤ 前端工具交互（卡片/标签/确认后新气泡）的浏览器联调由用户手动完成，AI 已做 vue-tsc/eslint/vite build + 后端 SSE 实测覆盖。
+3. **P3 注意**：P3 做云盘（cloud 域），与 AI 域无直接耦合，但需沿用 P2b 沉淀的域门面纪律（跨域只经对方模块 exports 的 Service，`ToolBootstrap` 是范例）；若 P3 要为 AI 增加"文件/云盘"类工具，按 `tool.types.ts` 的 AiTool 接口在 `modules/ai/tool/tools/` 下加一个文件并在 `tool.bootstrap.ts` 注册即可，注意 handler 只注入 cloud 域 exports 的 Service；系统依赖 `@nestjs/schedule`/`openai`/`markdown-it` 已就位，P3 无需再引入。
 
 ---
 
