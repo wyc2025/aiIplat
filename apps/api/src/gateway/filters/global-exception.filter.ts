@@ -15,6 +15,8 @@ const HTTP_STATUS_TO_CODE: Record<number, number> = {
   401: ErrorCode.Unauthorized,
   403: ErrorCode.Forbidden,
   404: ErrorCode.NotFound,
+  // Multer 文件超限被 platform-express 包装为 PayloadTooLargeException（ARCHITECTURE-P3 §13.3）
+  413: ErrorCode.CloudFileTooLarge,
   429: ErrorCode.TooManyRequests,
 }
 
@@ -32,10 +34,22 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       return
     }
 
+    // Multer 上传错误：multer 为 @nestjs/platform-express 的传递依赖（pnpm 隔离不可直接 import），
+    // 按 MulterError 特征（name + code）鸭子识别（ARCHITECTURE-P3 §13.3：超限映射 30004）
+    if (this.isMulterError(exception)) {
+      const code =
+        exception.code === 'LIMIT_FILE_SIZE' ? ErrorCode.CloudFileTooLarge : ErrorCode.ParamInvalid
+      const message = exception.code === 'LIMIT_FILE_SIZE' ? '文件大小超出限制' : `上传处理失败（${exception.code}）`
+      response.status(200).json({ code, message, data: null })
+      return
+    }
+
     if (exception instanceof HttpException) {
       const status = exception.getStatus()
       const code = HTTP_STATUS_TO_CODE[status] ?? ErrorCode.InternalError
-      response.status(status).json({ code, message: this.resolveMessage(exception), data: null })
+      // Multer 超限（413）message 为英文 "File too large"，统一中文提示
+      const message = status === 413 ? '文件大小超出限制' : this.resolveMessage(exception)
+      response.status(status).json({ code, message, data: null })
       return
     }
 
@@ -43,6 +57,16 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     response
       .status(500)
       .json({ code: ErrorCode.InternalError, message: '服务器内部错误', data: null })
+  }
+
+  /** MulterError 鸭子识别（name 标识 + 携带 code 字段） */
+  private isMulterError(exception: unknown): exception is Error & { code: string } {
+    return (
+      exception instanceof Error &&
+      exception.name === 'MulterError' &&
+      'code' in exception &&
+      typeof (exception as { code?: unknown }).code === 'string'
+    )
   }
 
   /** 从 HttpException 中提取人类可读的错误信息（兼容字符串与对象两种响应体） */

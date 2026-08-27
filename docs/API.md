@@ -2,7 +2,7 @@
 
 > 本文档是前后端接口的唯一事实来源。与代码冲突时以本文档为准并修正代码。
 > 通用约定（统一响应、错误码、分页、bigint→string、时间格式）见 ARCHITECTURE.md 4.3 节，此处不再重复。
-> 当前覆盖：P2a（ai 域 + system 域在线用户增量）。system 域既有接口以代码与 Swagger 为准。
+> 当前覆盖：P2a（ai 域 + system 域在线用户增量）、P2b（AI 工具调用）、P3（cloud 域 + 头像上传）。system 域既有接口以代码与 Swagger 为准。
 
 ## ai 域错误码（20xxx）
 
@@ -192,3 +192,85 @@ Content-Type: application/json　Accept: text/event-stream
 - `approved=true`：执行工具 → 结果回喂上游 → **本接口以 SSE 流式返回**模型的后续总结（事件序列同 /ai/chat：meta / delta / done / error，含 15s 心跳）；**总结持久化为新的 assistant 消息并独立结算**，meta 事件携带新的 assistantMessageId，前端追加新气泡（不续接到卡片所在消息）
 - `approved=false`：ai_tool_call 置 rejected，回喂"用户已取消"，同样 SSE 返回模型的回应
 - 确认单为一次性：确认/取消后立即失效，重复提交返回 20016
+
+---
+
+## 5. P3 增补：云盘（cloud 域）
+
+### 5.1 错误码新增（30xxx 段）
+
+| code  | 含义                                                   | 前端处理               |
+| ----- | ------------------------------------------------------ | ---------------------- |
+| 30001 | 文件/文件夹不存在或无权访问                            | 刷新当前目录列表       |
+| 30002 | 同目录下已存在同名项                                   | 提示更换名称           |
+| 30003 | 存储配额不足                                           | 提示用量与配额         |
+| 30004 | 文件超出大小限制                                       | 提示上限值             |
+| 30005 | 该类型不支持预览                                       | 提示"请下载查看"       |
+| 30006 | 超出目录限制（深度>10 / 单目录>500 项 / 名称>64 字符） | 提示具体限制           |
+| 30007 | 回收站记录不存在                                       | 刷新回收站列表         |
+| 30008 | 分享链接无效（不存在/已停止/已过期/文件已删/未过审）   | 访客页提示失效         |
+| 30009 | 文件夹暂不支持创建公开链接                             | 提示                   |
+| 30010 | 文件未通过内容审核，禁止分享                           | 提示（开关开启后生效） |
+
+通用约定不变：bigint ID 序列化为字符串；文件大小字段（size/quota/used）为数字字节数，前端负责格式化展示。
+
+### 5.2 我的文件（均要求登录；数据按当前用户隔离）
+
+| 方法   | 路径                   | 权限              | 说明                                                                                                                                                                                                 |
+| ------ | ---------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | /api/cloud/file/list   | cloud:file:list   | 目录内容。入参 `parentId`（缺省 0=根）。返回 `{ list, quota, used }`；list **不分页**：文件夹在前（按名称升序），文件在后（按修改时间倒序）；item `{ id, name, isDir, size, ext, mime, updateTime }` |
+| GET    | /api/cloud/file/path   | cloud:file:list   | 面包屑链。入参 `id`；返回 `[{ id, name }]` 从根到当前（根目录返回 `[]`）                                                                                                                             |
+| POST   | /api/cloud/file/mkdir  | cloud:file:mkdir  | 入参 `{ parentId, name }`；同名冲突自动"(1)"；深度/数量/名称限制（30006）                                                                                                                            |
+| POST   | /api/cloud/file/rename | cloud:file:rename | 入参 `{ id, name }`；同名冲突**阻止**（30002）                                                                                                                                                       |
+| DELETE | /api/cloud/file/:id    | cloud:file:delete | 软删入回收站（R2：只标自身），挂 @OperationLog                                                                                                                                                       |
+| GET    | /api/cloud/file/quota  | cloud:file:list   | 我的配额 `{ quota, used }`（cloud_usage 懒创建）                                                                                                                                                     |
+
+### 5.3 上传 / 预览 / 下载（流式）
+
+| 方法 | 路径                         | 权限              | 说明                                                                                                                                                          |
+| ---- | ---------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST | /api/cloud/file/upload       | cloud:file:upload | multipart，字段名 `file`，query 带 `parentId`；单文件 ≤100MB（30004）；配额校验（30003）；同名自动"(1)"；多文件 = 前端逐文件调用（并发 ≤3）。挂 @OperationLog |
+| GET  | /api/cloud/file/preview/:id  | cloud:file:list   | 流式预览：白名单类型 inline + 真实 mime，**支持 Range**；非白名单返回 30005；文本 >2MB 返回 30005                                                             |
+| GET  | /api/cloud/file/download/:id | cloud:file:list   | 流式下载（attachment + 原文件名），支持 Range                                                                                                                 |
+
+三者均校验数据归属当前用户（30001）。
+
+### 5.4 回收站
+
+| 方法   | 路径                       | 权限                  | 说明                                                                                                                              |
+| ------ | -------------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | /api/cloud/recycle/list    | cloud:recycle:list    | 无 parentId → **顶层被删项**；带 `parentId` → 只读浏览该被删文件夹内容（前置校验目标处于已删子树）。item 同 5.2，附加 `deletedAt` |
+| GET    | /api/cloud/recycle/path    | cloud:recycle:list    | 被删文件夹内浏览的面包屑链（根固定为"回收站"）                                                                                    |
+| POST   | /api/cloud/recycle/restore | cloud:recycle:restore | 入参 `{ id }`；R5：父目录可用还原原位、否则落根目录；同名自动"(1)"；响应 message 说明还原位置                                     |
+| DELETE | /api/cloud/recycle/:id     | cloud:recycle:delete  | 彻底删除：递归整棵子树 + 物理删文件 + 连带删分享 + used 回扣，挂 @OperationLog                                                    |
+| DELETE | /api/cloud/recycle/clear   | cloud:recycle:delete  | 清空回收站（全部顶层被删项同上处理），挂 @OperationLog                                                                            |
+
+### 5.5 公开链接
+
+管理侧（登录）：
+
+| 方法 | 路径                    | 权限               | 说明                                                                                                                                                                                    |
+| ---- | ----------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST | /api/cloud/share/create | cloud:share:create | 入参 `{ fileId, expireDays }`（1/7/30/0，0=永久，缺省 7）；仅文件（30009）；审核门禁（R9，30010）；返回 `{ token, url, expireAt }`；同一文件重复创建 → 直接返回现存有效链接，不重复建行 |
+| GET  | /api/cloud/share/list   | cloud:share:list   | 我的分享（**不分页**，创建时间倒序）：`[{ id, fileId, fileName, size, token, visitCount, expireAt, status, createTime }]`；status 由后端计算返回：1 有效 / 0 已停止 / 2 已过期          |
+| POST | /api/cloud/share/stop   | cloud:share:stop   | 入参 `{ id }`，挂 @OperationLog                                                                                                                                                         |
+| POST | /api/cloud/share/extend | cloud:share:stop   | 入参 `{ id, expireDays }`（档位同上）；从 max(now, expireAt) 续期；已停止的链接不可延长（30008）                                                                                        |
+
+访客侧（**@Public 免登录**，独立限流 30 次/分/IP）：
+
+| 方法 | 路径                             | 说明                                                                |
+| ---- | -------------------------------- | ------------------------------------------------------------------- |
+| GET  | /api/cloud/share/:token          | 链接信息 `{ fileName, size, expireAt, visitCount }`；无效统一 30008 |
+| GET  | /api/cloud/share/:token/download | 流式下载（attachment），成功 visit_count+1；无效统一 30008          |
+
+### 5.6 配额管理（admin）
+
+| 方法 | 路径                   | 权限               | 说明                                                                                                   |
+| ---- | ---------------------- | ------------------ | ------------------------------------------------------------------------------------------------------ |
+| PUT  | /api/cloud/admin/quota | cloud:quota:update | 入参 `{ userId, quota }`（字节）；quota 下限 = 该用户当前 used；upsert（懒创建兼容），挂 @OperationLog |
+
+### 5.7 个人中心头像上传（P1 遗留补做，system 域）
+
+| 方法 | 路径                       | 权限     | 说明                                                                                                                                                                             |
+| ---- | -------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST | /api/system/profile/avatar | 登录即可 | multipart，字段名 `file`；jpg/jpeg/png/webp，≤5MB；落 StorageService + 更新 sys_user.avatar；返回 `{ avatar }`（URL）；GET /api/auth/userinfo 的 user 对象同步携带 `avatar` 字段 |

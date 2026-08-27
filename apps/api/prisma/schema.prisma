@@ -432,3 +432,74 @@ model AiToolCall {
   @@index([userId, createdAt])
   @@map("ai_tool_call")
 }
+
+// ========== 云盘域（P3） ==========
+
+/// 文件树（文件+文件夹统一建模）
+model CloudFile {
+  id          BigInt    @id @default(autoincrement())
+  /// 属主（逻辑关联 sys_user，禁 JOIN）
+  userId      BigInt    @map("user_id")
+  /// 0 = 根目录
+  parentId    BigInt    @default(0) @map("parent_id")
+  /// 文件/文件夹名（不含路径）
+  name        String    @map("name") @db.VarChar(64)
+  /// 1 文件夹 / 0 文件
+  isDir       Int       @map("is_dir") @db.TinyInt
+  /// 字节；文件夹恒 0
+  size        BigInt    @default(0) @map("size")
+  mime        String?   @map("mime") @db.VarChar(100)
+  /// 小写不带点，预览白名单判断用
+  ext         String?   @map("ext") @db.VarChar(20)
+  /// StorageService 相对路径（yyyyMM/uuid.ext）；文件夹为 null
+  storageName String?   @map("storage_name") @db.VarChar(120)
+  /// 0 未审核 / 1 通过 / 2 驳回 / 3 审核中（D13 预留）
+  auditStatus Int       @default(0) @map("audit_status") @db.TinyInt
+  /// 非空 = 在回收站（R2 只标记自身）
+  deletedAt   DateTime? @map("deleted_at")
+  createTime  DateTime  @default(now()) @map("create_time")
+  updateTime  DateTime  @updatedAt @map("update_time")
+
+  shares CloudShare[]
+
+  @@index([userId, parentId, deletedAt])
+  @@index([userId, deletedAt])
+  @@map("cloud_file")
+}
+
+/// 公开链接
+model CloudShare {
+  id         BigInt    @id @default(autoincrement())
+  /// 创建者
+  userId     BigInt    @map("user_id")
+  /// 逻辑关联 cloud_file（仅文件，is_dir=0）
+  fileId     BigInt    @map("file_id")
+  /// 随机 URL-safe 串（crypto.randomBytes）
+  token      String    @unique @map("token") @db.VarChar(32)
+  /// 下载成功 +1
+  visitCount Int       @default(0) @map("visit_count")
+  /// null = 永久
+  expireAt   DateTime? @map("expire_at")
+  /// 1 有效 / 0 已停止（过期不置状态，靠 expire_at 判定）
+  status     Int       @default(1) @map("status") @db.TinyInt
+  createTime DateTime  @default(now()) @map("create_time")
+
+  file CloudFile @relation(fields: [fileId], references: [id])
+
+  @@index([fileId])
+  @@index([userId])
+  @@map("cloud_share")
+}
+
+/// 配额
+model CloudUsage {
+  /// 懒创建（首次上传/查询配额时）
+  userId     BigInt   @id @map("user_id")
+  /// 字节，默认 CLOUD_DEFAULT_QUOTA（1GB）
+  quota      BigInt   @map("quota")
+  /// 字节（R3 记账规则）
+  used       BigInt   @default(0) @map("used")
+  updateTime DateTime @updatedAt @map("update_time")
+
+  @@map("cloud_usage")
+}

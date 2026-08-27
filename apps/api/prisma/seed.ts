@@ -56,6 +56,8 @@ const menuTree: MenuSeed[] = [
           { name: '用户删除', type: 3, perms: 'system:user:delete', sort: 4 },
           { name: '重置密码', type: 3, perms: 'system:user:reset-password', sort: 5 },
           { name: '分配角色', type: 3, perms: 'system:user:assign-role', sort: 6 },
+          // P3：云盘配额调整（cloud 域按钮挂在用户管理下，属 admin 能力，不给 common）
+          { name: '调整配额', type: 3, perms: 'cloud:quota:update', sort: 7 },
         ],
       },
       {
@@ -250,6 +252,60 @@ const menuTree: MenuSeed[] = [
       },
     ],
   },
+  // 云盘管理（P3）：登录用户均可访问的目录，走正常 RBAC（cloud:* 权限标识）
+  {
+    name: '云盘管理',
+    type: 1,
+    path: '/cloud',
+    icon: 'Folder',
+    sort: 5,
+    children: [
+      {
+        name: '我的文件',
+        type: 2,
+        path: 'cloud/file',
+        component: 'cloud/file/index',
+        perms: 'cloud:file:list',
+        icon: 'FolderOpened',
+        sort: 1,
+        children: [
+          { name: '文件查询', type: 3, perms: 'cloud:file:list', sort: 1 },
+          { name: '上传', type: 3, perms: 'cloud:file:upload', sort: 2 },
+          { name: '新建文件夹', type: 3, perms: 'cloud:file:mkdir', sort: 3 },
+          { name: '重命名', type: 3, perms: 'cloud:file:rename', sort: 4 },
+          { name: '删除', type: 3, perms: 'cloud:file:delete', sort: 5 },
+          { name: '创建分享', type: 3, perms: 'cloud:share:create', sort: 6 },
+        ],
+      },
+      {
+        name: '公开链接',
+        type: 2,
+        path: 'cloud/share',
+        component: 'cloud/share/index',
+        perms: 'cloud:share:list',
+        icon: 'Link',
+        sort: 2,
+        children: [
+          { name: '分享查询', type: 3, perms: 'cloud:share:list', sort: 1 },
+          { name: '停止/延长', type: 3, perms: 'cloud:share:stop', sort: 2 },
+        ],
+      },
+      {
+        name: '回收站',
+        type: 2,
+        path: 'cloud/recycle',
+        component: 'cloud/recycle/index',
+        perms: 'cloud:recycle:list',
+        icon: 'Delete',
+        sort: 3,
+        children: [
+          { name: '回收站查询', type: 3, perms: 'cloud:recycle:list', sort: 1 },
+          { name: '恢复', type: 3, perms: 'cloud:recycle:restore', sort: 2 },
+          { name: '彻底删除', type: 3, perms: 'cloud:recycle:delete', sort: 3 },
+        ],
+      },
+    ],
+  },
   // 个人中心：路由存在但不进侧边栏菜单（visible=0）
   {
     name: '个人中心',
@@ -257,7 +313,7 @@ const menuTree: MenuSeed[] = [
     path: '/profile',
     component: 'profile/index',
     icon: 'Postcard',
-    sort: 5,
+    sort: 6,
     visible: 0,
   },
 ]
@@ -331,6 +387,32 @@ async function main() {
         where: { roleId_menuId: { roleId: commonRole.id, menuId: menu.id } },
         update: {},
         create: { roleId: commonRole.id, menuId: menu.id },
+      })
+    }
+  }
+
+  // P3：common 角色授予「云盘管理」整棵子树（不含 cloud:quota:update，该按钮属 admin）
+  const cloudDir = await prisma.sysMenu.findFirst({
+    where: { parentId: BigInt(0), name: '云盘管理' },
+  })
+  if (cloudDir) {
+    // 收集云盘管理整棵子树（目录 + 菜单 + 按钮），排除 cloud:quota:update
+    const cloudMenuIds: bigint[] = [cloudDir.id]
+    const pending: bigint[] = [cloudDir.id]
+    while (pending.length > 0) {
+      const parentId = pending.pop()!
+      const children = await prisma.sysMenu.findMany({ where: { parentId } })
+      for (const child of children) {
+        if (child.perms === 'cloud:quota:update') continue
+        cloudMenuIds.push(child.id)
+        pending.push(child.id)
+      }
+    }
+    for (const menuId of cloudMenuIds) {
+      await prisma.sysRoleMenu.upsert({
+        where: { roleId_menuId: { roleId: commonRole.id, menuId } },
+        update: {},
+        create: { roleId: commonRole.id, menuId },
       })
     }
   }
@@ -510,7 +592,7 @@ async function main() {
   }
 
   console.log(
-    `seed 完成：角色 2 个，菜单新增 ${createdMenuIds.length} 条，admin 用户就绪，内置字典 2 组，AI 厂商 4 家、示例模型 7 个、套餐 2 个`,
+    `seed 完成：角色 2 个，菜单新增 ${createdMenuIds.length} 条，admin 用户就绪，内置字典 2 组，AI 厂商 4 家、示例模型 7 个、套餐 2 个，云盘菜单树 + common 授权已就绪`,
   )
 }
 

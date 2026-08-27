@@ -92,6 +92,28 @@ export const ErrorCode = {
   AiToolConfirmExpired: 20016,
   /** 工具执行失败 */
   AiToolFailed: 20017,
+
+  // ========== cloud 域（30xxx，见 API.md §5.1） ==========
+  /** 文件/文件夹不存在或无权访问 */
+  CloudFileNotFound: 30001,
+  /** 同目录下已存在同名项 */
+  CloudNameConflict: 30002,
+  /** 存储配额不足 */
+  CloudQuotaExceeded: 30003,
+  /** 文件超出大小限制 */
+  CloudFileTooLarge: 30004,
+  /** 该类型不支持预览 */
+  CloudPreviewNotSupported: 30005,
+  /** 超出目录限制（深度>10 / 单目录>500 项 / 名称>64 字符） */
+  CloudDirLimitExceeded: 30006,
+  /** 回收站记录不存在 */
+  CloudRecycleNotFound: 30007,
+  /** 分享链接无效（不存在/已停止/已过期/文件已删/未过审） */
+  CloudShareInvalid: 30008,
+  /** 文件夹暂不支持创建公开链接 */
+  CloudShareNotAllowed: 30009,
+  /** 文件未通过内容审核，禁止分享 */
+  CloudAuditNotPassed: 30010,
 } as const
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode]

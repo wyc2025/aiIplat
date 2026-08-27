@@ -15,6 +15,7 @@ import { PermissionModule } from './gateway/services/permission.module'
 import { PrismaModule } from './infra/prisma/prisma.module'
 import { RedisModule } from './infra/redis/redis.module'
 import { AiModule } from './modules/ai/ai.module'
+import { CloudModule } from './modules/cloud/cloud.module'
 import { AuthModule } from './modules/system/auth/auth.module'
 import { DashboardModule } from './modules/system/dashboard/dashboard.module'
 import { DeptModule } from './modules/system/dept/dept.module'
@@ -36,6 +37,7 @@ import { UserModule } from './modules/system/user/user.module'
     RedisModule,
     PermissionModule,
     AiModule,
+    CloudModule,
     AuthModule,
     DashboardModule,
     UserModule,
