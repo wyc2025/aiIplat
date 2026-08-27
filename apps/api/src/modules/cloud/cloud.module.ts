@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common'
 import { FileModule } from './file/file.module'
+import { RecycleModule } from './recycle/recycle.module'
+import { ShareModule } from './share/share.module'
 import { TransferModule } from './transfer/transfer.module'
 
 /**
@@ -8,7 +10,7 @@ import { TransferModule } from './transfer/transfer.module'
  * 域门面 CloudFacade（hasFiles）随 T30 落地；StorageService 已于 T27 在 infra/storage 就绪。
  */
 @Module({
-  imports: [FileModule, TransferModule],
-  exports: [FileModule, TransferModule],
+  imports: [FileModule, TransferModule, RecycleModule, ShareModule],
+  exports: [FileModule, TransferModule, RecycleModule, ShareModule],
 })
 export class CloudModule {}
