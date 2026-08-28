@@ -19,14 +19,14 @@ export class RecycleService {
 
   /**
    * 回收站列表：
-   * - 无 parentId → 顶层被删项（R2 算法，§13.4 禁 JOIN 应用层过滤）
+   * - 无 parentId → 顶层被删项（R2 算法，ARCHITECTURE.md §4.7 禁 JOIN 应用层过滤）
    * - 带 parentId → 只读浏览该被删文件夹内容（前置校验目标处于已删子树内）
    */
   async list(userId: bigint, query: RecycleListQueryDto) {
-    if (query.parentId == null) {
+    // parentId 缺省或 0 = 顶层被删项（前端进入回收站根会传 parentId=0）
+    if (!query.parentId) {
       const topLevel = await this.findTopLevelDeleted(userId)
-      const list = topLevel.map((f) => this.toItem(f))
-      return { list }
+      return topLevel.map((f) => this.toItem(f))
     }
 
     // 只读浏览：前置校验目标自身已删，或其任一祖先已删（即处于 deleted 子树内）
@@ -48,13 +48,13 @@ export class RecycleService {
     const files = children
       .filter((f) => f.isDir === 0)
       .sort((a, b) => b.updateTime.getTime() - a.updateTime.getTime())
-    return { list: [...dirs, ...files].map((f) => this.toItem(f)) }
+    return [...dirs, ...files].map((f) => this.toItem(f))
   }
 
   /** 回收站面包屑链：根固定为「回收站」，后续为从被删项向上到其直接子级（自身必为 deleted 根） */
   async path(userId: bigint, id: bigint) {
-    // 根（回收站本身）
-    if (id === BigInt(0)) return [{ id: BigInt(0), name: '回收站' }]
+    // 根（回收站本身）返回空链：根"回收站"由前端固定渲染（对齐 file.path 约定：链不含根）
+    if (id === BigInt(0)) return []
 
     const target = await this.prisma.cloudFile.findFirst({ where: { id, userId } })
     if (!target || !(await this.isInDeletedSubtree(target))) {
@@ -74,7 +74,7 @@ export class RecycleService {
       current = parent
     }
     upward.reverse()
-    return [{ id: BigInt(0), name: '回收站' }, ...upward]
+    return upward
   }
 
   /**
@@ -120,7 +120,7 @@ export class RecycleService {
   }
 
   /**
-   * 彻底删除（R3/R8，§13.4）：BFS 收集整棵子树（自身 + 全部后代）→ 连带删分享 →
+   * 彻底删除（R3/R8，ARCHITECTURE.md §4.7）：BFS 收集整棵子树（自身 + 全部后代）→ 连带删分享 →
    * 删物理文件 → 删 DB 行 → used 回扣 Σ文件 size（不小于 0 兜底）。
    */
   async purge(userId: bigint, id: bigint) {
@@ -150,7 +150,7 @@ export class RecycleService {
   // ==================== 私有方法 ====================
 
   /**
-   * 顶层被删项（R2 算法，§13.4 禁 JOIN）：
+   * 顶层被删项（R2 算法，ARCHITECTURE.md §4.7 禁 JOIN）：
    * 自身 deleted_at 非空 且 沿 parent_id 上溯无 deleted 祖先。
    * 实现：查该用户全部 deleted 项 → 集合内比对祖先；祖先不在集合时补查父行 deleted_at。
    */

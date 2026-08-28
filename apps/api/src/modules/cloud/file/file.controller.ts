@@ -1,8 +1,10 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Query } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Query, Res } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
+import type { Response } from 'express'
 import { CurrentUser } from '../../../gateway/decorators/current-user.decorator'
 import { OperationLog } from '../../../gateway/decorators/operation-log.decorator'
 import { RequirePermission } from '../../../gateway/decorators/require-permission.decorator'
+import { SkipTransform } from '../../../gateway/decorators/skip-transform.decorator'
 import { FileListQueryDto, FilePathQueryDto, MkdirDto, RenameDto } from './dto/file.dto'
 import { FileService } from './file.service'
 
@@ -55,5 +57,20 @@ export class FileController {
   @ApiOperation({ summary: '删除（软删入回收站，R2 只标自身）' })
   remove(@CurrentUser('userId') userId: string, @Param('id', ParseIntPipe) id: number) {
     return this.fileService.remove(BigInt(userId), BigInt(id))
+  }
+
+  @Get('avatar/:id')
+  @SkipTransform()
+  @RequirePermission('cloud:file:list')
+  @ApiOperation({ summary: '头像预览（仅当前用户自己的头像可读）' })
+  async avatar(
+    @CurrentUser('userId') userId: string,
+    @Param('id', ParseIntPipe) id: number,
+    @Res() res: Response,
+  ): Promise<void> {
+    const { stream, mime } = await this.fileService.getAvatarStream(BigInt(id), BigInt(userId))
+    res.setHeader('Content-Type', mime || 'application/octet-stream')
+    res.setHeader('Cache-Control', 'no-cache')
+    stream.pipe(res)
   }
 }

@@ -2,7 +2,7 @@
 
 > 本文件由 AI 在每完成一个任务后更新。开工前先读本文件，从"进行中 / 下一个待办"继续。
 
-## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24）
+## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32）
 
 ## 里程碑总览
 
@@ -11,7 +11,7 @@
 | P1   | 后台管理底座                      | 已完成 |
 | P2a  | AI 模块：对话 + 套餐积分（ai 域） | 已完成 |
 | P2b  | AI 模块：工具调用 Agent 化        | 已完成 |
-| P3   | 云盘模块（cloud 域）              | 进行中 |
+| P3   | 云盘模块（cloud 域）              | 已完成 |
 | P4   | 个人网站模块（site 域）           | 未开始 |
 
 ## P2a 任务拆解（AI 模块）
@@ -47,9 +47,98 @@
 | T27  | 上传/下载/预览：流式上传（tmp→正式区、配额校验 30003、used 记账）、预览/下载流（Range 支持、白名单 30005）、StorageService 方法按需扩展并回写资产表                                                        | 已完成 |
 | T28  | 回收站：顶层被删项查询（R2 算法）/ 只读浏览 / 还原（R5 + 自动重命名）/ 彻底删除（递归子树 + 连带删分享 + used 回扣 R3）/ 清空                                                                              | 已完成 |
 | T29  | 公开链接：create（仅文件 + 审核门禁 R9）/ list / stop / extend + 免登录访问与下载（@Public + 限流 + visit_count）                                                                                          | 已完成 |
-| T30  | admin 配额调整接口 + 用户管理页配额按钮 + 个人中心头像上传（P1 遗留）+ 删用户预检接 cloud 门面 hasFiles（R10）                                                                                             | 待办   |
-| T31  | 前端三页：FileExplorer（面包屑/双击/URL 同步/上传进度/预览弹层）+ 回收站页 + 公开链接页（复用 ProTable）+ 访客分享页（独立路由）+ 菜单接入                                                                 | 待办   |
-| T32  | 联调验收（对照第 6 节 14 条）+ 文档回写（资产表 / PROGRESS 完成记录）                                                                                                                                      | 待办   |
+| T30  | admin 配额调整接口 + 用户管理页配额按钮 + 个人中心头像上传（P1 遗留）+ 删用户预检接 cloud 门面 hasFiles（R10）                                                                                             | 已完成 | 2026-08-27 |
+| T31  | 前端三页：FileExplorer（面包屑/双击/URL 同步/上传进度/预览弹层）+ 回收站页 + 公开链接页（复用 ProTable）+ 访客分享页（独立路由）+ 菜单接入                                                                 | 已完成 | 2026-08-27 |
+| T32  | 联调验收（对照 PRD-P3 第 6 节 14 条）+ 文档回写（资产表 / PROGRESS 完成记录）                                                                                                                              | 已完成 | 2026-08-28 |
+
+### T31 完成记录（2026-08-27）
+
+**前端**
+
+- 新增类型 `types/api.d.ts`：CloudFile / BreadcrumbItem / CloudQuota / CloudShare / CloudRecycleItem / CloudSharePublic
+- 新增 `api/cloud/file.ts`（list/path/quota/mkdir/rename/remove/upload，upload 支持 onUploadProgress 进度回调，直连 instance + token）、`api/cloud/recycle.ts`、`api/cloud/share.ts`（含 publicShareInfo / publicDownloadUrl 访客侧直链）
+- 我的文件页 `views/cloud/file/index.vue`（FileExplorer）：面包屑、双击进文件夹、URL `?dir=` 同步（watch + onMounted）、上传（el-upload 原生 input 多选 + 进度条）、新建文件夹/重命名弹窗、删除（软删入回收站）、创建分享、预览弹层（图片/视频/文本/PDF，其余降级下载）、配额进度条
+- 回收站页 `views/cloud/recycle/index.vue`：顶层被删项列表、双击进文件夹浏览、还原/彻底删除/清空，面包屑
+- 公开链接页 `views/cloud/share/index.vue`：我的分享列表（有效期/访问次数/状态）、复制链接、延长（1/7/30/0 天）、停止
+- 访客分享页 `views/cloud/share-visitor/index.vue` + `router/index.ts` 静态路由 `/share/:token`（独立根路由，无布局、免登录），调 publicShareInfo + 直链下载
+- 三页均遵循 AGENTS 交付要求：加载中/空/失败三态（ProTable + el-empty/el-result）、权限 `v-permission` 门控、ID 字符串化返回大整数；菜单接入复用 seed 已注册组件路径（cloud/file/index、cloud/share/index、cloud/recycle/index），动态路由自动注册，无需改后端
+
+**验证**
+
+- `pnpm -C apps/web build`（vue-tsc --noEmit + vite build）0 错误；`read_lints` 0 错误
+- 后端无改动（T27/T30 已落地全部 cloud 接口），本任务为前端落地
+
+**待办/遗留**
+
+- 上传进度用 `instance` 直连（request 封装不暴露 onUploadProgress），属必要绕过
+- 访客页 `publicShareInfo` 走统一 request（已登录态会带 token，@Public 端点兼容；匿名态不报错），实现可接受
+
+**联调验收修复（2026-08-27 浏览器实测，agent-browser 真实 Chromium + curl）**
+
+- 实测发现访客分享页 `/share/:token` 在匿名态被路由守卫重定向到 /login（快照显示登录页），功能不可用。根因：
+  1. **前端守卫误拦**：`router/guard.ts` 的 `WHITE_LIST` 仅含 `/login`、`/404`，访客分享页（动态路由外的独立根路由）未加入免登录白名单，守卫对「无 token + 非白名单」一律 `return { path: '/login' }`。修复：新增 `isPublicRoute(to)`，对 `to.name === 'share-visitor'` 始终放行（免登录公开页）。
+  2. **后端误加冲突路由**：曾误在 `share.controller.ts`（管理侧）补 `@Get(':token')` / `:token/download` 两个路由，与已存在的独立 `share-public.controller.ts`（`@Public`，访客侧 info/download）路由路径冲突，Nest 启动报路由冲突。修复：回退 `share.controller.ts` 的多余路由，访客接口统一由 `SharePublicController` 提供（与 §4.7 / §4.1 目录结构一致）。
+- 配套对齐：`share.service.ts` 的 `publicInfo` 返回结构补 `token / mime / isExpired` 字段（`size` 转字符串），与前端 `CloudSharePublic` 类型对齐（原实现缺字段，前端会取 undefined）。
+- 验证（修复后）：agent-browser 打开 `/share/<token>` → 渲染文件名/大小/有效期/下载次数，**不再跳登录**；点击「下载文件」→ 无报错且后端 `visitCount` 0→1；curl `GET /api/cloud/share/<token>` 免登录返回完整分享信息（code 0）；`nest build` + `vue-tsc` + `read_lints` 0 错误。
+- 文档回写：ARCHITECTURE.md §3.2 新增「免登录公开路由」约束（列出 `/login`、`/404`、`/share/:token`，要求新增匿名路由同步在 guard.ts 的 `isPublicRoute` 注册），防重蹈覆辙。
+
+**联调修复（2026-08-27 浏览器实测，续）：「我的文件」页一直转圈 / 上传·新建·刷新无响应**
+
+- 现象：进入「我的文件」菜单，表格空白一直加载态，上传/新建文件夹/刷新按钮点击无反应；浏览器 console 报 `[Vue warn] Invalid prop: type check failed for prop "data". Expected Array, got Object` + `Unhandled error during execution of watcher callback`（at <Index>）。
+- 根因：后端 `GET /cloud/file/list` 返回 `{ list, quota, used }`（`CloudFileList`），但前端 `api/cloud/file.ts` 的 `listFiles` 类型被错误标注为 `CloudFile[]`，`FileExplorer.loadDir` 直接 `list.value = files`（把整个对象当数组赋给 `list`）→ `el-table :data` 收到 Object → 渲染报错、组件更新循环中断，所有交互失效。
+- 修复：
+  1. `types/api.d.ts` 新增 `CloudFileList { list: CloudFile[]; quota: string; used: string }`；
+  2. `api/cloud/file.ts` 的 `listFiles` 返回类型改为 `CloudFileList`；
+  3. `FileExplorer.loadDir` 改为 `list.value = filesRes.list ?? []`、`quota/used` 取 `filesRes.quota/used`（删除多余的 `getQuota()` 二次请求，list 接口已含配额联动）；并清理未使用的 `getQuota`/`CloudQuota` import。
+- 验证（agent-browser 全新会话，排除 HMR 残留）：「我的文件」表格正常渲染 2 条文件（名称/大小/修改时间/操作齐全），点击刷新列表保持，console 无 `Invalid prop`/`Unhandled error` 警告；`vue-tsc` + `read_lints` 0 错误。
+
+**联调修复（2026-08-27 浏览器实测，续 2）：前端「上传文件」失败**
+
+- 现象：点「上传」选文件后报 `Cannot POST /api/api/cloud/file/upload?parentId=90`（双 `/api` 前缀 → 404）；前期亦有无提示失败。
+- 根因（两个叠加 bug，均在 `api/cloud/file.ts` 的 `uploadFile`）：
+  1. **双 `/api` 前缀**：`uploadFile` 自己拼了 `base = VITE_API_BASE_URL ?? '/api'` 作 URL 前缀，又交给 `request.post`（其底层 axios 实例 `baseURL` 已是 `/api`）→ 实际请求 `/api/api/cloud/file/upload` → 404。
+  2. **`request.post` 封装不支持第 3 个 config 参数**：`utils/request.ts` 的 `post(url, data?)` 只透传 data，导致 `uploadFile` 传的 `headers`/`onUploadProgress` 被忽略（进度条永不更新）；且旧代码还写了 `.then((res)=>res.data.code)` 解包，而响应拦截器已对 `code===0` 解包为业务 `data`，`res` 已是 `CloudFile`，`res.data` 为 `undefined` → 抛 `TypeError`。
+- 修复：改用 `utils/request.ts` 默认导出的原始 axios 实例 `instance`（自带 `baseURL=/api`、支持 config 第 3 参、响应拦截器同样解包）；`uploadFile` 用相对路径 `/cloud/file/upload?parentId=...` 去掉手拼 `base`，`onUploadProgress` 正确透传（进度条恢复），返回类型断言为 `Promise<CloudFile>`（拦截器已解包）；删除旧的 `.then` 错误解包与多余的 `ApiResult` import。
+- 验证：后端 `curl -F file=@x` 对 `/api/cloud/file/upload` 实测 `code:0`；前端修复后请求路径为单 `/api` 前缀；`read_lints` 0 错误。注：agent-browser 因隐藏 `<input type=file>` 限制无法自动触发上传 UI，建议浏览器硬刷新后手动点「上传」实测（后端链路已证通）。
+
+### T30 完成记录（2026-08-27）
+
+**后端**
+
+- 错误码：`CloudUserHasFiles = 30011`（common/constants/error-code.ts）
+- cloud 域门面 `CloudFacade`（modules/cloud/facade/cloud-facade.service.ts，随 CloudModule 导出）：
+  - `hasFiles(userId)`：删用户预检（R10），system 域经此门面调用，禁止跨域 import FileService
+  - `saveAvatar(userId, meta)`：头像落盘后登记 cloud_file（虚拟 parentId=-1，不污染根目录列表）+ used 同步 + 旧头像软删回退；返回可访问 url
+- cloud AdminModule（modules/cloud/admin/）：
+  - `PUT /api/cloud/admin/quota`（`cloud:admin:quota`）：调整配额，**配额下限 = 当前已用容量**（低于则 30001）
+  - `GET /api/cloud/admin/quota?userId=`（`cloud:admin:quota`）：查询已用容量（前端弹窗下限提示）
+  - `GET /api/cloud/admin/stats`（`cloud:admin:quota`）：文件数/总容量/活跃用户数
+- 删用户预检：UserService.remove 引入 CloudModule 后调 `cloud.hasFiles`，有文件抛 30011（R10）
+- 个人中心头像上传：`POST /api/system/user/profile/avatar`（`multipart/form-data`，复用 infra 公共上传引擎，图片 ≤5MB 校验），落盘经 StorageService.moveToStorage → CloudFacade.saveAvatar → 写回 sys_user.avatar；userinfo 已含 avatar 字段自动返回
+- 头像预览端点：`GET /api/cloud/file/avatar/:id`（`cloud:file:list`，仅当前用户自己的头像可读，@SkipTransform 流式）
+- 公共资产上移：multer 上传引擎 `createTmpUploadStorage` 抽到 infra/storage/tmp-storage.ts，cloud/transfer 与 system/avatar 统一复用（消除重复实现）
+
+**前端**
+
+- `api/system/user.ts`：`updateUserQuota` / `getUserQuota`；`api/system/profile.ts`：`uploadAvatar`（FormData）
+- 用户管理页（system/user）：操作列「配额」按钮（`cloud:admin:quota`），弹窗展示已用容量（下限）并以 MB 输入配额上限
+- 个人中心（profile）：头像区支持点击上传（el-upload，图片 ≤5MB 前端校验），成功后同步顶栏 userinfo.avatar
+
+**待办 / 遗留**
+
+- seed 已补充/统一权限标识 `cloud:admin:quota`（原误写 `cloud:quota:update`），common 角色授权排除该标识
+- 头像记录复用 cloud_file 表（parentId=-1），与配额 used 联动；删除用户预检已覆盖头像记录
+- 联调已实测（2026-08-27，服务运行中 curl 实测）：userinfo 同步 avatar ✓、头像上传返回 `/api/cloud/file/avatar/:id` ✓、头像预览流 `Content-Type:image/png` 首字节 PNG 签名 ✓、配额 used 联动 +69 字节 ✓、配额下限校验 40001 ✓、删用户预检有头像 `30011` 拦截 / 删头像后放行 ✓；nest build + vue-tsc build 0 错误
+
+**开发过程文档与实际差异（已处理）**
+
+1. 权限标识文档不一致：增补文档 §13.9 与初版 ARCHITECTURE §5 均写 `cloud:quota:update`，而后端实际用 `cloud:admin:quota`；已统一为 `cloud:admin:quota`（seed / ARCHITECTURE.md §4.7+§5 / API.md §5.6 全部对齐）。
+2. ARCHITECTURE.md §4.7 错误码表（并入时抄写错位）：原表 30001~30008 文案与 error-code.ts 实际映射整体错 2 位（如 30001 错写"空间不足"实为"文件不存在"）。已用增补文档 §13.10 正确内容覆盖修正；运行时实测 30001/30011 透传正确。
+3. 文档 §4.7「分享 is_public 字段」「访问上限 max_visits」属超前描述：实际 schema / ShareService 无 is_public 字段、无 max_visits 上限逻辑（访客靠 @Public + token，限流 30 次/分/IP 已实现）。已改文档为「is_public 预留、访问次数上限待实现、独立限流已实现」。
+4. 文档 §5 cloud_share 索引写 `(user_id, status, expire_at)`，实际 schema/migration 仅 `@@index([fileId])`、`@@index([userId])`；已据实修正并注明复合索引待补。
+5. CloudFacade.AvatarMeta 冗余 `url` 字段（cloud_file 无 url 列）：已删除该字段及 ProfileService 传参。
+6. 失效章节号注释（recycle/share 中 §13.x / API.md §5.5）：已改为语义说明或 ARCHITECTURE.md §4.7 引用。
+   | T32 | 联调验收（对照第 6 节 14 条）+ 文档回写（资产表 / PROGRESS 完成记录） | 待办 |
 
 ## 第一期任务拆解（P1 底座）
 
@@ -68,7 +157,7 @@
 
 ## 进行中
 
-（空，T29 已完成，待 T30 admin 配额 + 头像上传 + 删用户预检）
+（空；P3 全部完成（T25~T32），下一阶段 P4 个人网站模块（site 域）未开始）
 
 ## 遗留问题
 
@@ -83,7 +172,7 @@
 9. （运维建议）admin 初始密码仍为 seed 值 `Admin@123`，生产部署前务必通过个人中心修改；`.env` 中 JWT 双密钥亦为本地开发值，上线需替换
 10. （P2a 环境）`prisma generate` / `migrate dev` 末尾会报 `EPERM: rename query_engine-windows.dll.node.tmp* -> query_engine-windows.dll.node`——原因是运行中的 api 进程（`node dist/main.js`）占用该 dll；**类型生成与迁移本身均成功**（index.d.ts 已含新模型、迁移已应用），仅最后一步引擎 dll 替换失败，残留 `.tmp*` 文件在 node_modules 内无害。规避：如需完全干净可先停 api 服务再 generate，或忽略该告警
 11. （P2b 经验）DeepSeek 思考模式（V4 系列，如 deepseek-v4-flash）多轮工具调用有两个硬约束，已处理但后续接新模型/厂商需注意：① 回喂 assistant 消息的 tool_calls 必须用嵌套结构 `{ id, type:'function', function:{ name, arguments } }`（引擎层 `toOpenAIMessages` 已转换）；② 若模型返回了 `reasoning_content`（思考过程），回喂时必须原样回传，否则 400 `The reasoning_content in the thinking mode must be passed back to the API`（ai_message 已加 reasoning_content 字段持久化跨 confirm 请求回传）。接入非思考型模型（如 kimi/qwen/glm 标准版）时不受此约束，但代码已兼容
-12. （T27 核实的既有偏差）ARCHITECTURE §4.6 规划的 system 域通用上传口 `POST /api/system/file/upload`（Multer 10MB，落 sys_file）**文档存在、代码从未实现**（P1 实际只建了 upload 配置与空 storage 目录）；T30 头像上传时落地，届时按 5.7 契约实现或同步修正 §4.6 表述
+12. ~~（T27 核实的既有偏差）ARCHITECTURE §4.6 规划的 system 域通用上传口 `POST /api/system/file/upload`（Multer 10MB，落 sys_file）文档存在、代码从未实现~~ **已处理（2026-08-28）**：T30 头像上传实际经 `CloudFacade.saveAvatar` 落 cloud_file（虚拟 parentId=-1）实现，ARCHITECTURE §4.6 已修订为实际方案，本遗留关闭；sys_file 表暂无写入方，通用上传口如有新增消费场景再另起任务
 
 ## 完成记录
 
@@ -127,6 +216,116 @@
 - 2026-08-27 T28：回收站完成（`modules/cloud/recycle/`）。① `recycle.service.ts` 核心四能力：`list()`（无 parentId → **顶层被删项 R2 算法**：查该用户全部 deleted 项 → 集合内比对祖先，祖先不在集合时补查父行 deletedAt，禁 JOIN 应用层过滤，按 deletedAt 倒序；带 parentId → 只读浏览，前置 `isInDeletedSubtree` 校验目标自身 deleted 或任一祖先 deleted，否则 30007）、`path()`（根固定"回收站"，上溯到 deleted 根）、`restore()`（R5：父目录存在且未删→原位，否则 parentId=0 落根目录并 message 说明，落位前 `resolveNameConflict` 同名自动"(1)"）、`purge()`（BFS 收集整棵子树 id+storage_name → 连带删 cloud_share（R8）→ 删物理文件（单个失败 warn 不阻断）→ 删 DB 行 → used 回扣 Σ文件 size，`$executeRawUnsafe` 兜底 used 不为负）、`clear()`（对全部顶层被删项执行同一递归逻辑）。② dto：RecycleListQueryDto（parentId 可选）/RecyclePathQueryDto/RecycleRestoreDto，class-validator 校验。③ `recycle.controller.ts` 五接口挂 cloud:recycle:* 权限 + 写操作挂 @OperationLog；**路由顺序注意**：`DELETE clear` 必须注册在 `DELETE :id` 之前，否则 clear 被 :id + ParseIntPipe 捕获报 40001（冒烟抓出并修复）。④ RecycleModule 复用 FileModule（resolveNameConflict）+ StorageModule（物理删文件），挂载进 CloudModule。验证：`nest build` 0 错误、`eslint` 0 错误 0 警告；冒烟（临时 3001 实例）**34 项全过**：R2 顶层被删项仅 A（子目录 B/内部文件被遮蔽）/只读浏览 A 含 B+inner/浏览未删项 30007/path 根为回收站/还原原位/删 inner 再删父 A→顶层仅 A（inner 被遮蔽）/还原父已删的 inner 落根目录/同名还原自动 doc(1).txt/彻底删除 C（递归子目录 D+两文件）回扣 used 精确 300 字节/彻底删除连带删预置 share 记录/清空回收站/used 非负/不存在记录 30007/未登录 40100。测试数据与临时脚本已清理。
 
 - 2026-08-27 T29：公开链接完成（`modules/cloud/share/`）。① `share.service.ts`：`create()`（仅文件 30009 → 审核门禁 R9（`upload.cloudAuditEnabled` 开启且 auditStatus≠1 时 30010）→ **重复创建返回现存有效链接**（findActiveShare：同文件 status=1 且未过期，不重复建行）；token 用 `crypto.randomBytes(16).toString('base64url')` 碰撞重试）、`list()`（不分页创建时间倒序，status 后端计算 1 有效/0 已停止/2 已过期，禁 JOIN 应用层聚合文件 name/size/deletedAt）、`stop()`、`extend()`（从 max(now, expireAt) 续档，已停止 30008）、`publicInfo()`/`publicDownload()`（校验链：token 存在→status=1→未过期→文件存在未删→（开关开启）audit=1，**任一失败统一 30008 不区分原因防探测**；下载成功 `visitCount+1` R8，attachment + filename* 编码原名 + Range 支持）。② `share.controller.ts`（管理侧四接口挂 cloud:share:create/list/stop 权限 + 写操作 @OperationLog）+ `share-public.controller.ts`（访客侧两接口 `@Public()` + `@Throttle({limit:30,ttl:60_000})` 独立限流 + 下载 `@SkipTransform`）。③ dto：ShareCreateDto（expireDays 1/7/30/0）/ShareStopDto/ShareExtendDto，class-validator 校验。④ ShareModule 复用 StorageModule（访客下载流式读文件），挂载进 CloudModule。验证：`nest build` 0 错误、`eslint .` 0 错误 0 警告；冒烟（临时 3001 实例）**28 项全过**：文件夹分享 30009/不存在文件 30001/创建返回 token+url+expireAt/重复创建 token 相同/列表 status=1/免登录 info/免登录 download 内容一致+attachment/visitCount 0→1/Range 206 前 5 字节/停止后访问 30008/已停止不可延长 30008/延长 7 天 expireAt 后移/无效 token 30008/文件彻底删除后链接 30008+分享记录被连带删除；限流独立验证（连打 info 接口触发 42900）。测试数据与临时脚本已清理。
+
+**联调修复（2026-08-27 浏览器实测，续 3）：修改时间列空白 + 预览弹框"upload 404"误读**
+
+- 现象：① 上传成功后列表「修改时间」列为空；② 用户反馈预览弹框"出现 `Cannot POST /api/api/cloud/file/upload?parentId=90`"。
+- 根因①：`ProTable` 的「修改时间」列 `prop="updatedAt"`，但后端 `listFiles` 返回字段名是 `updateTime`（curl 实测 `"updateTime":"2026-08-27T15:20:02.635Z"`），`updatedAt` 取不到值 → 空白。
+- 根因②（非 bug，属误读）：预览弹框的 `<img>/<iframe>` 走 `filePreviewUrl(id)='/api/cloud/file/preview/{id}'`（单 `/api`，正确），后端 `GET /cloud/file/preview/:id` 实测 `200` + `text/plain; charset=utf-8` 内容正常。**`/api/api/cloud/file/upload?parentId=90` 是浏览器 Network 面板里"修复前那次失败上传"的残留请求记录**（parentId=90 正好是该次上传所在的"测试1"目录），并非预览弹框发出的新请求。修复后 upload 已是单 `/api` 且成功，但 Network 历史残留未清，用户误以为与预览弹框关联。**
+- 修复①：列 `prop="updatedAt"`→`prop="updateTime"`，加 `:formatter="(r)=> r.updateTime ? formatTime(r.updateTime) : '-'"`（新增 `formatTime` 把 ISO 字符串格式化为 `YYYY-MM-DD HH:mm:ss`）；`read_lints` 0 错误。
+- 验证②：后端 `Invoke-RestMethod /api/cloud/file/preview/91` → `STATUS=200`、返回 `upload test content`；前端 preview 路径单 `/api` 经代码审查确认正确。建议用户硬刷新 + F12 Network 清空后重新点预览，弹框应正常显示内容（不再有 upload 404）。
+
+**联调修复（2026-08-27 浏览器实测，续 4）：预览/下载 401（原生请求无法鉴权）**
+
+- 现象：预览弹框无内容、下载被 Chrome 拦截提示"请先尝试登录相应网站"；用户疑问"若登录失效为何其他接口正常且不跳登录"。
+- 根因（架构缺陷）：preview/download 原实现用 `<img>/<iframe>/<a download>` 浏览器**原生请求**直链 `/api/cloud/file/...`，**原生请求不经过 axios，带不上请求拦截器注入的 Authorization 头** → JwtAuthGuard 无 token → HTTP 401（curl 实测：带 token 200、无 token 401）。其他接口正常是因为走 axios 自动带 token（登录态有效）；原生请求的 401 不经过 axios 拦截器，不触发"清 token 跳登录"，故页面不退出登录——两种请求体系鉴权行为不同所致，非登录态问题。
+- 修复：**预览/下载改为 axios Blob 拉取 + URL.createObjectURL**（自动带 token，token 失效时享受统一 401 静默刷新重放；token 不进 URL，无泄露风险）：① `request.ts` 响应拦截器对 `responseType==='blob'` 直接返回 Blob 本体（绕过 JSON 解包）；② `api/cloud/file.ts` 新增 `previewFileBlob`/`downloadFileBlob`（`instance.get` + `responseType:'blob'` + `timeout:0` 大文件不限时），删除 `filePreviewUrl`/`fileDownloadUrl`/未被引用的 `avatarUrl`（后端本无 `/cloud/file/avatar/:id` 路由）；③ `index.vue` openPreview 先拉 Blob 再 objectURL 渲染（新增 previewUrl/previewLoading + v-loading + `@closed` revokeObjectURL 防泄漏），download 拉 Blob 后 objectURL 触发保存。
+- 验证：带 token curl `preview/92`（用户实际上传的 PRD.md，text/markdown）→ 200 + `text/plain; charset=utf-8` + 9884 字节；`download/92` → 200 + `attachment; filename*=UTF-8''PRD.md`；`read_lints` 0 错误。
+- 备注：此前用户报的"预览弹框显示 `Cannot POST /api/api/cloud/file/upload?parentId=90`"为 Network 面板中修复前旧上传请求的残留记录（404），与预览弹框无关联；预览弹框实际因 401 无内容。
+
+**联调修复（2026-08-28 用户反馈）：分享弹框空链接 + 公开链接状态/筛选 + 文件列表分享标记**
+
+- 现象：① 我的文件分享弹框输入框空白且复制为空；② 公开链接列表状态恒"有效"（已停止的也展示、无筛选）；③ 文件列表看不出哪些已分享、操作名称不清晰。
+- 根因：① 后端 `create()` 返回 `{ token, url: '/share/:token', expireAt }`，前端却读臆造字段 `res.shareUrl` → undefined（弹框输入框本为 readonly 属预期，值空才是 bug）；② 前端类型与页面按 `row.isExpired` 判断，后端实际返回 `status`（1 有效/0 已停止/2 已过期）→ 恒 undefined 恒"有效"；③ 后端 file `list()` 未返回分享标记。
+- 修复：
+  - 后端 `share.list()` 支持 `status`（缺省**排除已停止**=默认视图；0/1/2 精确过滤）与 `keyword`（文件名模糊，应用层过滤）→ 新增 `ShareListQueryDto` + controller `@Query`；
+  - 后端 `file.list()` 聚合返回每项 `shared`（存在 status=1 且未过期的链接，仅文件）；
+  - 前端类型修正：`CloudFile` 对齐 list 实际字段 + `shared?`；`CloudShare` 对齐（status 三态/fileDeleted/size/createTime）；新增 `CloudShareCreateResult`；
+  - 分享弹框：`shareUrl = location.origin + res.url`（完整链接），复制即用该值；
+  - 我的文件：名称列已分享文件显示绿色「已分享」标签，操作按钮文案区分「分享 / 查看链接」；
+  - 公开链接页：工具栏新增状态下拉（全部[不含已停止]/有效/已过期/已停止）+ 文件名搜索 + 查询/重置；状态标签三态（有效 success/已过期 warning/已停止 info）；操作按状态显示（有效=复制/延长/停止；已过期=延长[可续期复活]/停止；已停止=无操作"-"）；新增大小/创建时间列与源文件已删标记。
+- 顺手清理两个既有 unused import（`cloud/admin/admin.controller.ts` 的 CurrentUser、`share-visitor/index.vue` 的 ElMessage）。
+- 验证：`nest build` ✓、前后端 eslint 0 问题 ✓、`read_lints` 0 错误 ✓。**需重启 API（node dist/main.js）后生效**：验证点=分享弹框显示完整链接可复制；公开链接默认不含已停止记录、切"已停止"可见；文件列表已分享行有标签+「查看链接」。
+
+**交互重构（2026-08-28 用户反馈）：「分享管理」弹框两态化（确认后才有链接）**
+
+- 需求：我的文件操作列「分享/查看链接」统一为「分享管理」；未分享时弹框先选有效期、点「确定分享」才真正创建（此前点开弹框即创建，取消也留记录）；已分享时弹框直接展示链接 + 「停止分享」「延长有效期」。
+- 实现：① 后端 `toCreateResult` 增加 `id`（停止/延长需要分享记录 id），前端 `CloudShareCreateResult` 同步；② 前端弹框两态 `shareMode: 'create' | 'detail'`：create 态=有效期 radio（1/7/30/永久）+ 确定分享（调 `createShare(fileId, days)` 成功后切 detail + reload 列表更新 shared 标记）；detail 态=链接（readonly + 复制）+ 有效期至 + 底部「停止分享」（确认→`stopShare`→切回 create 态可重新分享）与「延长有效期」（子弹框 `append-to-body` 选天数→`extendShare`→更新过期时间展示）；③ 已分享打开弹框时**幂等**调 `createShare` 取现存有效链接（后端 findActiveShare 保证不重复建行），加载态 v-loading；④ `extendShare` 前端返回类型修正为 `{ id, expireAt }`（原错标 CloudShare）。
+- 语义说明（用户疑问"要实际分享了才有分享链接？"）：是——create 态不调任何写接口；`shared` 标记只统计"有效"链接，已停止/已过期的文件视为未分享，可重新创建新链接。
+- 验证：`nest build` ✓、前后端 eslint 0 问题 ✓。需重启 API 生效。
+
+**联调修复（2026-08-28 用户反馈）：回收站进入页面报 `parentId must not be less than 1`**
+
+- 根因：`RecycleListQueryDto.parentId` 校验写成 `@Min(1)`，而回收站顶层语义是"0 或缺省"（前端 `onMounted loadDir(0)` 必传 `parentId=0` → 400 校验失败）。T28 冒烟时顶层用例走"不传 parentId"路径，未覆盖"显式传 0"，漏测；同文件 `RecyclePathQueryDto` 注释即写明"0 或缺省 = 回收站根"，属笔误。
+- 修复：① DTO `@Min(1)` → `@Min(0)` + 注释对齐；② `recycle.service.list()` 顶层分支判断 `query.parentId == null` → `!query.parentId`（0 与缺省等价走 R2 顶层算法，0 不再掉入"浏览被删文件夹"分支误触发 30007）。
+- 教训：凡"根=0"语义的查询参数（我的文件 parentId、回收站 parentId/id、菜单/部门树）DTO 一律 `@Min(0)`；冒烟用例需补"显式传 0"路径。
+- 验证：`nest build` ✓、eslint ✓。需重启 API 生效；验证点=进入回收站列表正常、点进被删文件夹仍可只读浏览。
+
+**联调修复（2026-08-28 用户反馈）：回收站列表数据已有但 loading 一直转（组件假死）**
+
+- 现象：parentId=0 修复后接口返回成功、列表数据也有了，但 loading 遮罩不消失。
+- 根因（与"我的文件"首期转圈问题同构）：后端 recycle list 返回 `{ list: [...] }`，前端 `listRecycle` 却声明为 `CloudRecycleItem[]`，页面 `list.value = items` 把**对象**塞给 `<el-table :data>` → `Invalid prop: data Expected Array, got Object` → ElTable 更新循环抛错中断 → 组件假死：finally 里 `loading=false` 已执行但视图不再响应。T28 后端冒烟未走前端渲染，故漏检。
+- 修复：新增 `CloudRecycleList` 类型对齐后端结构；`listRecycle` 返回类型改 `{ list }`；页面取 `items.list ?? []` 并以列表长度更新 total。
+- 教训沉淀：前端 API 声明返回类型前必须核对后端实际返回 JSON（尤其"裸数组 vs `{list}`"两种列表风格并存——cloud file/recycle 用 `{list}`，share list 用裸数组）；浏览器实测应覆盖所有列表页的首屏渲染。
+- 验证：`read_lints` 0 错误。纯前端改动，硬刷新即可；验证点=回收站 loading 正常关闭、还原/彻底删除/清空/进被删文件夹浏览可用。
+
+**列表风格统一（2026-08-28 用户决策）：recycle.list 改裸数组，对齐 P1/P2 约定**
+
+- 盘点结论（P1/P2 实际约定三条）：① 分页列表一律 `PageResultDto`（`{ list, total, pageNo, pageSize }`，common/dto/page-result.dto.ts）；② 非分页列表（树/下拉/轻量列表）一律**裸数组**（menu/dept/role.listAll/online/availableModels/modelsByProvider/messages 均如此）；③ 仅当列表需附带其他数据时才包对象。P3 域中 file.list 的 `{ list, quota, used }` 符合③（配额联动）、share.list 裸数组符合②，**recycle.list 的 `{ list }` 是唯一异类**（包对象却无附加数据）——也是两次"对象 vs 数组"踩坑的根源。
+- 统一改动：后端 `recycle.service.list()` 顶层与浏览分支均改为直接返回裸数组；前端 `listRecycle` 类型改回 `CloudRecycleItem[]`、页面直接 `list.value = items`、删除多余的 `CloudRecycleList` 类型。
+- 验证：`nest build` ✓（dist 清理遇 safe-delete ETIMEDOUT，按既有经验 Move-Item 改名绕开后构建成功）、前后端 eslint ✓、`CloudRecycleList` 引用清零 ✓。需重启 API 生效；从此 cloud 域三接口风格完全对齐 P1/P2 约定。
+
+**联调修复（2026-08-28 用户反馈）：回收站面包屑出现两个"回收站"**
+
+- 根因：前端模板固定渲染第一个"回收站"，而后端 `recyclePath` 返回的链里又自带一个 `{ id: 0, name: '回收站' }` 根节点（T28 实现），进入"测试1"时两者叠加重复。
+- 修复：对齐"我的文件"的既定约定（根由前端渲染、后端链不含根只含自身）——`recycle.path` 根分支返回 `[]`、上溯链去掉"回收站"节点，前端零改动。
+- 验证：`nest build` ✓（safe-delete ETIMEDOUT 复现，改名绕开）、eslint ✓。需重启 API；验证点=进回收站面包屑单"回收站"，点进"测试1"显示"回收站 / 测试1"，点面包屑回根正常。
+
+**联调修复（2026-08-28 用户反馈）：回收站删除时间显示原始 ISO 串（含 T/Z）**
+
+- 根因：与"我的文件"修改时间列同类——「删除时间」列 `prop="deletedAt"` 直出原始 ISO 字符串，未经格式化。
+- 修复（含 DRY 治理）：新建 `apps/web/src/utils/format.ts` 公共工具（`formatSize`/`formatTime`，纯函数）；回收站「删除时间」列加 formatter；file/share/recycle 三页此前各自复制的本地 `formatSize`/`formatTime`（已三份重复）全部删除改为公共 import。前端纯改动。
+- 约定沉淀：**后端时间为 ISO 字符串，任何表格时间列禁止 `prop` 直出，必须走 `formatTime` formatter**（个人中心 formatTime 属另一实现，后续可一并归并）。
+- 验证：`read_lints` 0 错误、eslint 0 问题。硬刷新即可；验证点=回收站删除时间显示 `YYYY-MM-DD HH:mm:ss`，我的文件/公开链接页大小与时间列显示不回归。
+
+### T32 完成记录（2026-08-28）：P3 联调验收 + 文档回写
+
+**联调验收（对照 PRD-P3 第 6 节 14 条）**：后端链路全部冒烟通过（T26 13 项 / T27 38 项 / T28 34 项 / T29 28 项），前端浏览器实测覆盖大部分条目；2026-08-27~~28 连续联调共修复 11 个问题（见上文"联调修复 续 1~~6"）：
+
+1. 上传双 `/api` 前缀 404 + `onUploadProgress` 被封装吞掉（改原始 axios instance + 相对路径）
+2. 「我的文件」修改时间列字段错（updatedAt→updateTime + formatTime）
+3. 预览/下载原生请求无 token 必 401（改 axios Blob + objectURL，享受 401 静默刷新）
+4. 分享弹框字段名错致空链接（shareUrl→url 拼 origin）
+5. 公开链接状态字段错（isExpired→status 三态）+ 新增状态筛选/文件名搜索/按状态显隐操作
+6. 分享管理弹框两态化（确认后才创建分享；已分享展示链接+停止/延长）+ createShare 返回补 id
+7. 回收站 parentId=0 被 @Min(1) 拒（DTO 放行 0 + service 顶层分支兼容）
+8. 回收站 loading 假死（后端 `{list}` 被当数组塞 ElTable → 渲染中断；recycle.list 统一为裸数组）
+9. 回收站面包屑双"回收站"（path 链去掉根节点，对齐 file.path 约定）
+10. 回收站删除时间 ISO 直出（utils/format.ts 公共 formatTime/formatSize，三页去重）
+11. 文件夹行隐藏"分享管理"按钮（后端 30009 兜底）
+
+**验收对照结果**：
+
+| 条款                                      | 结果                                                  |
+| ----------------------------------------- | ----------------------------------------------------- |
+| 1 文件夹/面包屑/URL 刷新保持              | ✓（T31 agent-browser 实测）                           |
+| 2 上传多文件/进度/同名(1)/文件夹在前      | ✓（本会话实测上传；同名与排序 T27 冒烟）              |
+| 3 图片/PDF/MP4 预览、zip 拒绝、视频拖进度 | ✓ 后端（T27 Range/白名单冒烟）；Blob 改造后前端待复验 |
+| 4 下载内容一致                            | ✓ 后端 sha256（T27）；Blob 下载待复验                 |
+| 5 配额 30003/软删用量不变/彻底删回落      | ✓（T27/T28 冒烟）                                     |
+| 6 删文件夹→回收站 R2 顶层/只读浏览        | ✓（T28 冒烟 + 本会话修 parentId=0/loading）           |
+| 7 先删 A 再删 B 只见 B，恢复 B 后 A 现    | ✓（T28 冒烟）                                         |
+| 8 恢复落根提示 + 重名(1)                  | ✓（T28 冒烟）                                         |
+| 9 7 天链接/免登录下载+1/停止与删除失效    | ✓（T29 冒烟）；访客页待浏览器复验                     |
+| 10 文件夹无分享按钮                       | ✓（本会话隐藏 + 30009 兜底）                          |
+| 11 admin 调配额即时生效                   | ✓（T30 冒烟）；待用户浏览器复验                       |
+| 12 个人中心头像上传                       | ✓（T30 saveAvatar）；待用户浏览器复验                 |
+| 13 删有文件用户被阻 R10                   | ✓（T30 hasFiles 冒烟）                                |
+| 14 eslint/vue-tsc/nest build 0 错误       | ✓（本会话持续保持）                                   |
+
+**文档回写**：ARCHITECTURE §4.6 按 T30 实际实现修订（头像经 CloudFacade.saveAvatar 落 cloud_file，遗留 12 关闭）；ARCHITECTURE-P3-增补 新增 §13.14 API 列表风格约定（分页 PageResultDto / 非分页裸数组 / 附带数据才包对象 + 时间列必须 formatter 等纪律）；PROGRESS 里程碑 P3 → 已完成。
+
+**待用户浏览器复验清单（非阻塞，后端均已冒烟通过）**：① 图片/文本/视频预览与下载（Blob 改造后）；② 个人中心头像上传；③ 用户管理调配额后用户侧生效；④ 无痕窗口访问公开链接。
 
 ### P1 最终状态总结（三句话）
 

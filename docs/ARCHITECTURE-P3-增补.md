@@ -1,5 +1,16 @@
 # iplat —— 架构文档 P3 增补：云盘模块（cloud 域）
 
+> ⚠️ 本文档内容已于 2026-08-27 **完整并入 `ARCHITECTURE.md`**（以 ARCHITECTURE.md 为唯一权威源）：
+>
+> - 目录结构 → §4.1
+> - 域纪律 / 流式上传 / 配额 / 分享安全 / 预览 / 前端约束 → §4.7（含 30xxx 错误码段）
+> - cloud 三表设计细节 → §5
+> - seed 权限标识（已统一为 `cloud:admin:quota`）→ §5
+> - upload 环境变量 → §8
+> - 公共资产（CloudFacade / 通用 tmp StorageEngine / StorageService 扩展 / 前端组件）→ §9
+>
+> 后续维护请直接改 `ARCHITECTURE.md`，本文件保留仅作历史对照，不再作为权威源。
+
 > 本文档是 ARCHITECTURE.md 的 P3 增补，既定铁律（域边界、统一响应、gateway 层、资产复用）全部沿用。
 > P3 关键前提：**复用 P1 已建 StorageService（本地磁盘）**，零新基础设施、零新 npm 依赖。
 
@@ -9,10 +20,16 @@
 
 ```
 api/src/modules/cloud/
-├── cloud.module.ts          # 域模块：imports infra（StorageService 经 infra 出口注入）
+├── cloud.module.ts          # 域模块：exports CloudFacade（门面）/ FileModule 等
+├── facade/                  # ★ 域门面（T30 落地）
+│   └── cloud-facade.service.ts # CloudFacade：对外（system 域）暴露 hasFiles(userId) + saveAvatar
+├── admin/                   # 管理员（T30）
+│   ├── admin.controller.ts  #   PUT/GET /api/cloud/admin/quota、GET /api/cloud/admin/stats
+│   ├── admin.service.ts     #   配额调整（下限=used）、单用户/全局统计
+│   └── dto/quota.dto.ts     #   UpdateQuotaDto（class-validator）
 ├── file/                    # 我的文件
-│   ├── file.controller.ts   #   list/path/mkdir/rename/delete
-│   ├── file.service.ts      #   文件树查询与维护（同名判定、R2/R5 语义）
+│   ├── file.controller.ts   #   list/path/mkdir/rename/delete/avatar（头像预览流）
+│   ├── file.service.ts      #   文件树查询与维护（同名判定、R2/R5 语义）+ hasFiles + getAvatarStream
 │   └── dto/                 #   MkdirDto / RenameDto（class-validator）
 ├── transfer/                # 上传下载
 │   ├── transfer.controller.ts # upload/preview/download（流式）
@@ -20,14 +37,10 @@ api/src/modules/cloud/
 ├── recycle/                 # 回收站
 │   ├── recycle.controller.ts
 │   └── recycle.service.ts   # 顶层被删项算法、还原、递归彻底删除
-├── share/                   # 公开链接
-│   ├── share.controller.ts  # 管理侧（登录）：create/list/stop/extend
-│   ├── share-public.controller.ts # 访客侧（@Public）：info/download
-│   └── share.service.ts
-├── quota/
-│   ├── quota.service.ts     # cloud_usage 懒创建、增减记账、admin 调整
-│   └── quota.controller.ts  # GET 我的配额 + PUT admin 调整
-└── cloud.facade.ts          # ★ 域门面：对外（system 域）仅暴露 hasFiles(userId)
+└── share/                   # 公开链接
+    ├── share.controller.ts  # 管理侧（登录）：create/list/stop/extend
+    ├── share-public.controller.ts # 访客侧（@Public）：info/download
+    └── share.service.ts
 ```
 
 纪律：
@@ -100,8 +113,9 @@ api/src/modules/cloud/
 ### 13.5 配额记账（R3）
 
 - 变动时机：上传成功 `+size`；彻底删除/清空 `-size`；软删、还原、重命名、新建文件夹**不动**
+- **头像登记**：`CloudFacade.saveAvatar` 新建 cloud_file（parentId=-1，不可达）后 `+size`，并软删旧头像记录回退其 `-size`（`adjustUsed` 不小于 0 兜底）
 - 校验与记账存在 check-then-act 竞态：个人单用户场景接受轻微超额（不超过单文件上限），文档明示，不做分布式锁
-- admin 调整配额：`quota` 下限 = 当前 used；upsert（懒创建兼容）
+- admin 调整配额：`PUT /api/cloud/admin/quota`（`cloud:admin:quota`），`quotaLimit` 下限 = 当前 used，低于则 30001；`quotaUsed` 选填；upsert（懒创建兼容）。另 `GET /api/cloud/admin/quota?userId=` 查已用容量（前端弹窗下限提示）、`GET /api/cloud/admin/stats` 全局统计
 
 ### 13.6 公开分享端点（安全纪律）
 
@@ -153,10 +167,10 @@ router 静态路由新增：/share/:token → views/public/share.vue（独立极
 └── 回收站（菜单，cloud/recycle，component cloud/recycle/index，perms cloud:recycle:list）
     ├── 恢复（按钮 cloud:recycle:restore）
     └── 彻底删除（按钮 cloud:recycle:delete）
-系统管理/用户管理 下追加按钮：调整配额（cloud:quota:update）
+系统管理/用户管理 下追加按钮：调整配额（cloud:admin:quota）
 ```
 
-默认角色（普通用户）授予"云盘管理"整棵子树（不含 cloud:quota:update）；超管 `*` 自动覆盖。seed 幂等（按 perms/path 判重，沿用既有 seed 风格）。
+默认角色（普通用户）授予"云盘管理"整棵子树（不含 cloud:admin:quota，仅 admin 可调整）；超管 `*` 自动覆盖。seed 幂等（按 perms/path 判重，沿用既有 seed 风格）。
 
 ### 13.10 错误码 30xxx 段
 
@@ -172,6 +186,7 @@ router 静态路由新增：/share/:token → views/public/share.vue（独立极
 | 30008 | 分享链接无效（不存在/已停止/已过期/文件已删/未过审）   | 访客页提示失效           |
 | 30009 | 文件夹暂不支持创建公开链接                             | 提示                     |
 | 30010 | 文件未通过内容审核，禁止分享                           | 提示（开关开启后生效）   |
+| 30011 | 用户仍有云盘文件，禁止删除                             | 提示（R10 删用户预检）   |
 
 ### 13.11 环境变量与配置增补
 
@@ -187,15 +202,29 @@ UPLOAD_DIR 沿用既有配置（P1 已建）。Redis **无新增 key**（公开�
 
 ### 13.12 资产表增补（完成后回写 §9）
 
-| 名称                     | 位置                                          | 用途                                                                                                                                                                         | 状态                 |
-| ------------------------ | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-| CloudFacade              | api/src/modules/cloud/cloud.facade.ts         | 跨域门面（hasFiles，R10 删用户预检用）                                                                                                                                       | 待建（T30）          |
-| StorageService 扩展方法  | api/src/infra/storage/storage.service.ts      | moveToStorage（tmp→正式区 yyyyMM/uuid.ext）/remove/removeTmp/createReadStream（Range）/stat/tmpDir，含路径穿越与 tmp 区越界防御                                              | 已建（T27）          |
-| 自定义 tmp StorageEngine | api/src/modules/cloud/transfer/tmp-storage.ts | Multer 临时区流式落盘引擎（pnpm 隔离下 diskStorage 的等价替代）：stat 回填 file.size / _removeFile 清半截 / fail 兜底流错误与客户端中断（三行为对齐 diskStorage 并实测通过） | 已建（T27 补充验收） |
-| FileExplorer             | web/src/views/cloud/components                | 文件管理器（面包屑/双击/URL 同步）                                                                                                                                           | 待建（T31）          |
-| FilePreview              | web/src/views/cloud/components                | 预览弹层                                                                                                                                                                     | 待建（T31）          |
-| UploadButton             | web/src/views/cloud/components                | 上传+进度                                                                                                                                                                    | 待建（T31）          |
+| 名称                    | 位置                                                 | 用途                                                                                                                                                    | 状态                             |
+| ----------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| CloudFacade             | api/src/modules/cloud/facade/cloud-facade.service.ts | 跨域门面：hasFiles（R10 删用户预检）+ saveAvatar（头像登记/used 同步/旧头像软删回退）；随 CloudModule 导出，system 域仅经此调用                         | 已建（T30）                      |
+| StorageService 扩展方法 | api/src/infra/storage/storage.service.ts             | moveToStorage（tmp→正式区 yyyyMM/uuid.ext）/remove/removeTmp/createReadStream（Range）/stat/tmpDir，含路径穿越与 tmp 区越界防御；新增静态 tmpDirPath()  | 已建（T27/T30）                  |
+| 通用 tmp StorageEngine  | api/src/infra/storage/tmp-storage.ts                 | Multer 临时区流式落盘引擎（公共资产）：stat 回填 file.size / _removeFile 清半截 / fail 兜底流错误与客户端中断；cloud/transfer 与 system/avatar 统一复用 | 已建（T27 提至 infra，T30 复用） |
+| FileExplorer            | web/src/views/cloud/components                       | 文件管理器（面包屑/双击/URL 同步）                                                                                                                      | 待建（T31）                      |
+| FilePreview             | web/src/views/cloud/components                       | 预览弹层                                                                                                                                                | 待建（T31）                      |
+| UploadButton            | web/src/views/cloud/components                       | 上传+进度                                                                                                                                               | 待建（T31）                      |
 
 ### 13.13 与 AI 域的关系（说明，本期无工作）
 
 cloud 与 ai 无直接耦合。后续若加 AI 云盘工具（如 get_my_files），按 P2b `tool.types.ts` 的 AiTool 接口在 ai 域新增工具文件，handler 经 CloudFacade 调用——**禁止** ai 域直接 import cloud 内部 Service。
+
+### 13.14 API 列表风格约定（P3 联调沉淀，全局适用）
+
+前端两次因"数组 vs 对象"结构错配踩坑（P2 厂商模型、P3 回收站），沉淀三条约定，后续所有域遵照执行：
+
+1. **分页列表**：一律返回 `PageResultDto`（`{ list, total, pageNo, pageSize }`，见 common/dto/page-result.dto.ts）
+2. **非分页列表**（树/下拉/轻量列表）：一律返回**裸数组**（如 menu/dept/role.listAll/online、ai availableModels/modelsByProvider/messages、cloud share.list 与 recycle.list）
+3. **仅当列表需附带其他数据时才包对象**：如 cloud file.list 的 `{ list, quota, used }`（配额联动）
+
+配套纪律：
+
+- 前端声明 API 返回类型前必须核对后端实际返回 JSON（"裸数组 vs `{list}`"两种风格并存最易踩坑）
+- 后端时间为 ISO 字符串，表格时间列禁止 `prop` 直出，必须走 `utils/format.ts` 的 `formatTime` formatter（大小列走 `formatSize`）
+- 浏览器实测必须覆盖所有列表页首屏渲染（后端冒烟不含前端渲染链路）

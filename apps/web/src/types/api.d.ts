@@ -147,6 +147,86 @@ export interface LoginLogItem {
   createdAt: string
 }
 
+// ========== cloud 域实体 ==========
+
+/** 云盘文件/文件夹（list 接口返回字段；ID 以字符串返回，避免 bigint 精度问题） */
+export interface CloudFile {
+  id: string
+  name: string
+  isDir: boolean
+  size: string
+  ext: string | null
+  mime: string | null
+  /** 修改时间（ISO 字符串） */
+  updateTime: string
+  /** 是否存在有效公开链接（仅 list 接口返回；文件夹恒 false；upload/mkdir/rename 单对象返回无此字段） */
+  shared?: boolean
+}
+
+/** 面包屑节点 */
+export interface BreadcrumbItem {
+  id: string
+  name: string
+}
+
+/** 配额信息 */
+export interface CloudQuota {
+  quota: string
+  used: string
+}
+
+/** 目录列表响应（list 接口返回，含配额联动） */
+export interface CloudFileList {
+  list: CloudFile[]
+  quota: string
+  used: string
+}
+
+/** 公开链接（我的分享；status 由后端计算：1 有效 / 0 已停止 / 2 已过期） */
+export interface CloudShare {
+  id: string
+  fileId: string
+  fileName: string
+  size: string
+  /** 源文件是否已被删除（彻底删除/回收站中） */
+  fileDeleted: boolean
+  token: string
+  visitCount: number
+  expireAt: string | null
+  status: 1 | 0 | 2
+  createTime: string
+}
+
+/** 创建分享返回（url 为站内相对路径 /share/:token，需自行拼 origin；id 用于停止/延长） */
+export interface CloudShareCreateResult {
+  id: string
+  token: string
+  url: string
+  expireAt: string | null
+}
+
+/** 回收站项 */
+export interface CloudRecycleItem {
+  id: string
+  name: string
+  isDir: boolean
+  size: string
+  deletedAt: string
+  parentId: string
+  parentName: string | null
+}
+
+/** 访客分享信息 */
+export interface CloudSharePublic {
+  token: string
+  fileName: string
+  size: string
+  mime: string | null
+  expireAt: string | null
+  isExpired: boolean
+  visitCount: number
+}
+
 export interface OperationLogItem {
   id: string
   username: string | null

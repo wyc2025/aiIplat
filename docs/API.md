@@ -2,7 +2,7 @@
 
 > 本文档是前后端接口的唯一事实来源。与代码冲突时以本文档为准并修正代码。
 > 通用约定（统一响应、错误码、分页、bigint→string、时间格式）见 ARCHITECTURE.md 4.3 节，此处不再重复。
-> 当前覆盖：P2a（ai 域 + system 域在线用户增量）、P2b（AI 工具调用）、P3（cloud 域 + 头像上传）。system 域既有接口以代码与 Swagger 为准。
+> 当前覆盖：P2a（ai 域 + system 域在线用户增量）、P2b（AI 工具调用）、P3（cloud 域 + 头像上传）、P4a（site 域 + 开放层 + cloud 公开机制增量）。system 域既有接口以代码与 Swagger 为准。
 
 ## ai 域错误码（20xxx）
 
@@ -211,19 +211,21 @@ Content-Type: application/json　Accept: text/event-stream
 | 30008 | 分享链接无效（不存在/已停止/已过期/文件已删/未过审）   | 访客页提示失效         |
 | 30009 | 文件夹暂不支持创建公开链接                             | 提示                   |
 | 30010 | 文件未通过内容审核，禁止分享                           | 提示（开关开启后生效） |
+| 30011 | 用户仍有云盘文件，禁止删除（R10 删用户预检）           | 提示                   |
 
 通用约定不变：bigint ID 序列化为字符串；文件大小字段（size/quota/used）为数字字节数，前端负责格式化展示。
 
 ### 5.2 我的文件（均要求登录；数据按当前用户隔离）
 
-| 方法   | 路径                   | 权限              | 说明                                                                                                                                                                                                 |
-| ------ | ---------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | /api/cloud/file/list   | cloud:file:list   | 目录内容。入参 `parentId`（缺省 0=根）。返回 `{ list, quota, used }`；list **不分页**：文件夹在前（按名称升序），文件在后（按修改时间倒序）；item `{ id, name, isDir, size, ext, mime, updateTime }` |
-| GET    | /api/cloud/file/path   | cloud:file:list   | 面包屑链。入参 `id`；返回 `[{ id, name }]` 从根到当前（根目录返回 `[]`）                                                                                                                             |
-| POST   | /api/cloud/file/mkdir  | cloud:file:mkdir  | 入参 `{ parentId, name }`；同名冲突自动"(1)"；深度/数量/名称限制（30006）                                                                                                                            |
-| POST   | /api/cloud/file/rename | cloud:file:rename | 入参 `{ id, name }`；同名冲突**阻止**（30002）                                                                                                                                                       |
-| DELETE | /api/cloud/file/:id    | cloud:file:delete | 软删入回收站（R2：只标自身），挂 @OperationLog                                                                                                                                                       |
-| GET    | /api/cloud/file/quota  | cloud:file:list   | 我的配额 `{ quota, used }`（cloud_usage 懒创建）                                                                                                                                                     |
+| 方法   | 路径                       | 权限              | 说明                                                                                                                                                                                                 |
+| ------ | -------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | /api/cloud/file/list       | cloud:file:list   | 目录内容。入参 `parentId`（缺省 0=根）。返回 `{ list, quota, used }`；list **不分页**：文件夹在前（按名称升序），文件在后（按修改时间倒序）；item `{ id, name, isDir, size, ext, mime, updateTime }` |
+| GET    | /api/cloud/file/path       | cloud:file:list   | 面包屑链。入参 `id`；返回 `[{ id, name }]` 从根到当前（根目录返回 `[]`）                                                                                                                             |
+| POST   | /api/cloud/file/mkdir      | cloud:file:mkdir  | 入参 `{ parentId, name }`；同名冲突自动"(1)"；深度/数量/名称限制（30006）                                                                                                                            |
+| POST   | /api/cloud/file/rename     | cloud:file:rename | 入参 `{ id, name }`；同名冲突**阻止**（30002）                                                                                                                                                       |
+| DELETE | /api/cloud/file/:id        | cloud:file:delete | 软删入回收站（R2：只标自身），挂 @OperationLog                                                                                                                                                       |
+| GET    | /api/cloud/file/quota      | cloud:file:list   | 我的配额 `{ quota, used }`（cloud_usage 懒创建）                                                                                                                                                     |
+| GET    | /api/cloud/file/avatar/:id | cloud:file:list   | 头像预览流（@SkipTransform）：仅当前用户自己的头像记录（parentId=-1）可读，流式返回图片                                                                                                              |
 
 ### 5.3 上传 / 预览 / 下载（流式）
 
@@ -265,12 +267,116 @@ Content-Type: application/json　Accept: text/event-stream
 
 ### 5.6 配额管理（admin）
 
-| 方法 | 路径                   | 权限               | 说明                                                                                                   |
-| ---- | ---------------------- | ------------------ | ------------------------------------------------------------------------------------------------------ |
-| PUT  | /api/cloud/admin/quota | cloud:quota:update | 入参 `{ userId, quota }`（字节）；quota 下限 = 该用户当前 used；upsert（懒创建兼容），挂 @OperationLog |
+| 方法 | 路径                   | 权限              | 说明                                                                                                                                                                       |
+| ---- | ---------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PUT  | /api/cloud/admin/quota | cloud:admin:quota | 入参 `{ userId, quotaLimit, quotaUsed? }`（字节）；quotaLimit 下限 = 该用户当前 used（低于则 30001）；quotaUsed 选填（缺省不改动）；upsert（懒创建兼容），挂 @OperationLog |
+| GET  | /api/cloud/admin/quota | cloud:admin:quota | 入参 `userId`；返回 `{ userId, quotaLimit, quotaUsed }`，供前端弹窗展示已用容量（下限）提示                                                                                |
+| GET  | /api/cloud/admin/stats | cloud:admin:quota | 全局统计 `{ fileCount, totalUsed, activeUsers }`                                                                                                                           |
 
 ### 5.7 个人中心头像上传（P1 遗留补做，system 域）
 
-| 方法 | 路径                       | 权限     | 说明                                                                                                                                                                             |
-| ---- | -------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| POST | /api/system/profile/avatar | 登录即可 | multipart，字段名 `file`；jpg/jpeg/png/webp，≤5MB；落 StorageService + 更新 sys_user.avatar；返回 `{ avatar }`（URL）；GET /api/auth/userinfo 的 user 对象同步携带 `avatar` 字段 |
+| 方法 | 路径                            | 权限     | 说明                                                                                                                                                                                                                                                                                             |
+| ---- | ------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| POST | /api/system/user/profile/avatar | 登录即可 | multipart，字段名 `file`；图片类型（jpg/jpeg/png/gif/webp/bmp/svg），≤5MB；落 StorageService.moveToStorage 后登记 cloud_file（头像记录，used 同步）→ 写回 sys_user.avatar；返回 `{ avatar }`（可访问 URL，前端 img 直接可用）；GET /api/auth/userinfo 的 user 对象同步携带 `avatar` 字段（已含） |
+
+---
+
+## 6. P4a 增补：个人网站（site 域 + 开放层）
+
+### 6.1 错误码新增（40xxx 段，40101 起）
+
+| code  | 含义                                       | 前端处理           |
+| ----- | ------------------------------------------ | ------------------ |
+| 40101 | 站点不存在或未开通                         | 引导创建站点       |
+| 40102 | slug 已被占用                              | 提示更换           |
+| 40103 | slug 格式非法或命中保留字                  | 提示规则           |
+| 40104 | 站点已停用                                 | 后台提示           |
+| 40105 | 站点根目录不可用（被删或已取消公开）       | 提示去云盘检查目录 |
+| 40106 | 栏目不存在                                 | 刷新栏目列表       |
+| 40107 | 栏目下存在子栏目或文章，不可删除           | 提示先清空         |
+| 40108 | 标签已存在                                 | 提示更换名称       |
+| 40109 | 文章不存在                                 | 刷新文章列表       |
+| 40110 | 评论不存在                                 | 刷新评论列表       |
+| 40111 | 评论提交过于频繁                           | 提示稍后再试       |
+| 40112 | 用户已开通个人网站，禁止删除（删用户预检） | 提示先删除站点     |
+
+通用约定不变：bigint ID 序列化为字符串；时间为 ISO 字符串。**开放层（6.3）一切失败统一返回 40400**，不返回上表细分码（防探测）。
+
+### 6.2 管理侧接口（/api/site，登录 + @RequirePermission，数据按当前用户隔离）
+
+**站点设置（site:site:manage）**
+
+| 方法 | 路径           | 说明                                                                                                                                                                                                                                                                  |
+| ---- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET  | /api/site/mine | 我的站点：`null`（未开通）或 `{ id, slug, title, description, status, commentAudit, siteUrl, rootFolderId, mediaFolderId, createdAt }`；siteUrl = `/api/open/{slug}/`                                                                                                 |
+| POST | /api/site/mine | 创建站点。入参 `{ slug, title, description? }`；slug 规则 `^[a-z0-9][a-z0-9-]{2,31}$` + 保留字黑名单（40103）+ 全局唯一（40102）；创建动作含：云盘根建「我的站点」目录（重名自动"(1)"）并设公开、建 media/ 子目录、复制默认模板四文件、落 site_site。挂 @OperationLog |
+| PUT  | /api/site/mine | 编辑。入参 `{ title?, description?, slug?, status?, commentAudit? }`；改 slug 同规则校验并使旧 slug 缓存失效；status 0 停用即开放层全 404。挂 @OperationLog                                                                                                           |
+
+**栏目（site:column:\*）**
+
+| 方法   | 路径                  | 权限               | 说明                                                                                            |
+| ------ | --------------------- | ------------------ | ----------------------------------------------------------------------------------------------- |
+| GET    | /api/site/column/list | site:column:list   | 平铺裸数组（前端组树，沿用平台惯例）：`[{ id, parentId, name, sort, articleCount, createdAt }]` |
+| POST   | /api/site/column      | site:column:create | `{ parentId, name, sort? }`；≤3 级（R6），挂 @OperationLog                                      |
+| PUT    | /api/site/column/:id  | site:column:update | `{ name?, sort?, parentId? }`；换父级禁止自身/后代且不得超 3 级，挂 @OperationLog               |
+| DELETE | /api/site/column/:id  | site:column:delete | 有子栏目或文章 → 40107，挂 @OperationLog                                                        |
+
+**标签（site:tag:\*）**
+
+| 方法   | 路径               | 权限            | 说明                                             |
+| ------ | ------------------ | --------------- | ------------------------------------------------ |
+| GET    | /api/site/tag/list | site:tag:list   | 裸数组 `[{ id, name, articleCount, createdAt }]` |
+| POST   | /api/site/tag      | site:tag:create | `{ name }`；重复 40108                           |
+| PUT    | /api/site/tag/:id  | site:tag:update | `{ name }`，挂 @OperationLog                     |
+| DELETE | /api/site/tag/:id  | site:tag:delete | 连带删 site_article_tag 关联，挂 @OperationLog   |
+
+**文章（site:article:\*）**
+
+| 方法   | 路径                         | 权限                 | 说明                                                                                                                                                                                                                  |
+| ------ | ---------------------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | /api/site/article            | site:article:list    | 分页（PageResultDto）。筛选：columnId / tagId / status / keyword（标题模糊）；item `{ id, columnId, columnName, title, summary, coverPath, tagIds, wordCount, viewCount, status, publishedAt, createdAt, updatedAt }` |
+| GET    | /api/site/article/:id        | site:article:list    | 详情，附加 `contentMd`                                                                                                                                                                                                |
+| POST   | /api/site/article            | site:article:create  | `{ columnId, title, summary?, tagIds?, coverPath?, contentMd, status }`；summary 空自动取正文前 100 字；coverPath 必须 media/ 前缀（40105 口径校验）；字数后端统计落库（R14）。挂 @OperationLog                       |
+| PUT    | /api/site/article/:id        | site:article:update  | 同 POST；挂 @OperationLog                                                                                                                                                                                             |
+| PUT    | /api/site/article/:id/status | site:article:publish | `{ status }`（0 下架 / 1 发布）；首次发布写 published_at。挂 @OperationLog                                                                                                                                            |
+| DELETE | /api/site/article/:id        | site:article:delete  | **物理删除**，连带标签关联与全部评论（R7）。挂 @OperationLog                                                                                                                                                          |
+
+封面/正文配图上传：**复用** `POST /api/cloud/file/upload?parentId={mediaFolderId}&overwrite=1`（mediaFolderId 取自 GET /api/site/mine），无新接口；上传成功后公开 URL = `/api/open/{slug}/media/{文件名}`。
+
+**评论（site:comment:\*）**
+
+| 方法   | 路径                        | 权限                | 说明                                                                                                                                                              |
+| ------ | --------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | /api/site/comment           | site:comment:list   | 分页（PageResultDto）。筛选：auditStatus / articleId / keyword（昵称模糊）；item `{ id, articleId, articleTitle, nickname, content, ip, auditStatus, createdAt }` |
+| PUT    | /api/site/comment/:id/audit | site:comment:audit  | `{ auditStatus }`（1 通过 / 2 驳回）。挂 @OperationLog                                                                                                            |
+| DELETE | /api/site/comment/:id       | site:comment:delete | 物理删除。挂 @OperationLog                                                                                                                                        |
+
+### 6.3 开放层接口（/api/open，@Public 免登录，独立限流，CORS `*`）
+
+> 契约纪律：**v1 只增不改**（用户站点代码依赖这些接口）；除评论提交外全部只读；一切失败统一 40400；
+> 数据接口限流 60 次/分/IP，静态限流 120 次/分/IP，评论提交 10 次/分/IP + 同文章同 IP 60 秒 1 条（40111）；
+> 仅返回已发布文章与已过审评论；站点停用/不存在一律 40400。
+
+| 方法 | 路径                                      | 说明                                                                                                                                                                                                                                                                                                 |
+| ---- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET  | /api/open/:slug/api/site                  | 站点信息 `{ title, description }`                                                                                                                                                                                                                                                                    |
+| GET  | /api/open/:slug/api/columns               | 栏目**嵌套树**（例外于平铺惯例，见架构增补 §14.6）：`[{ id, name, sort, children: [...] }]`                                                                                                                                                                                                          |
+| GET  | /api/open/:slug/api/tags                  | `[{ id, name }]`                                                                                                                                                                                                                                                                                     |
+| GET  | /api/open/:slug/api/articles              | 分页。入参 columnId? / tagId? / keyword? / pageNo / pageSize（≤50）；返回 `{ list, total, pageNo, pageSize }`，item `{ id, title, summary, coverUrl, columnId, columnName, tags: [{ id, name }], wordCount, viewCount, publishedAt }`；coverUrl 为完整公开路径（无封面为 null）；按 publishedAt 倒序 |
+| GET  | /api/open/:slug/api/articles/:id          | 详情：上项字段 + `contentMd`（markdown 原文，渲染由站点代码负责）；触发查看数（R8 窗口去重）                                                                                                                                                                                                         |
+| GET  | /api/open/:slug/api/articles/:id/comments | 分页，仅已过审：`{ list: [{ id, nickname, content, createdAt }], total, pageNo, pageSize }`，按时间正序                                                                                                                                                                                              |
+| POST | /api/open/:slug/api/articles/:id/comments | 提交评论。入参 `{ nickname(1~32), content(1~500) }`；落库待审（站点关审核则直过审）；成功返回统一提示文案"已提交，审核后展示"                                                                                                                                                                        |
+| GET  | /api/open/:slug                           | 站点入口（= 根目录 index.html）                                                                                                                                                                                                                                                                      |
+| GET  | /api/open/:slug/{*path}                   | 静态文件（nginx 语义，路径即 URL）：MIME 白名单 + CSP 沙箱 + ETag/304 + Range，规则见架构增补 §14.4/§14.5                                                                                                                                                                                            |
+
+### 6.4 cloud 域增量（公开机制，登录 + 权限）
+
+| 方法 | 路径                               | 权限              | 说明                                                                                                                                                                                |
+| ---- | ---------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST | /api/cloud/file/set-public         | cloud:file:public | 入参 `{ id, isPublic }`；仅标记自身（公开性向下级联、访问时上溯判定，R2）；文件/文件夹均可。挂 @OperationLog                                                                        |
+| POST | /api/cloud/file/upload?overwrite=1 | cloud:file:upload | 新增可选 query `overwrite`：=1 且同目录存在同名未删文件 → 物理替换（更新 size/mime/ext/storage_name/update_time，used 按差额调整，旧物理文件直接删除，不可恢复）；缺省维持自动"(1)" |
+| GET  | /api/cloud/file/list               | cloud:file:list   | item 新增 `isPublic` 字段（前端显示「公开」标签）——兼容增量，不影响既有调用方                                                                                                       |
+
+### 6.5 system 域增量（删用户预检扩展）
+
+`UserService.remove` 预检链扩展：`cloud.hasFiles`（30011）→ `site.hasSite`（40112）依次询问，任一命中阻止删除。无新接口。

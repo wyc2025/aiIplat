@@ -1,9 +1,9 @@
-import { Body, Controller, Get, Post } from '@nestjs/common'
+import { Body, Controller, Get, Post, Query } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { CurrentUser } from '../../../gateway/decorators/current-user.decorator'
 import { OperationLog } from '../../../gateway/decorators/operation-log.decorator'
 import { RequirePermission } from '../../../gateway/decorators/require-permission.decorator'
-import { ShareCreateDto, ShareExtendDto, ShareStopDto } from './dto/share.dto'
+import { ShareCreateDto, ShareExtendDto, ShareListQueryDto, ShareStopDto } from './dto/share.dto'
 import { ShareService } from './share.service'
 
 /** 公开链接（管理侧，登录；cloud:share:*） */
@@ -23,9 +23,9 @@ export class ShareController {
 
   @Get('list')
   @RequirePermission('cloud:share:list')
-  @ApiOperation({ summary: '我的分享（不分页，创建时间倒序）' })
-  list(@CurrentUser('userId') userId: string) {
-    return this.shareService.list(BigInt(userId))
+  @ApiOperation({ summary: '我的分享（不分页；status 缺省排除已停止，keyword 按文件名过滤）' })
+  list(@CurrentUser('userId') userId: string, @Query() query: ShareListQueryDto) {
+    return this.shareService.list(BigInt(userId), query)
   }
 
   @Post('stop')

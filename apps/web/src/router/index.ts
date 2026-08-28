@@ -45,6 +45,13 @@ export const staticRoutes: RouteRecordRaw[] = [
     meta: { title: '404', hidden: true },
   },
   {
+    // 云盘公开分享访客页：独立根路由（免登录、无布局侧边栏），凭 token 访问
+    path: '/share/:token',
+    name: 'share-visitor',
+    component: () => import('@/views/cloud/share-visitor/index.vue'),
+    meta: { title: '文件分享', hidden: true },
+  },
+  {
     // 兜底：匹配所有未注册路径。直接渲染 404 组件而非 redirect——
     // redirect 会在全局守卫之前把导航劫持到 /404，导致整页刷新直达深层路径
     // （动态路由尚未注册）时守卫拿不到原始 path 而永远 404；

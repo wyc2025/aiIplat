@@ -114,6 +114,8 @@ export const ErrorCode = {
   CloudShareNotAllowed: 30009,
   /** 文件未通过内容审核，禁止分享 */
   CloudAuditNotPassed: 30010,
+  /** 用户仍有云盘文件，禁止删除 */
+  CloudUserHasFiles: 30011,
 } as const
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode]

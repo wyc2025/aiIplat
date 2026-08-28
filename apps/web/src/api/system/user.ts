@@ -38,3 +38,15 @@ export const assignUserRoles = (id: string, roleIds: number[]) =>
   put(`/system/user/${id}/roles`, { roleIds })
 
 export const deleteUser = (id: string) => del(`/system/user/${id}`)
+
+export interface UpdateQuotaPayload {
+  userId: string
+  quotaLimit: number
+  quotaUsed?: number
+}
+
+/** 调整用户配额（管理员；quotaLimit 下限=当前已用） */
+export const updateUserQuota = (data: UpdateQuotaPayload) => put('/cloud/admin/quota', data)
+
+/** 查询用户配额（含已用容量，作为调整下限参考） */
+export const getUserQuota = (userId: string) => get<{ userId: string; quotaLimit: string; quotaUsed: string }>('/cloud/admin/quota', { userId })

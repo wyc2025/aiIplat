@@ -3,10 +3,13 @@ import { ConfigService } from '@nestjs/config'
 import { ErrorCode } from '../../../common/constants/error-code'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
+import { StorageService } from '../../../infra/storage/storage.service'
 import type { FileListQueryDto, MkdirDto, RenameDto } from './dto/file.dto'
 
 /** 目录深度上限（R6） */
 const MAX_DEPTH = 10
+/** 头像记录的虚拟父目录（不可达，避免污染根目录列表）：BigInt(-1) */
+export const AVATAR_PARENT_ID = BigInt(-1)
 /** 单目录直接子项上限（R6；TransferService 上传计数复用，故导出） */
 export const MAX_CHILDREN = 500
 
@@ -15,6 +18,7 @@ export class FileService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly storage: StorageService,
   ) {}
 
   /** 目录内容列表：文件夹在前（名称升序），文件在后（修改时间倒序），不分页 */
@@ -35,6 +39,22 @@ export class FileService {
       .filter((f) => f.isDir === 0)
       .sort((a, b) => b.updateTime.getTime() - a.updateTime.getTime())
 
+    // 聚合"有效分享"标记（仅文件可分享）：有 status=1 且未过期的链接 → shared=true
+    const fileIds = files.map((f) => f.id)
+    const sharedSet = new Set<bigint>()
+    if (fileIds.length > 0) {
+      const shares = await this.prisma.cloudShare.findMany({
+        where: { userId, fileId: { in: fileIds }, status: 1 },
+        select: { fileId: true, expireAt: true },
+      })
+      const now = Date.now()
+      for (const s of shares) {
+        if (!s.expireAt || s.expireAt.getTime() >= now) {
+          sharedSet.add(s.fileId)
+        }
+      }
+    }
+
     const list = [...dirs, ...files].map((f) => ({
       id: f.id,
       name: f.name,
@@ -43,6 +63,7 @@ export class FileService {
       ext: f.ext,
       mime: f.mime,
       updateTime: f.updateTime,
+      shared: f.isDir === 0 && sharedSet.has(f.id),
     }))
 
     const { quota, used } = await this.getQuota(userId)
@@ -136,6 +157,26 @@ export class FileService {
       })
     }
     return { quota: usage.quota, used: usage.used }
+  }
+
+  /** 用户是否存在未删除的云盘文件（含头像记录）；用于删用户预检（R10） */
+  async hasFiles(userId: bigint): Promise<boolean> {
+    const hit = await this.prisma.cloudFile.findFirst({
+      where: { userId, deletedAt: null },
+      select: { id: true },
+    })
+    return !!hit
+  }
+
+  /** 头像预览流：仅归属当前用户且未删除的头像记录可读；返回 { stream, mime } */
+  async getAvatarStream(id: bigint, userId: bigint) {
+    const file = await this.prisma.cloudFile.findFirst({
+      where: { id, userId, deletedAt: null, parentId: AVATAR_PARENT_ID },
+    })
+    if (!file || !file.storageName) {
+      throw new BusinessException(ErrorCode.CloudFileNotFound, '头像不存在或无权访问')
+    }
+    return { stream: this.storage.createReadStream(file.storageName), mime: file.mime }
   }
 
   /** 校验目标项归属当前用户且未删除；isDir 校验可强制要求文件夹（TransferService 上传/预览复用） */

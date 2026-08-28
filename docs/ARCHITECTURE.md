@@ -151,6 +151,14 @@ views/ai/
    传数组表示满足其一即可；超管（roles 含 admin）直接放行
 6. 路由守卫：无 token → /login；有 token 但无菜单数据 → 先拉 userinfo 再放行；
    已登录访问 /login → 重定向首页
+7. 【免登录公开路由】动态路由（后端菜单驱动）之外的「独立根路由」默认也受守卫拦截，
+   必须显式加入免登录白名单才能匿名访问。当前免登录公开路由：
+   - /login、/404（WHITE_LIST 基础项）
+   - /share/:token（云盘访客分享页，凭链接 token 访问，不要求登录态；
+     路由守卫通过判断 to.name === 'share-visitor' 放行，见 router/guard.ts 的 isPublicRoute）
+   新增任何「访客可匿名访问」的独立路由时，必须同步在 guard.ts 的 isPublicRoute 注册，
+   否则会被守卫误重定向到 /login（T31 联调实测踩坑：未注册导致访客页跳登录）。
+   注意：免登录公开页仍须后端对应接口标记 @Public()，前端/后端任一缺失都不可匿名访问。
 ```
 
 ### 3.3 request.ts 封装行为规范
@@ -219,6 +227,27 @@ apps/api/src/
                 ├── get-online-users.tool.ts
                 ├── kick-user.tool.ts
                 └── ...
+    └── cloud/              # ★ P3 新增域（云盘）
+        ├── cloud.module.ts #   域模块：exports CloudFacade（门面）/ FileModule 等
+        ├── facade/         #   ★ 域门面：跨域能力唯一出口
+        │   └── cloud-facade.service.ts # CloudFacade：对外暴露 hasFiles(userId) + saveAvatar
+        ├── admin/          #   管理员（配额调整 / 统计）
+        │   ├── admin.controller.ts  #   PUT/GET /api/cloud/admin/quota、GET /api/cloud/admin/stats
+        │   ├── admin.service.ts     #   配额调整（下限=used）、单用户/全局统计
+        │   └── dto/quota.dto.ts      #   UpdateQuotaDto（class-validator）
+        ├── file/           #   我的文件
+        │   ├── file.controller.ts   #   list/path/mkdir/rename/delete/avatar（头像预览流）
+        │   ├── file.service.ts      #   文件树查询与维护 + hasFiles + getAvatarStream
+        │   └── dto/                 #   MkdirDto / RenameDto（class-validator）
+        ├── transfer/       #   上传下载（流式）
+        │   ├── transfer.controller.ts # upload/preview/download
+        │   └── transfer.service.ts    # 配额校验、used 记账、预览白名单
+        │   └── tmp-storage.ts         # 自定义 Multer StorageEngine（流式落临时区）
+        ├── recycle/        #   回收站（顶层被删项算法/还原/递归彻底删除）
+        └── share/          #   公开链接
+            ├── share.controller.ts      # 管理侧（登录）：create/list/stop/extend
+            ├── share-public.controller.ts # 访客侧（@Public）：info/download
+            └── share.service.ts
 ```
 
 ### 4.2 请求生命周期（守卫链，全局注册顺序固定）
@@ -239,15 +268,17 @@ apps/api/src/
 - **统一响应**：`{ "code": 0, "message": "success", "data": ... }`
 - **错误码**：
 
-| code  | 含义                                          |
-| ----- | --------------------------------------------- |
-| 0     | 成功                                          |
-| 40001 | 参数校验失败                                  |
-| 40100 | 未登录 / token 失效                           |
-| 40300 | 无权限                                        |
-| 40400 | 资源不存在                                    |
-| 50000 | 服务器内部错误                                |
-| 1xxxx | 业务错误（各域自定义，如 10001 用户名已存在） |
+| code  | 含义                                                                                                   |
+| ----- | ------------------------------------------------------------------------------------------------------ |
+| 0     | 成功                                                                                                   |
+| 40001 | 参数校验失败                                                                                           |
+| 40100 | 未登录 / token 失效                                                                                    |
+| 40300 | 无权限                                                                                                 |
+| 40400 | 资源不存在                                                                                             |
+| 50000 | 服务器内部错误                                                                                         |
+| 1xxxx | 业务错误（各域自定义，如 10001 用户名已存在）                                                          |
+| 2xxxx | ai 域业务错误（如 20001 无套餐 / 20002 余额不足 / 20007 并发流 / 20015 无工具权限 / 20016 确认单失效） |
+| 3xxxx | cloud 域业务错误（见下「cloud 错误码 30xxx 段」）                                                      |
 
 - **分页请求**：GET 参数 `pageNo`（从 1 起）、`pageSize`（默认 10，最大 100），列表条件平铺
 - **分页返回**：`data = { "list": [], "total": 0, "pageNo": 1, "pageSize": 10 }`
@@ -274,13 +305,47 @@ apps/api/src/
 
 ### 4.6 文件上传（第一期为二期云盘打底）
 
-- `POST /api/system/file/upload`：multipart，Multer 接收，单文件上限 10MB
-- 存储：`UPLOAD_DIR/yyyyMM/uuid.ext`，落库 `sys_file`
-- 业务代码只允许通过 `infra/storage/StorageService` 读写文件，禁止直接操作 fs
+- 存储：`UPLOAD_DIR/yyyyMM/uuid.ext`；业务代码只允许通过 `infra/storage/StorageService` 读写文件，禁止直接操作 fs
+- **实际落地说明（T30 修订，2026-08-28）**：P1 规划的 system 通用上传口 `POST /api/system/file/upload`（Multer 10MB，落 sys_file）未实现；头像上传按 §4.7 域门面约定经 `CloudFacade.saveAvatar` 落 cloud_file（虚拟 parentId=-1，不污染根目录列表），sys_file 表暂无写入方。如后续出现新的 system 域上传消费场景，再按原规划另起任务建通用上传口
+
+### 4.7 云盘（cloud 域）架构约定（P3）
+
+> 域纪律：cloud 域的对外能力（被 system 等域消费）**只经 `CloudFacade` 暴露**，禁止跨域 import 对端内部 Service。sys_user 头像复用 cloud_file 存储，经 `CloudFacade.saveAvatar` 登记（R10 删用户预检经 `hasFiles`）。
+
+- **表前缀**：`cloud_`；域边界同 R6（禁止跨域 JOIN / import）
+- **流式上传纪律**：全程磁盘流，不进内存
+  - 方案：`Multer` 的 `diskStorage` 在 pnpm 隔离下无法工作，改用自定义 `StorageEngine`（`infra/storage/tmp-storage.ts`：写 `UPLOAD_DIR/tmp/uuid.tmp`，`fs.stat` 回填权威 `file.size`，`_removeFile` 清半截，`fail` 兜底流错误/`aborted`）
+  - 超大文件：数千 MB 仍安全；支持断电续传与断点续传（**当前未实现，仅预留**）
+  - 状态机：pending（tmp，无记录）→ active（正式区，有记录，@SkipTransform）→ deleted（软删）
+- **回收站语义（R2）**：只标自身（OWNER 不可删他人文件），顶层被删项并列展示，还原回原父（父已删则归位根目录），彻底删除递归 children
+- **配额记账（R3）**：上传成功 `+size`；彻底删除/清空 `-size`；软删、还原、重命名、新建文件夹不动；头像登记 `+size` 并软删旧头像回退 `-size`；校验与记账存在 check-then-act 竞态，个人单用户场景接受轻微超额（≤单文件上限），不做分布式锁；admin 调整配额下限=当前 used
+- **分享端点安全**：访客侧 `GET /cloud/share/:token`（返回分享基本信息）与 `GET /cloud/share/:token/download`（流式下载）为 `@Public` 独立 controller（`share-public.controller.ts`，免登录、独立限流 30 次/分/IP），凭 token 访问（token 经 path，而非 query/Referer）。下载前校验 token 有效性 / status=1 / 未过期 / 文件存在且未删 /（开关开启）审核门禁；下载成功 `visit_count + 1`。当前**不区分「登录可见 / 免密公开」**（`is_public` 字段预留，本期待定）。**访问次数上限（max_visits：下载达 N 次自动失效）待实现**。前端访客页 `/share/:token` 须同时：① 后端接口 `@Public()`；② 前端 `router/guard.ts` 的 `isPublicRoute` 将 `share-visitor` 加入免登录白名单（详见 §3.2）——任一侧缺失都会匿名不可访问。
+- **文件预览**：活跃且通过内容审核才可读；`transfer/preview` 用 `createReadStream`（支持 Range，`Content-Type` 取 `mime`）；`file/avatar/:id` 仅当前用户自己的头像记录可读
+- **内容审核（开关）**：`CloudContentAuditService` 预留（AI 文本/图片识别），默认关闭；开启后未过审文件禁止分享
+- **前端结构**：`views/cloud/FileExplorer.vue`（面包屑/双击/URL 同步/上传进度/预览弹层）、`Recycle.vue`、`Share.vue`，访客分享页独立路由 `share/:token`；复用 `ProTable` / `useTable` 等公共资产
+- **前端门面约束**：访客侧只调公开接口，不携带登录态 token；管理员页组件可带 token
+
+> AI 关系（预留）：用户上传的文档/图片可经 `ai` 域检索与问答（嵌入与向量检索），当前未实现。
+
+**cloud 错误码 30xxx 段（30xxx 为 cloud 域业务错误）**
+
+| code  | 文案                                                   | 处理                     |
+| ----- | ------------------------------------------------------ | ------------------------ |
+| 30001 | 文件/文件夹不存在或无权访问                            | 刷新当前目录列表         |
+| 30002 | 同目录下已存在同名项                                   | 提示更换名称             |
+| 30003 | 存储配额不足                                           | 提示用量与配额，引导清理 |
+| 30004 | 文件超出大小限制                                       | 提示上限值               |
+| 30005 | 该类型不支持预览                                       | 提示"请下载查看"         |
+| 30006 | 超出目录限制（深度>10 / 单目录>500 项 / 名称>64 字符） | 提示具体限制             |
+| 30007 | 回收站记录不存在                                       | 刷新回收站列表           |
+| 30008 | 分享链接无效（不存在/已停止/已过期/文件已删/未过审）   | 访客页提示失效           |
+| 30009 | 文件夹暂不支持创建公开链接                             | 提示                     |
+| 30010 | 文件未通过内容审核，禁止分享                           | 提示（开关开启后生效）   |
+| 30011 | 用户仍有云盘文件，禁止删除                             | 提示（R10 删用户预检）   |
 
 ---
 
-## 5. 数据库设计（sys_ 前缀为 P1 底座；P2a 新增 7 张 ai_ 表）
+## 5. 数据库设计（sys_ 前缀为 P1 底座；P2a 新增 7 张 ai_ 表；P3 新增 3 张 cloud_ 表）
 
 > Prisma model 用 PascalCase + `@@map("sys_user")`，字段 camelCase + `@map("user_name")`。以下为数据库层结构。时间字段统一 `created_at / updated_at`，软删除用 `deleted_at`。
 >
@@ -499,6 +564,8 @@ apps/api/src/
 
 索引：(user_id, parent_id, deleted_at)、(user_id, deleted_at)。
 
+> 同名判定在 Service 层（同目录 name+is_dir 查重），**未加唯一索引**：软删 + 回收站期间会短暂出现同名记录（还原/重名场景），物理唯一键会冲突。
+
 ### cloud_share —— 公开链接（P3 新增）
 
 | 字段        | 类型               | 说明                                                 |
@@ -511,6 +578,10 @@ apps/api/src/
 | expire_at   | datetime null      | null = 永久                                          |
 | status      | tinyint default 1  | 1 有效 / 0 已停止（过期不置状态，靠 expire_at 判定） |
 | create_time | datetime           |                                                      |
+
+索引：`@@index([fileId])`、`@@index([userId])`。
+
+> 注：`(user_id, status, expire_at)` 复合索引未建（本期管理列表量小，直接走 userId 查询即可；后续量大再补建）。
 
 ### cloud_usage —— 配额（P3 新增）
 
@@ -565,9 +636,9 @@ apps/api/src/
 
 ### seed 增补（P3 云盘模块）
 
-- 云盘菜单树（见 ARCHITECTURE-P3-增补 §13.9）：云盘管理目录（我的文件 / 公开链接 / 回收站三页及 cloud:* 按钮权限标识）
-- 系统管理/用户管理下追加按钮"调整配额"（cloud:quota:update）
-- common 角色授予「云盘管理」整棵子树（不含 cloud:quota:update）；超管 `*` 自动覆盖
+- 云盘菜单树（见 §4.7 / §5 接口约定）：云盘管理目录（我的文件 / 公开链接 / 回收站三页及 cloud:* 按钮权限标识）
+- 系统管理/用户管理下追加按钮"调整配额"（cloud:admin:quota）
+- common 角色授予「云盘管理」整棵子树（不含 cloud:admin:quota，仅 admin 可调整）；超管 `*` 自动覆盖
 
 ---
 
@@ -611,49 +682,61 @@ CORS_ORIGINS=http://localhost:5173
 
 P2a 增补：无新增环境变量（apiKey 存 ai_provider 表）。`.env` 增补可选项：`AI_CHAT_THROTTLE_LIMIT=20`（聊天限流，默认 20 次/分）。
 
+P3 增补（upload 配置组，见 `apps/api/src/config/upload.config.ts`）：
+
+- `UPLOAD_DIR`：物理根目录（默认 `./uploads`，临时区 `UPLOAD_DIR/tmp`）
+- `CLOUD_MAX_FILE_SIZE`：单文件上限字节（默认 100MB）
+- `CLOUD_DEFAULT_QUOTA`：默认配额字节（默认 1GB）
+- `CLOUD_ALLOWED_PREVIEW_TYPES`：预览白名单（默认 `image/*,text/*,application/pdf`）
+- `CLOUD_AUDIT_ENABLED`：内容审核开关（默认 `false`，预留）
+- `CLOUD_PUBLIC_SHARE_RATE_LIMIT`：公开分享限流（待补）
+
 ---
 
 ## 9. 公共资产表（优先复用，禁止重复造；新增后必须回写登记）
 
-| 名称                                                        | 位置                                      | 用途                                                                                                                                                             | 状态                              |
-| ----------------------------------------------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| request                                                     | web/src/utils/request.ts                  | Axios 封装（双 token 静默刷新）                                                                                                                                  | 已建（T7）                        |
-| v-permission                                                | web/src/directives/permission.ts          | 按钮权限指令                                                                                                                                                     | 已建（T7）                        |
-| useTable                                                    | web/src/hooks/useTable.ts                 | 列表页通用逻辑（分页/查询/加载态）                                                                                                                               | 已建（T9）                        |
-| token                                                       | web/src/utils/token.ts                    | 双 token localStorage 读写                                                                                                                                       | 已建（T7）                        |
-| tree                                                        | web/src/utils/tree.ts                     | 平铺列表组树（dept/menu 通用）                                                                                                                                   | 已建（T7）                        |
-| validate                                                    | web/src/utils/validate.ts                 | 密码/手机号/邮箱校验规则                                                                                                                                         | 已建（T7）                        |
-| useUserStore 等四 store                                     | web/src/stores                            | user/permission/tabs/settings                                                                                                                                    | 已建（T7）                        |
-| useDict                                                     | web/src/hooks/useDict.ts                  | 字典取值与渲染（带缓存）                                                                                                                                         | 已建（T9）                        |
-| ProTable                                                    | web/src/components/ProTable               | 搜索+表格+分页+操作列                                                                                                                                            | 已建（T9）                        |
-| FormDialog                                                  | web/src/components/FormDialog             | 新增/编辑表单弹窗                                                                                                                                                | 已建（T9）                        |
-| IconSelect                                                  | web/src/components/IconSelect             | 图标选择器                                                                                                                                                       | 待建（T9）                        |
-| Upload                                                      | web/src/components/Upload                 | 文件上传                                                                                                                                                         | 待建（T9）                        |
-| JwtAuthGuard                                                | api/src/gateway/guards                    | 全局认证守卫                                                                                                                                                     | 已建（T2）                        |
-| PermissionGuard                                             | api/src/gateway/guards                    | 全局权限守卫                                                                                                                                                     | 已建（T2）                        |
-| TransformInterceptor                                        | api/src/gateway/interceptors              | 统一响应 + bigint 转字符串                                                                                                                                       | 已建（T2）                        |
-| OperationLogInterceptor                                     | api/src/gateway/interceptors              | 操作日志异步落库（配 @OperationLog）                                                                                                                             | 已建（T6）                        |
-| GlobalExceptionFilter                                       | api/src/gateway/filters                   | 全局异常兜底                                                                                                                                                     | 已建（T2）                        |
-| @Public / @RequirePermission / @CurrentUser / @OperationLog | api/src/gateway/decorators                | 装饰器组                                                                                                                                                         | 已建（T2）                        |
-| PageQueryDto / PageResultDto                                | api/src/common/dto                        | 分页基类                                                                                                                                                         | 已建（T2）                        |
-| BusinessException                                           | api/src/common/exceptions                 | 业务异常（code + message）                                                                                                                                       | 已建（T2）                        |
-| ErrorCode                                                   | api/src/common/constants/error-code.ts    | 统一错误码常量                                                                                                                                                   | 已建（T2）                        |
-| RedisKey                                                    | api/src/common/constants/redis-key.ts     | Redis Key 生成约定                                                                                                                                               | 已建（T2）                        |
-| parseDurationToSeconds                                      | api/src/common/utils/duration.ts          | '2h'/'7d' 时长解析为秒                                                                                                                                           | 已建（T10，自 auth.service 抽出） |
-| 配置模块组                                                  | api/src/config                            | database/redis/jwt/upload 配置 + validate.ts 启动环境变量校验                                                                                                    | 已建（T2）                        |
-| PrismaService / RedisService                                | api/src/infra/prisma、api/src/infra/redis | 基础设施服务（全局模块，懒连接；RedisService 含 scanDel 按前缀批量清理）                                                                                         | 已建（T2）                        |
-| StorageService                                              | api/src/infra/storage                     | 文件存储抽象（moveToStorage/remove/removeTmp/createReadStream/stat，本地磁盘，预留 MinIO/OSS 切换；tmp 区 UPLOAD_DIR/tmp，正式区 yyyyMM/uuid.ext，路径穿越防御） | 已建（T27）                       |
-| ProviderService                                             | api/src/modules/ai/engine                 | OpenAI 兼容适配器（流式调用 + usage 解析）                                                                                                                       | 已建（T12）                       |
-| CreditService                                               | api/src/modules/ai/credit                 | 积分预检/结算/余额                                                                                                                                               | 已建（T14）                       |
-| @SkipTransform                                              | api/src/gateway/decorators                | SSE 接口跳过统一响应                                                                                                                                             | 已建（T14）                       |
-| sse                                                         | web/src/views/ai/utils/sse.ts             | 前端 SSE 客户端                                                                                                                                                  | 已建（T17）                       |
-| MarkdownView                                                | web/src/views/ai/components               | markdown-it 渲染封装（禁 raw HTML）                                                                                                                              | 已建（T17）                       |
-| AiTool / ToolRegistry                                       | api/src/modules/ai/tool                   | 工具类型与注册表（新增工具 = tools/ 下加一个文件并注册）                                                                                                         | 已建（T19）                       |
-| PermissionService                                           | api/src/gateway/services                  | 权限判定共用服务（PermissionGuard 与工具层同源）                                                                                                                 | 已建（T19）                       |
-| PLATFORM-GUIDE                                              | docs/PLATFORM-GUIDE.md                    | AI 平台手册，注入 system prompt；功能变更必须同步更新                                                                                                            | 已建（T23）                       |
-| SystemPromptService                                         | api/src/modules/ai/chat                   | system prompt 拼装（手册缓存 + 用户上下文 + 工具原则）                                                                                                           | 已建（T23）                       |
-| ToolConfirmCard                                             | web/src/views/ai/components               | 确认卡片组件（参数摘要 + 确认/取消 + 过期态）                                                                                                                    | 已建（T24）                       |
-| ToolResultTag                                               | web/src/views/ai/components               | 工具结果折叠标签                                                                                                                                                 | 已建（T24）                       |
+| 名称                                                        | 位置                                                 | 用途                                                                                                                                                                                                      | 状态                              |
+| ----------------------------------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| request                                                     | web/src/utils/request.ts                             | Axios 封装（双 token 静默刷新）                                                                                                                                                                           | 已建（T7）                        |
+| v-permission                                                | web/src/directives/permission.ts                     | 按钮权限指令                                                                                                                                                                                              | 已建（T7）                        |
+| useTable                                                    | web/src/hooks/useTable.ts                            | 列表页通用逻辑（分页/查询/加载态）                                                                                                                                                                        | 已建（T9）                        |
+| token                                                       | web/src/utils/token.ts                               | 双 token localStorage 读写                                                                                                                                                                                | 已建（T7）                        |
+| tree                                                        | web/src/utils/tree.ts                                | 平铺列表组树（dept/menu 通用）                                                                                                                                                                            | 已建（T7）                        |
+| validate                                                    | web/src/utils/validate.ts                            | 密码/手机号/邮箱校验规则                                                                                                                                                                                  | 已建（T7）                        |
+| useUserStore 等四 store                                     | web/src/stores                                       | user/permission/tabs/settings                                                                                                                                                                             | 已建（T7）                        |
+| useDict                                                     | web/src/hooks/useDict.ts                             | 字典取值与渲染（带缓存）                                                                                                                                                                                  | 已建（T9）                        |
+| ProTable                                                    | web/src/components/ProTable                          | 搜索+表格+分页+操作列                                                                                                                                                                                     | 已建（T9）                        |
+| FormDialog                                                  | web/src/components/FormDialog                        | 新增/编辑表单弹窗                                                                                                                                                                                         | 已建（T9）                        |
+| IconSelect                                                  | web/src/components/IconSelect                        | 图标选择器                                                                                                                                                                                                | 待建（T9）                        |
+| Upload                                                      | web/src/components/Upload                            | 文件上传                                                                                                                                                                                                  | 待建（T9）                        |
+| JwtAuthGuard                                                | api/src/gateway/guards                               | 全局认证守卫                                                                                                                                                                                              | 已建（T2）                        |
+| PermissionGuard                                             | api/src/gateway/guards                               | 全局权限守卫                                                                                                                                                                                              | 已建（T2）                        |
+| TransformInterceptor                                        | api/src/gateway/interceptors                         | 统一响应 + bigint 转字符串                                                                                                                                                                                | 已建（T2）                        |
+| OperationLogInterceptor                                     | api/src/gateway/interceptors                         | 操作日志异步落库（配 @OperationLog）                                                                                                                                                                      | 已建（T6）                        |
+| GlobalExceptionFilter                                       | api/src/gateway/filters                              | 全局异常兜底                                                                                                                                                                                              | 已建（T2）                        |
+| @Public / @RequirePermission / @CurrentUser / @OperationLog | api/src/gateway/decorators                           | 装饰器组                                                                                                                                                                                                  | 已建（T2）                        |
+| PageQueryDto / PageResultDto                                | api/src/common/dto                                   | 分页基类                                                                                                                                                                                                  | 已建（T2）                        |
+| BusinessException                                           | api/src/common/exceptions                            | 业务异常（code + message）                                                                                                                                                                                | 已建（T2）                        |
+| ErrorCode                                                   | api/src/common/constants/error-code.ts               | 统一错误码常量                                                                                                                                                                                            | 已建（T2）                        |
+| RedisKey                                                    | api/src/common/constants/redis-key.ts                | Redis Key 生成约定                                                                                                                                                                                        | 已建（T2）                        |
+| parseDurationToSeconds                                      | api/src/common/utils/duration.ts                     | '2h'/'7d' 时长解析为秒                                                                                                                                                                                    | 已建（T10，自 auth.service 抽出） |
+| 配置模块组                                                  | api/src/config                                       | database/redis/jwt/upload 配置 + validate.ts 启动环境变量校验                                                                                                                                             | 已建（T2）                        |
+| PrismaService / RedisService                                | api/src/infra/prisma、api/src/infra/redis            | 基础设施服务（全局模块，懒连接；RedisService 含 scanDel 按前缀批量清理）                                                                                                                                  | 已建（T2）                        |
+| StorageService                                              | api/src/infra/storage                                | 文件存储抽象（moveToStorage/remove/removeTmp/createReadStream/stat/tmpDir，本地磁盘，预留 MinIO/OSS 切换；tmp 区 UPLOAD_DIR/tmp，正式区 yyyyMM/uuid.ext，路径穿越防御；静态 tmpDirPath() 供 multer 引擎） | 已建（T27/T30）                   |
+| 通用 tmp StorageEngine                                      | api/src/infra/storage/tmp-storage.ts                 | Multer 临时区流式落盘引擎（公共资产）：写 UPLOAD_DIR/tmp/uuid.tmp、stat 回填 file.size、_removeFile 清半截、fail 兜底流错误/aborted；cloud/transfer 与 system/avatar 统一复用                             | 已建（T27 提至 infra，T30 复用）  |
+| CloudFacade                                                 | api/src/modules/cloud/facade/cloud-facade.service.ts | 跨域门面（随 CloudModule 导出）：hasFiles(userId)（R10 删用户预检）+ saveAvatar(userId, meta)（头像登记/used 同步/旧头像软删回退）；system 域仅经此调用                                                   | 已建（T30）                       |
+| FileExplorer / FilePreview / UploadButton                   | web/src/views/cloud                                  | 云盘前端公共组件（面包屑/双击/URL 同步/上传进度/预览弹层），复用 ProTable/useTable                                                                                                                        | 待建（T31 起）                    |
+| ProviderService                                             | api/src/modules/ai/engine                            | OpenAI 兼容适配器（流式调用 + usage 解析）                                                                                                                                                                | 已建（T12）                       |
+| CreditService                                               | api/src/modules/ai/credit                            | 积分预检/结算/余额                                                                                                                                                                                        | 已建（T14）                       |
+| @SkipTransform                                              | api/src/gateway/decorators                           | SSE 接口跳过统一响应                                                                                                                                                                                      | 已建（T14）                       |
+| sse                                                         | web/src/views/ai/utils/sse.ts                        | 前端 SSE 客户端                                                                                                                                                                                           | 已建（T17）                       |
+| MarkdownView                                                | web/src/views/ai/components                          | markdown-it 渲染封装（禁 raw HTML）                                                                                                                                                                       | 已建（T17）                       |
+| AiTool / ToolRegistry                                       | api/src/modules/ai/tool                              | 工具类型与注册表（新增工具 = tools/ 下加一个文件并注册）                                                                                                                                                  | 已建（T19）                       |
+| PermissionService                                           | api/src/gateway/services                             | 权限判定共用服务（PermissionGuard 与工具层同源）                                                                                                                                                          | 已建（T19）                       |
+| PLATFORM-GUIDE                                              | docs/PLATFORM-GUIDE.md                               | AI 平台手册，注入 system prompt；功能变更必须同步更新                                                                                                                                                     | 已建（T23）                       |
+| SystemPromptService                                         | api/src/modules/ai/chat                              | system prompt 拼装（手册缓存 + 用户上下文 + 工具原则）                                                                                                                                                    | 已建（T23）                       |
+| ToolConfirmCard                                             | web/src/views/ai/components                          | 确认卡片组件（参数摘要 + 确认/取消 + 过期态）                                                                                                                                                             | 已建（T24）                       |
+| ToolResultTag                                               | web/src/views/ai/components                          | 工具结果折叠标签                                                                                                                                                                                          | 已建（T24）                       |
 
 ### Redis Key 增补约定（写入 RedisKey 常量）
 

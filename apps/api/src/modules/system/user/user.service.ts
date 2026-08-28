@@ -10,6 +10,7 @@ import { parseDurationToSeconds } from '../../../common/utils/duration'
 import type { AuthUser } from '../../../gateway/guards/jwt.strategy'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { RedisService } from '../../../infra/redis/redis.service'
+import { CloudFacade } from '../../cloud/facade/cloud-facade.service'
 import type {
   AssignRoleDto,
   CreateUserDto,
@@ -28,6 +29,7 @@ export class UserService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly config: ConfigService,
+    private readonly cloud: CloudFacade,
   ) {}
 
   /** 分页查询（含部门、角色；剔除 password） */
@@ -122,11 +124,14 @@ export class UserService {
     return { success: true }
   }
 
-  /** 删除（软删除，admin 不可删除）；清理用户-角色关联 */
+  /** 删除（软删除，admin 不可删除）；清理用户-角色关联；R10：仍有云盘文件者禁止删除 */
   async remove(id: bigint) {
     const user = await this.assertExists(id)
     if (user.username === ADMIN_USERNAME) {
       throw new BusinessException(ErrorCode.AdminProtected, 'admin 用户不可删除')
+    }
+    if (await this.cloud.hasFiles(id)) {
+      throw new BusinessException(ErrorCode.CloudUserHasFiles, '该用户仍有云盘文件，禁止删除')
     }
     await this.prisma.sysUserRole.deleteMany({ where: { userId: id } })
     await this.prisma.sysUser.update({ where: { id }, data: { deletedAt: new Date() } })

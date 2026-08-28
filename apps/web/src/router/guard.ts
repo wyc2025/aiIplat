@@ -7,6 +7,11 @@ import { registerDynamicRoutes } from './dynamic'
 
 const WHITE_LIST = ['/login', '/404']
 
+/** 免登录公开页（如云盘访客分享页，凭 token 访问，不要求登录态） */
+function isPublicRoute(to: { path: string; name: unknown | symbol }): boolean {
+  return WHITE_LIST.includes(to.path) || to.name === 'share-visitor'
+}
+
 /**
  * 确保权限数据与动态路由已就绪。
  * 供 layout 路由的 beforeEnter 调用：必须在 redirect 到 /dashboard 之前完成注册，
@@ -46,7 +51,7 @@ export function setupRouterGuard(router: Router): void {
   router.beforeEach(async (to) => {
     const token = getAccessToken()
 
-    if (WHITE_LIST.includes(to.path)) {
+    if (isPublicRoute(to)) {
       if (to.path === '/login' && token) return '/dashboard'
       return true
     }

@@ -2,12 +2,23 @@
   <div class="v-profile">
     <!-- 左侧个人卡片（PRD F11：头像、昵称、角色、最后登录） -->
     <div class="v-profile-side">
-      <el-avatar
-        :size="84"
-        :src="userStore.userInfo?.avatar || undefined"
+      <el-upload
+        class="v-avatar-uploader"
+        accept="image/*"
+        :show-file-list="false"
+        :http-request="handleAvatarUpload"
+        :before-upload="beforeAvatarUpload"
       >
-        {{ userStore.nickname.charAt(0) }}
-      </el-avatar>
+        <el-avatar
+          :size="84"
+          :src="userStore.userInfo?.avatar || undefined"
+        >
+          {{ userStore.nickname.charAt(0) }}
+        </el-avatar>
+        <div class="v-avatar-tip">
+          点击更换
+        </div>
+      </el-upload>
       <h3 class="v-profile-nickname">
         {{ userStore.nickname }}
       </h3>
@@ -164,7 +175,7 @@ import 'element-plus/es/components/message/style/css'
 import dayjs from 'dayjs'
 import type { FormInstance, FormRules } from 'element-plus'
 import type { Ref } from 'vue'
-import { changePassword, updateProfile } from '@/api/system/profile'
+import { changePassword, updateProfile, uploadAvatar } from '@/api/system/profile'
 import { useDict, type DictItem } from '@/hooks/useDict'
 import { usePermissionStore } from '@/stores/permission'
 import { useTabsStore } from '@/stores/tabs'
@@ -178,6 +189,35 @@ const tabsStore = useTabsStore()
 // useDict 返回动态键，TS 无法推导，按文档用法做类型收窄
 const { sys_user_gender } = useDict('sys_user_gender') as unknown as {
   sys_user_gender: Ref<DictItem[]>
+}
+
+// ========== 头像上传（图片 ≤5MB） ==========
+const MAX_AVATAR_MB = 5
+function beforeAvatarUpload(file: File): boolean {
+  const isImage = file.type.startsWith('image/')
+  if (!isImage) {
+    ElMessage.error('头像仅支持图片格式')
+    return false
+  }
+  const isLt5M = file.size / 1024 / 1024 <= MAX_AVATAR_MB
+  if (!isLt5M) {
+    ElMessage.error('头像大小不可超过 5MB')
+    return false
+  }
+  return true
+}
+
+async function handleAvatarUpload(options: { file: File }) {
+  try {
+    const res = await uploadAvatar(options.file)
+    // 同步 userinfo.avatar（后端已落盘并登记云盘记录）
+    if (userStore.userInfo) {
+      userStore.userInfo = { ...userStore.userInfo, avatar: res.avatar }
+    }
+    ElMessage.success('头像已更新')
+  } catch {
+    // 错误提示已由 request 拦截器统一弹出
+  }
 }
 
 // ========== 基本信息 ==========
@@ -309,6 +349,22 @@ function formatTime(time?: string | null): string {
   flex-direction: column;
   align-items: center;
   gap: 8px;
+}
+.v-avatar-uploader {
+  cursor: pointer;
+  text-align: center;
+}
+.v-avatar-uploader :deep(.el-avatar) {
+  border: 2px dashed #dcdfe6;
+  transition: border-color 0.2s;
+}
+.v-avatar-uploader:hover :deep(.el-avatar) {
+  border-color: #409eff;
+}
+.v-avatar-tip {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #909399;
 }
 .v-profile-nickname {
   margin: 8px 0 0;

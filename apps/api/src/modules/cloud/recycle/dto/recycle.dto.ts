@@ -2,13 +2,13 @@ import { ApiPropertyOptional } from '@nestjs/swagger'
 import { Type } from 'class-transformer'
 import { IsInt, IsOptional, Min } from 'class-validator'
 
-/** 回收站列表查询（无 parentId = 顶层被删项；带 parentId = 只读浏览被删文件夹内容） */
+/** 回收站列表查询（parentId 缺省或 0 = 顶层被删项；带 parentId = 只读浏览被删文件夹内容） */
 export class RecycleListQueryDto {
-  @ApiPropertyOptional({ description: '被删文件夹 ID，缺省返回顶层被删项', default: undefined })
+  @ApiPropertyOptional({ description: '被删文件夹 ID（0 或缺省 = 顶层被删项）', default: undefined })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
-  @Min(1)
+  @Min(0)
   parentId?: number
 }
 

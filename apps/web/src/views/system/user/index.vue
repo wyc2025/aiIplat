@@ -152,6 +152,15 @@
           </el-button>
           <el-button
             v-if="row.username !== 'admin'"
+            v-permission="'cloud:admin:quota'"
+            link
+            type="primary"
+            @click="openQuota(row)"
+          >
+            配额
+          </el-button>
+          <el-button
+            v-if="row.username !== 'admin'"
             v-permission="'system:user:delete'"
             link
             type="danger"
@@ -326,6 +335,50 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 配额调整弹窗 -->
+    <el-dialog
+      v-model="quotaVisible"
+      title="调整云盘配额"
+      width="480px"
+      :close-on-click-modal="false"
+      destroy-on-close
+    >
+      <el-form
+        v-loading="quotaLoading"
+        label-width="96px"
+      >
+        <el-form-item label="用户">
+          <span>{{ quotaRow?.nickname }}（{{ quotaRow?.username }}）</span>
+        </el-form-item>
+        <el-form-item label="已用容量">
+          <span>{{ quotaUsedText }}</span>
+          <span class="v-quota-hint">（配额下限）</span>
+        </el-form-item>
+        <el-form-item label="配额上限">
+          <el-input-number
+            v-model="quotaLimitMb"
+            :min="Math.ceil(quotaUsedMb)"
+            :step="100"
+            :controls="true"
+            style="width: 200px"
+          />
+          <span class="v-quota-unit">MB</span>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="quotaVisible = false">
+          取 消
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="quotaSubmitting"
+          @click="handleQuotaSubmit"
+        >
+          确 定
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -339,9 +392,11 @@ import {
   createUser,
   deleteUser,
   getUserPage,
+  getUserQuota,
   resetUserPassword,
   updateUser,
   updateUserStatus,
+  updateUserQuota,
 } from '@/api/system/user'
 import { getAllRoles } from '@/api/system/role'
 import { getDeptList } from '@/api/system/dept'
@@ -353,6 +408,14 @@ import type { DeptItem, RoleItem, UserRow } from '@/types/api'
 import { listToTree } from '@/utils/tree'
 import { isEmail, isPassword, isPhone } from '@/utils/validate'
 import { usePermissionStore } from '@/stores/permission'
+
+const MB = 1024 * 1024
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(2)} MB`
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(2)} KB`
+  return `${bytes} B`
+}
 
 // useDict 返回动态键，TS 无法推导，按文档用法做类型收窄
 const { sys_user_gender } = useDict('sys_user_gender') as unknown as {
@@ -565,10 +628,70 @@ async function handleDelete(row: UserRow) {
   ElMessage.success('删除成功')
   load()
 }
+
+// ========== 配额调整（cloud:admin:quota） ==========
+const quotaVisible = ref(false)
+const quotaLoading = ref(false)
+const quotaSubmitting = ref(false)
+const quotaRow = ref<UserRow | null>(null)
+const quotaUsedBytes = ref(0)
+const quotaLimitMb = ref(0)
+
+const quotaUsedMb = computed(() => quotaUsedBytes.value / MB)
+const quotaUsedText = computed(() => formatBytes(quotaUsedBytes.value))
+
+async function openQuota(row: UserRow) {
+  quotaRow.value = row
+  quotaVisible.value = true
+  quotaLoading.value = true
+  try {
+    const res = await getUserQuota(row.id)
+    quotaUsedBytes.value = Number(res.quotaUsed)
+    // 配额上限初值：不低于已用，缺省取已用向上取整到 100MB
+    const ceil = Math.ceil(quotaUsedBytes.value / MB)
+    const def = Math.max(ceil, Math.ceil(res.quotaLimit ? Number(res.quotaLimit) / MB : ceil))
+    quotaLimitMb.value = def
+  } catch {
+    // 错误已由拦截器提示
+  } finally {
+    quotaLoading.value = false
+  }
+}
+
+async function handleQuotaSubmit() {
+  if (!quotaRow.value) return
+  if (quotaLimitMb.value * MB < quotaUsedBytes.value) {
+    ElMessage.warning('配额下限为当前已用容量，不可更低')
+    return
+  }
+  quotaSubmitting.value = true
+  try {
+    await updateUserQuota({
+      userId: quotaRow.value.id,
+      quotaLimit: quotaLimitMb.value * MB,
+    })
+    ElMessage.success('配额已更新')
+    quotaVisible.value = false
+  } catch {
+    // 错误已由拦截器提示
+  } finally {
+    quotaSubmitting.value = false
+  }
+}
 </script>
 
 <style scoped>
 .v-role-tag {
   margin-right: 4px;
+}
+.v-quota-hint {
+  margin-left: 4px;
+  font-size: 12px;
+  color: #909399;
+}
+.v-quota-unit {
+  margin-left: 8px;
+  font-size: 13px;
+  color: #606266;
 }
 </style>

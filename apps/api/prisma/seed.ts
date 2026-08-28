@@ -57,7 +57,7 @@ const menuTree: MenuSeed[] = [
           { name: '重置密码', type: 3, perms: 'system:user:reset-password', sort: 5 },
           { name: '分配角色', type: 3, perms: 'system:user:assign-role', sort: 6 },
           // P3：云盘配额调整（cloud 域按钮挂在用户管理下，属 admin 能力，不给 common）
-          { name: '调整配额', type: 3, perms: 'cloud:quota:update', sort: 7 },
+          { name: '调整配额', type: 3, perms: 'cloud:admin:quota', sort: 7 },
         ],
       },
       {
@@ -391,19 +391,19 @@ async function main() {
     }
   }
 
-  // P3：common 角色授予「云盘管理」整棵子树（不含 cloud:quota:update，该按钮属 admin）
+  // P3：common 角色授予「云盘管理」整棵子树（不含 cloud:admin:quota，该按钮属 admin）
   const cloudDir = await prisma.sysMenu.findFirst({
     where: { parentId: BigInt(0), name: '云盘管理' },
   })
   if (cloudDir) {
-    // 收集云盘管理整棵子树（目录 + 菜单 + 按钮），排除 cloud:quota:update
+    // 收集云盘管理整棵子树（目录 + 菜单 + 按钮），排除 cloud:admin:quota（仅 admin）
     const cloudMenuIds: bigint[] = [cloudDir.id]
     const pending: bigint[] = [cloudDir.id]
     while (pending.length > 0) {
       const parentId = pending.pop()!
       const children = await prisma.sysMenu.findMany({ where: { parentId } })
       for (const child of children) {
-        if (child.perms === 'cloud:quota:update') continue
+        if (child.perms === 'cloud:admin:quota') continue
         cloudMenuIds.push(child.id)
         pending.push(child.id)
       }

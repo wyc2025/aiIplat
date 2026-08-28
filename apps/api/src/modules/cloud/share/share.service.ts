@@ -6,7 +6,7 @@ import { ErrorCode } from '../../../common/constants/error-code'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { StorageService } from '../../../infra/storage/storage.service'
-import type { ShareCreateDto, ShareExtendDto } from './dto/share.dto'
+import type { ShareCreateDto, ShareExtendDto, ShareListQueryDto } from './dto/share.dto'
 
 /** 有效期档位 → 毫秒（0 = 永久） */
 const EXPIRE_DAYS_TO_MS: Record<number, number> = {
@@ -16,7 +16,7 @@ const EXPIRE_DAYS_TO_MS: Record<number, number> = {
 }
 
 /**
- * 公开链接（P3 §13.6 / API.md §5.5）：
+ * 公开链接（P3；约定见 ARCHITECTURE.md §4.7）：
  * 管理侧（登录）：create（仅文件 + 审核门禁 R9 + 重复创建返回现存链接）/ list / stop / extend；
  * 访客侧（@Public）：info / download（校验链任一失败统一 30008，下载成功 visit_count+1）。
  */
@@ -63,8 +63,10 @@ export class ShareService {
     return this.toCreateResult(created)
   }
 
-  /** 我的分享列表（不分页，创建时间倒序；status 后端计算：1 有效 / 0 已停止 / 2 已过期） */
-  async list(userId: bigint) {
+  /** 我的分享列表（不分页，创建时间倒序；status 后端计算：1 有效 / 0 已停止 / 2 已过期）。
+   * status 缺省 → 排除"已停止"（默认视图不展示已停止链接）；指定 0/1/2 → 精确过滤。
+   * keyword → 文件名模糊过滤。 */
+  async list(userId: bigint, query?: ShareListQueryDto) {
     const shares = await this.prisma.cloudShare.findMany({
       where: { userId },
       orderBy: { createTime: 'desc' },
@@ -78,7 +80,7 @@ export class ShareService {
     const fileMap = new Map(files.map((f) => [f.id.toString(), f]))
     const now = new Date()
 
-    return shares.map((s) => {
+    let result = shares.map((s) => {
       const file = fileMap.get(s.fileId.toString())
       // status：已停止 0；已过期 2；否则 1（文件被删也视为"已过期/失效"？按契约仅 status 三态，文件删由校验链兜底）
       let status = 1
@@ -98,6 +100,19 @@ export class ShareService {
         createTime: s.createTime,
       }
     })
+
+    // 状态筛选：缺省排除已停止（默认视图），指定则精确匹配
+    if (query?.status === undefined || query.status === null) {
+      result = result.filter((r) => r.status !== 0)
+    } else {
+      result = result.filter((r) => r.status === query.status)
+    }
+    // 文件名关键字（模糊）
+    const keyword = query?.keyword?.trim()
+    if (keyword) {
+      result = result.filter((r) => r.fileName.includes(keyword))
+    }
+    return result
   }
 
   /** 停止公开：链接即刻失效 */
@@ -132,10 +147,14 @@ export class ShareService {
   /** 链接信息：访问校验链任一失败统一 30008（不区分原因，防探测） */
   async publicInfo(token: string) {
     const { share, file } = await this.assertAccessible(token)
+    // 校验链已确保未过期，isExpired 恒为 false；前端仍按 catch 分支处理失效
     return {
+      token,
       fileName: file.name,
-      size: file.size,
+      size: file.size.toString(),
+      mime: file.mime ?? null,
       expireAt: share.expireAt,
+      isExpired: false,
       visitCount: share.visitCount,
     }
   }
@@ -167,7 +186,7 @@ export class ShareService {
 
   // ==================== 私有方法 ====================
 
-  /** 校验链（§13.6）：token 存在 → status=1 → 未过期 → 文件存在且未删 →（开关开启）audit_status=1；任一失败 30008 */
+  /** 校验链（ARCHITECTURE.md §4.7 分享端点安全）：token 存在 → status=1 → 未过期 → 文件存在且未删 →（开关开启）audit_status=1；任一失败 30008 */
   private async assertAccessible(token: string) {
     const share = await this.prisma.cloudShare.findUnique({ where: { token } })
     const invalid = () => new BusinessException(ErrorCode.CloudShareInvalid, '分享链接无效')
@@ -222,8 +241,9 @@ export class ShareService {
     return new Date(Date.now() + EXPIRE_DAYS_TO_MS[days])
   }
 
-  private toCreateResult(share: { token: string; expireAt: Date | null }) {
+  private toCreateResult(share: { id: bigint; token: string; expireAt: Date | null }) {
     return {
+      id: share.id.toString(),
       token: share.token,
       url: `/share/${share.token}`,
       expireAt: share.expireAt,

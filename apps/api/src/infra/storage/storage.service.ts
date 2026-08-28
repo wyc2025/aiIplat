@@ -32,6 +32,12 @@ export class StorageService implements OnModuleInit {
     return join(this.baseDir, 'tmp')
   }
 
+  /** 临时区目录静态访问（供 multer 引擎在装饰器静态求值期使用，无需实例化） */
+  static tmpDirPath(): string {
+    const base = resolve(process.env.UPLOAD_DIR ?? './uploads')
+    return join(base, 'tmp')
+  }
+
   /**
    * 将临时区文件移动到正式区（yyyyMM/uuid.ext），成功后原 tmp 文件不复存在。
    * @param tmpPath 临时文件绝对路径（必须位于 tmp 区内）

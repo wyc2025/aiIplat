@@ -116,6 +116,10 @@ async function handleTokenInvalid(config: AxiosRequestConfig, message: string): 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 instance.interceptors.response.use(
   async (response: AxiosResponse<ApiResult>): Promise<any> => {
+    // Blob 流式响应（云盘预览/下载）：非统一 JSON 包装，直接返回 Blob 本体
+    if (response.config.responseType === 'blob') {
+      return response.data
+    }
     const result = response.data
 
     if (result.code === CODE_SUCCESS) {
