@@ -429,7 +429,7 @@ Content-Type: application/json　Accept: text/event-stream
 | read_site_file   | read  | site:site:manage | 读站点文本文件（白名单扩展名、≤64KB）                                                                                                                                            |
 | write_site_files | write | site:site:manage | 批量写站点文件（1~10 个 / 单文件 ≤256KB / 白名单扩展名）；同路径软删旧版 + 新建（回收站可回滚）；中间目录 mkdir -p 逐段复用；写完精确失效 site:path 缓存；部分成功返回逐文件明细 |
 
-**工具框架扩展（§4 增补）**：AiTool 新增可选 `summarize?: (params) => any`——write 工具的确认卡结构化摘要（write_site_files 返回 `[{ path, action, size }]`，卡片渲染为文件清单，action 为预判、以执行时实际为准）；缺省维持 P2b 字符串摘要，既有工具零改动。
+**工具框架扩展（§4 增补）**：AiTool 新增可选 `summarize?: (params, ctx) => any`——write 工具的确认卡结构化摘要（write_site_files 返回 `[{ path, action, size }]`，卡片渲染为文件清单，action 为预判、以执行时实际为准；ctx 供按当前用户查数据）；缺省维持 P2b 字符串摘要，既有工具零改动。summary 存确认单与 tool_confirm 事件，ai_tool_call.params 仍存原始 params；恢复链路对 pending write 按.params 重算。
 
 ### 7.5 开放层响应头修订（D28，对 §6.3 的修订）
 

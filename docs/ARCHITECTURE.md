@@ -1,7 +1,5 @@
 # iplat —— 技术架构约定（ARCHITECTURE.md）
 
-> ⚠️ 进行中阶段：P4b。本文件尚未包含 P4b 内容，须与 ARCHITECTURE-P4B-增补.md 同读（T45 并入后删除本行）。
-
 > 本文档是 iplat 的技术宪法。代码生成与审查以本文档为准；与对话中的口头约定冲突时，以本文档为准。
 
 ---
@@ -344,6 +342,8 @@ apps/api/src/
 | 30009 | 文件夹暂不支持创建公开链接                             | 提示                     |
 | 30010 | 文件未通过内容审核，禁止分享                           | 提示（开关开启后生效）   |
 | 30011 | 用户仍有云盘文件，禁止删除                             | 提示（R10 删用户预检）   |
+| 30012 | 该文件类型不支持在线编辑（非文本白名单扩展名，P4b）    | 提示"请下载后编辑"       |
+| 30013 | 内容超出在线编辑上限（1MB，P4b）                       | 提示"请下载后编辑"       |
 
 ### 4.8 个人网站（site 域）架构约定（P4a）
 
@@ -773,7 +773,12 @@ main.ts 增补：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 函数�
 | SystemPromptService                                         | api/src/modules/ai/chat                              | system prompt 拼装（手册缓存 + 用户上下文 + 工具原则）                                                                                                                                                    | 已建（T23）                       |
 | ToolConfirmCard                                             | web/src/views/ai/components                          | 确认卡片组件（参数摘要 + 确认/取消 + 过期态）                                                                                                                                                             | 已建（T24）                       |
 | ToolResultTag                                               | web/src/views/ai/components                          | 工具结果折叠标签                                                                                                                                                                                          | 已建（T24）                       |
-| SiteFacade                                                  | api/src/modules/site/facade                          | 跨域门面：hasSite（R13 删用户预检）；随 SiteModule 导出                                                                                                                                                   | 已建（T33）                       |
+| SiteFacade                                                  | api/src/modules/site/facade                          | 跨域门面：hasSite（R13 删用户预检）+ P4b 站点语义校验层（getMySiteInfo / invalidateSitePaths / listFiles / readFile / writeFiles，§15.3）；SiteFacadeModule 独立注册随 SiteModule 导出                    | 已建（T33/T41）                   |
+| CloudFacade 机械原语（P4b）                                 | api/src/modules/cloud/facade                         | listSubtreeRaw / readFileRaw / writeFileRaw（管理侧语义，mkdir -p 逐段复用，§15.3）                                                                                                                       | 已建（T41）                       |
+| FileService.replaceFileContent                              | api/src/modules/cloud/file                           | 替换文件内容公共实现（配额差额校验 + 事务行更新 + used 记账 + 删旧物理；覆盖上传与在线编辑共用）                                                                                                          | 已建（T43）                       |
+| FileEditorDialog                                            | web/src/views/cloud/components                       | CodeMirror 6 全屏在线编辑弹窗（语言包动态 import + Ctrl/Cmd+S + 脏检查）                                                                                                                                  | 已建（T43）                       |
+| AiTool.summarize                                            | api/src/modules/ai/tool                              | write 工具确认卡结构化摘要钩子（缺省回退现状，既有工具零改动）                                                                                                                                            | 已建（T42）                       |
+| 站点模板库                                                  | apps/api/assets/site-templates                       | 三套预置模板（default/portfolio/card，各四件套 + template.json）                                                                                                                                          | 已建（T44）                       |
 | CloudFacade 扩展（P4a）                                     | api/src/modules/cloud/facade                         | resolvePublicPath（三态继承判定）/ getPublicStream（Range + 缓存失效 40400）/ createFolder（重名自动(1)）/ registerPublicFile（used upsert）/ discardSiteDraft（建站回滚）                                | 已建（T34/T36，三态随修订记录）   |
 | SiteResolveService                                          | api/src/modules/site/open                            | slug/路径解析 + 正/负缓存（resolve 300s、path 60s）                                                                                                                                                       | 已建（T35）                       |
 | StorageService.writeFromBuffer                              | api/src/infra/storage                                | 内存内容直写正式区（模板复制等应用内生成文件场景）                                                                                                                                                        | 已建（T36）                       |
@@ -831,6 +836,7 @@ export interface AiTool {
   perms?: string // 绑定权限标识；缺省 = 登录即可
   risk: 'read' | 'write' // read 自动执行 / write 需用户确认
   handler: (ctx: { user: AuthUser }, params: any) => Promise<any> // 返回值会序列化回喂模型
+  summarize?: (params: any, ctx: { user: AuthUser }) => any // write 工具确认卡结构化摘要（P4b §15.6）；缺省 = params 截断字符串
 }
 ```
 
@@ -848,6 +854,7 @@ export interface AiTool {
 ### 12.3 域门面约定（域边界纪律的落地方式）
 
 - ai 域工具需要 system 域能力时，**只允许注入 system 域模块 export 出来的 Service**（如 UserService、OnlineService、RoleService）
+- ai 域工具操作个人网站时，**只注入 site 域门面 SiteFacade**（P4b 站点三件套，§15.2；ToolModule imports SiteModule）
 - system 域各模块需在 module 的 `exports` 中显式声明可被外部使用的 Service；未导出 = 私有
 - handler 禁止直接操作其他域的表、禁止绕过 Service 写旁路逻辑
 
@@ -878,10 +885,12 @@ export interface AiTool {
 
 ```
 api/src/modules/site/
-├── site.module.ts            # 域模块：exports SiteFacade（门面）
+├── site.module.ts            # 域模块：re-export SiteFacadeModule（对外契约）
 ├── facade/
-│   └── site-facade.service.ts # SiteFacade：hasSite(userId)（R13 删用户预检，供 system 域）
+│   ├── site-facade.service.ts # SiteFacade：hasSite（R13 删用户预检）+ P4b 站点语义校验层（§15.3）
+│   └── site-facade.module.ts  # SiteFacade 独立模块（P4b T44：子模块同域直注，零循环）
 ├── manage/                   # 站点设置（GET/POST/PUT /api/site/mine）
+├── template/                 # P4b 模板库（GET /api/site/templates、POST /api/site/mine/apply-template，§15.7）
 ├── column/                   # 栏目树（≤3 级）
 ├── tag/                      # 标签
 ├── article/                  # 文章（封面/字数/发布状态）
@@ -894,11 +903,13 @@ api/src/modules/site/
     ├── rate-limit.util.ts       # 限流工具（static/api/comment 三桶）+ extractIp
     └── mime.ts                  # MIME 白名单 + CSP sandbox 常量
 
-apps/api/assets/site-template/  # 默认模板（应用静态资产；读取可用 fs，写入用户站点必须经 StorageService）
-├── index.html  ├── style.css  ├── app.js  └── README.txt
+apps/api/assets/site-templates/ # 模板库（P4b T44 迁移自单数 site-template/；读取可用 fs，写入用户站点必须经 SiteFacade）
+├── default/   # 默认博客（index.html / style.css / app.js / README.txt / template.json）
+├── portfolio/ # 作品集（P4b 新增）
+└── card/      # 名片站（P4b 新增）
 ```
 
-纪律：site 域**禁止** import cloud/system/ai 内部实现；开放层只允许读 + 评论提交；物理文件读写只经 StorageService。
+纪律：site 域**禁止** import cloud/system/ai 内部实现；开放层只允许读 + 评论提交；物理文件读写只经 StorageService（站点内容写入经 SiteFacade → CloudFacade 机械原语，§15.3）。
 
 ### 14.2 数据表（6 张 site_ + cloud_file 加列；relationMode="prisma" 逻辑外键）
 
@@ -939,7 +950,7 @@ GET /api/open/{slug}/[path]
  5. 路径解析：site:path:{siteId}:{path}（TTL 60s，fileId 或 "404" 负缓存）
     经 CloudFacade.resolvePublicPath：下行逐段（深度≤10 防环）→ 上溯三态判定（R2 修订）；
     目录不算文件命中（不写负缓存）；getPublicStream 对失效 fileId 抛 40400（禁 500）
- 6. ETag（W/"size-mtime"）/304；Cache-Control：html no-cache、白名单 public max-age=3600
+ 6. ETag（W/"size-mtime"）/304；Cache-Control：全部白名单统一 no-cache（D28/P4b 修订——AI/编辑器高频迭代要求"改完立即可见"，max-age 会导致 js/css 最长 1 小时旧版；未变资源仅 304 头部零字节体），白名单外 no-store
  7. 输出：getPublicStream 管道；MIME 表 + nosniff + ACAO:* + CORP:cross-origin（main.ts 中间件对 /api/open 改写）；Range 206/416；res.setTimeout(30s)
  8. 全程禁挂 @OperationLog
 ```
@@ -982,20 +993,24 @@ CSP sandbox 固定值 `sandbox allow-scripts allow-forms allow-popups allow-down
 
 ### 14.11 错误码 40xxx 段
 
-| code  | 含义                                       | 处理                                     |
-| ----- | ------------------------------------------ | ---------------------------------------- |
-| 40101 | 站点不存在或未开通                         | 后台引导创建；开放层不出现（统一 40400） |
-| 40102 | slug 已被占用                              | 提示更换                                 |
-| 40103 | slug 格式非法或命中保留字                  | 提示规则                                 |
-| 40104 | 站点已停用                                 | 后台提示（开放层统一 40400）             |
-| 40105 | 站点根目录不可用 / 封面不在 media/         | 提示去云盘检查目录                       |
-| 40106 | 栏目不存在                                 | 刷新栏目列表                             |
-| 40107 | 栏目下存在子栏目或文章 / 超 3 级，不可操作 | 提示先清空                               |
-| 40108 | 标签已存在                                 | 提示更换名称                             |
-| 40109 | 文章不存在                                 | 刷新文章列表                             |
-| 40110 | 评论不存在                                 | 刷新评论列表                             |
-| 40111 | 评论提交过于频繁                           | 提示稍后再试                             |
-| 40112 | 用户已开通个人网站，禁止删除（R13 预检）   | 提示先删除站点                           |
+| code  | 含义                                                                | 处理                                     |
+| ----- | ------------------------------------------------------------------- | ---------------------------------------- |
+| 40101 | 站点不存在或未开通                                                  | 后台引导创建；开放层不出现（统一 40400） |
+| 40102 | slug 已被占用                                                       | 提示更换                                 |
+| 40103 | slug 格式非法或命中保留字                                           | 提示规则                                 |
+| 40104 | 站点已停用                                                          | 后台提示（开放层统一 40400）             |
+| 40105 | 站点根目录不可用 / 封面不在 media/                                  | 提示去云盘检查目录                       |
+| 40106 | 栏目不存在                                                          | 刷新栏目列表                             |
+| 40107 | 栏目下存在子栏目或文章 / 超 3 级，不可操作                          | 提示先清空                               |
+| 40108 | 标签已存在                                                          | 提示更换名称                             |
+| 40109 | 文章不存在                                                          | 刷新文章列表                             |
+| 40110 | 评论不存在                                                          | 刷新评论列表                             |
+| 40111 | 评论提交过于频繁                                                    | 提示稍后再试                             |
+| 40112 | 用户已开通个人网站，禁止删除（R13 预检）                            | 提示先删除站点                           |
+| 40113 | 站点文件路径非法（越出站点根 / 含 `..` / 绝对路径 / 空段，P4b R17） | AI 工具回喂，模型修正路径                |
+| 40114 | 文件类型不允许（非文本白名单扩展名，P4b R17）                       | AI 工具回喂 / 编辑器按钮不显示           |
+| 40115 | 内容超限（AI 写 >256KB / 单次 >10 个 / 读 >64KB，P4b R17）          | AI 工具回喂，模型拆分或精简              |
+| 40116 | 模板不存在（P4b T44 apply-template）                                | 刷新模板列表                             |
 
 > 注：标签不存在（tag PUT/DELETE、文章 tagIds 含不存在项）复用通用 40400，不设细分码（T37 偏差登记，T40 备案）。
 
@@ -1016,3 +1031,123 @@ P4b"AI 编写站点文件"按既有 AiTool 框架加工具：write 类必走确�
 | X-Accel-Redirect           | 公开流量显著增长   | 鉴权解析与字节输出分离（nginx sendfile）                   |
 | CDN                        | 盗链/流量大        | 开放静态天然可缓存                                         |
 | 开放层拆独立进程           | 可靠性隔离诉求     | /api/open 无鉴权无状态只读为主，模块化单体拆分第一个实践点 |
+
+---
+
+## 15. 个人网站二期（P4b）：AI 编写站点 + 在线编辑器 + 模板库（自 ARCHITECTURE-P4B-增补.md 并入；增补文档保留为历史细节参考）
+
+> 前提：P4a 全部机制（三态 is_public / 开放层 / 缓存体系）不动；唯一新依赖 = 前端 CodeMirror 6（D20）。
+
+### 15.1 后端/前端目录结构增量
+
+```
+api/src/modules/site/template/      # 模板库子模块
+├── template.controller.ts # GET /api/site/templates、POST /api/site/mine/apply-template
+├── template.service.ts    # 模板清单实时读 + 温和覆盖应用（写入经 SiteFacade.writeFiles）
+└── template.module.ts     # imports SiteFacadeModule（同域直注；见下方"模块形态"说明）
+
+api/src/modules/site/facade/
+└── site-facade.module.ts  # SiteFacade 独立模块（T44：子模块无法注入父聚合 provider，
+                           #  独立成模块后 template 同域直注零循环；SiteModule re-export 保持对外契约）
+
+api/src/modules/ai/tool/tools/      # P4b 三个工具文件（P2b 框架原位扩展，tool.bootstrap 注册）
+web/src/views/cloud/components/FileEditorDialog.vue  # CodeMirror 6 全屏编辑弹窗
+
+apps/api/assets/site-templates/{default,portfolio,card}/  # 三套模板（四件套 + template.json）
+```
+
+### 15.2 AI 工具契约（三件套，handler 只注入 SiteFacade 一个门面）
+
+| 工具               | risk  | perms            | parameters 要点                             | handler 返回                                                                                       |
+| ------------------ | ----- | ---------------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `list_site_files`  | read  | site:site:manage | `{}`（无参数）                              | `{ site: { slug, title, status }, files: [{ path, isDir, size, updatedAt }], truncated: boolean }` |
+| `read_site_file`   | read  | site:site:manage | `{ path }`（必填）                          | `{ path, size, content }`（UTF-8）                                                                 |
+| `write_site_files` | write | site:site:manage | `{ files: [{ path, content }] }`（1~10 个） | 逐文件明细 `[{ path, ok, action, size, error? }]`（部分成功语义）                                  |
+
+description 纪律：操作的是当前用户自己的站点（根 = 云盘「我的站点」）；改写前先 read README.txt；README 缺失按 PLATFORM-GUIDE 摘要保守操作（兼容 P4a 旧站）；读取类并行一轮发出；只能写文本，图片引导用户上传 media/；>10 个分批（每批一张确认卡）。未开通站点回喂 `{ ok:false, errorCode:40101 }` 引导文案，不抛栈。
+
+### 15.3 SiteFacade 站点语义校验层 + CloudFacade 机械原语
+
+**SiteFacade 新增**（抛 site 段码 40101/40113~40115/40400）：
+
+- `getMySiteInfo(userId)` → `{ id, slug, title, status, rootFolderId } | null`（null = 未开通，工具回喂引导）
+- `invalidateSitePaths(siteId, paths)`：逐路径 DEL `site:path:{siteId}:{path}`（含 "404" 负缓存）
+- `listFiles(userId)`：站点文件树（属主视角，经 `CloudFacade.listSubtreeRaw`）；null = 未开通
+- `readFile(userId, path)`：路径规范（40113）→ 白名单（40114）→ ≤64KB（40115）→ 机械读（cloud 30001 → 统一 40400）
+- `writeFiles(userId, files)`：批量 ≤10（40115）→ 逐文件校验（40113/40114/40115，失败记 per-file error 不中断）→ 机械写入（cloud 30001/30003/30006 捕获为该文件 error）→ 全部完成后仅对 ok 路径失效缓存（部分成功语义 R18）
+
+常量（写死代码 §15.11）：`SITE_FILE_TEXT_EXTS`（html/htm/css/js/mjs/txt/md/json/svg/xml/yml/yaml/csv）、AI 写单文件 256KB、单次 10 个、读 64KB。
+
+**CloudFacade 机械原语**（管理侧语义，只抛 cloud 段码 30001/30003/30006，禁止 site 段码）：
+
+- `listSubtreeRaw(rootFolderId, { maxDepth=10, limit=500 })`：有界 BFS，不含回收站，超限 truncated=true
+- `readFileRaw(rootFolderId, path)`：逐段下行 ≤10；读盘返回 Buffer（解码由调用方负责）
+- `writeFileRaw(userId, rootFolderId, path, content)`：配额预检（30003）→ **中间目录 mkdir -p：逐段下行，已存在目录直接复用，不存在才 createFolder（严禁无脑逐段 createFolder——二次写入会造出 "pages (1)" 平行目录，站点路径即 URL 下致命）** → 中间段撞同名文件 / 末段撞同名目录 30001 → R6 子项上限（排除将软删旧文件）→ 同路径旧文件软删进回收站（used 不动可回滚）→ writeFromBuffer → registerPublicFile（used += size，is_public 默认 0=继承）→ 登记失败删新物理防孤儿
+
+### 15.4 缓存失效口径（AI/模板写入路径）
+
+`SiteFacade.writeFiles` 全部完成后对 ok 路径逐个 DEL `site:path`（含负缓存）——AI/模板写完访客立即可见。**编辑器保存（R19）无需失效**：fileId/URL 不变，缓存的 fileId 仍有效，开放层 ETag 随 size/mtime 变化自然失效（PRD F4 定论）。cloud 侧公开性变更（set-public）仍走 60s TTL 被动生效（§14.4 R12 不变）。
+
+### 15.5 编辑器保存接口（cloud 域）
+
+`PUT /api/cloud/file/:id/content`，`@RequirePermission('cloud:file:upload')` + `@OperationLog('云盘','在线编辑保存')`：
+
+1. assertOwned（30001）→ isDir=1 拒绝（40001）
+2. ext ∈ 文本白名单（与 §15.11 同集）→ 否则 30012；`Buffer.byteLength(content)` ≤1MB → 否则 30013
+3. writeFromBuffer 写新物理 → `FileService.replaceFileContent`（公共方法，§9 资产表）→ 删旧物理
+4. 更新行语义：fileId/URL 不变，**仅 storage_name/size/update_time 三列**（mime/ext/is_public 不动；开放层 MIME 输出按 ext 解析，与 DB mime 无关）
+5. DTO `{ content }` @IsString + @MaxLength(1_048_576) 字符级粗拦，字节级 service 精算；**main.ts json body limit 须 ≥2MB**（默认 100KB 会在进 DTO 前 PayloadTooLarge）
+
+### 15.6 确认卡结构化清单（AiTool.summarize 钩子）
+
+```ts
+summarize?: (params: any, ctx: { user: AuthUser }) => any
+// （实现注：较初版草图 (params) => any 补充 ctx 入参——summarize 需按当前用户查数据）
+```
+
+- chat.service 写确认单时：工具有 summarize 则 `summary = await tool.summarize(params, ctx)`（返回 null/抛错回退 P2b 现状 params 截断字符串），既有 7 工具零改动；summary 进 Redis 确认单与 tool_confirm 事件；**ai_tool_call.params 仍存原始 params（content 全文）**，不加列——恢复链路（messages()）对 pending write 工具按 params 重算 summary
+- write_site_files 的 summarize：复用 listFiles（只读）逐路径预判 action（树中同名 → overwritten 带旧大小 / 否则 created 带入参字节）；action 为预判，以执行结果为准
+- ToolConfirmCard.vue：summary 为数组 → 渲染文件清单表格（路径 / 动作标签 created 绿 overwritten 橙 / 大小 formatSize）+「动作为预估，以执行结果为准」；字符串 → 维持现状
+
+### 15.7 模板库
+
+- 资产：`apps/api/assets/site-templates/{id}/`（四件套 + template.json `{ name, description, version, preview? }`；preview 本期恒 null）
+- `GET /api/site/templates`（site:site:manage）：readdir → 逐目录读 template.json → `[{ id, name, description }]`；缺失/解析失败跳过并记运行日志；**实时读不缓存**
+- `POST /api/site/mine/apply-template`（site:site:manage，@OperationLog）：未开通 40101（先于模板校验）→ templateId 由 DTO 正则 `^[A-Za-z0-9_-]{1,64}$` 挡穿越（40001）→ 目录不存在 40116 → 遍历模板文件（排除 template.json）→ 经 `SiteFacade.writeFiles` 温和覆盖（R20/D23：同名软删 + 新建，media/ 与模板外文件不动，失效由 writeFiles 内建）→ 返回逐文件清单
+- 建站（manage.create）模板源读 `site-templates/default/`；discardSiteDraft 回滚不变；已建站用户不受迁移影响
+- 模板纪律（R22）：README.txt 为字段级契约，三套主体逐字一致；开放 API 变更必须同步三套 README
+
+### 15.8 README 契约与 PLATFORM-GUIDE 分工（D26/R22，见 §14.9）
+
+### 15.9 错误码（40113~~40116 见 §14.11；30012~~30013 见 §4.7 表）
+
+### 15.10 seed 变更
+
+**零变更**：工具 perms 复用 site:site:manage（common 已授）；编辑器复用 cloud:file:upload；模板接口复用 site:site:manage。无新菜单、无新权限标识。
+
+### 15.11 常量（写死代码 + 文档，不进配置组、不加环境变量）
+
+| 常量                | 值                                                   | 位置                                       |
+| ------------------- | ---------------------------------------------------- | ------------------------------------------ |
+| SITE_FILE_TEXT_EXTS | html/htm/css/js/mjs/txt/md/json/svg/xml/yml/yaml/csv | SiteFacade（前端编辑器按钮另维护同集显示） |
+| AI 写单文件上限     | 256KB                                                | write-site-files.tool.ts                   |
+| AI 单次文件数上限   | 10                                                   | 同上                                       |
+| AI 读文件上限       | 64KB（同时是模型上下文护栏）                         | read-site-file.tool.ts                     |
+| 编辑器内容上限      | 1MB                                                  | cloud file service + 前端按钮显示条件      |
+| json body limit     | 2mb                                                  | main.ts（编辑器 1MB + 转义余量）           |
+
+### 15.12 资产表（并入 §9，见 SiteFacade/CloudFacade 机械原语/replaceFileContent/FileEditorDialog/AiTool.summarize/站点模板库行）
+
+### 15.13 与 P4a 走查修复的关系
+
+W1/W3~W10 文档补丁已并入（T41 开工前）；W2 代码修复（file.list 三态 int + 前端双标签，R23）已随 T43 生效。
+
+### 15.14 演进预留（本期不做，架构不堵路）
+
+| 项                | 触发条件             | 预留设计                                                            |
+| ----------------- | -------------------- | ------------------------------------------------------------------- |
+| AI 文章/栏目工具  | P4c 产品语义明确     | AiTool 框架原位加工具，perms 用 site:article:* 等既有标识           |
+| 模板预览图        | 模板数量 >5          | template.json.preview 已预留；GET templates 原样透传                |
+| 模板/功能分享市场 | 用户愿景落地期       | 模板即目录，导出=打包 assets 子目录，导入=解压 + template.json 校验 |
+| 站点多版本历史    | 回滚诉求超回收站语义 | SiteFacade.writeFiles 已集中写入点，加版本快照表即可                |
+| 用户自建表/接口   | 平台化愿景           | 开放层已证明"@Public + 独立限流 + 40400 防探测"模式可复制           |

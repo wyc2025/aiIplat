@@ -1,5 +1,8 @@
 # iplat —— 架构文档 P4b 增补：AI 编写站点 + 在线编辑器 + 模板库
 
+> ✅ **已并入（2026-08-30，T45）**：本文档 §15 已并入 ARCHITECTURE.md（章节号 §15），主文档为唯一权威；本文档保留为历史细节参考，不再维护。
+> 并入时按实施落地修订三处：§15.1 template 模块形态（SiteFacade 独立模块化解决子模块注入循环）、§15.6 summarize 签名（补充 ctx 入参）与 summary 存储口径（确认单 + 事件 + 恢复链路按 params 重算，ai_tool_call 不加列）、§15.5 补 main.ts json body limit ≥2mb 约束。
+
 > 本文档是 ARCHITECTURE.md 的 P4b 增补，既定铁律（域边界、统一响应、gateway 层、资产复用）全部沿用。
 > **并入机制（同 P4a 先例）**：CodeBuddy 开工前在 ARCHITECTURE.md 开头（标题行之后）插入指针行——
 > `> ⚠️ 进行中阶段：P4b。本文件尚未包含 P4b 内容，须与 ARCHITECTURE-P4B-增补.md 同读（T45 并入后删除本行）。`
