@@ -161,8 +161,8 @@ export interface CloudFile {
   updateTime: string
   /** 是否存在有效公开链接（仅 list 接口返回；文件夹恒 false；upload/mkdir/rename 单对象返回无此字段） */
   shared?: boolean
-  /** 是否显式公开（仅 list 接口返回；P4a 三态语义下仅显式置公开为 true，新建项继承父目录不显示标签） */
-  isPublic?: boolean
+  /** 公开性原始三态 int（仅 list 接口返回；R23/走查 W2：0=继承父目录 / 1=显式公开 / 2=显式阻断；有效公开性以开放层访问时上溯判定为准，列表不逐行算链） */
+  isPublic?: number
 }
 
 /** 面包屑节点 */

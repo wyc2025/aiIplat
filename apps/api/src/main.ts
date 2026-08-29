@@ -7,10 +7,15 @@ import helmet from 'helmet'
 import { AppModule } from './app.module'
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule)
+  // bodyParser: false + 手动注册（T43）：默认 json limit 100KB 会让在线编辑保存 >100KB 的
+  // content 直接 50000（PayloadTooLargeError 在进 DTO 前抛出）；上限提到 2MB（编辑上限 1MB +
+  // JSON 转义膨胀余量），其余接口仅放宽上限不受影响
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false })
 
   // 全局前缀 /api
   app.setGlobalPrefix('api')
+  app.useBodyParser('json', { limit: '2mb' })
+  app.useBodyParser('urlencoded', { limit: '2mb', extended: true })
   // CSP 会拦截 Swagger UI 资源，后端不渲染页面故关闭
   app.use(helmet({ contentSecurityPolicy: false }))
   // 开放层 CORP 改写（§14.5）：站点页面被 CSP sandbox 置于 opaque origin，其 style/js/img 等

@@ -94,9 +94,14 @@ export class OperationLogInterceptor implements NestInterceptor {
     }
   }
 
+  /** 序列化 params（TEXT 列上限 65535 字节：T43 在线编辑的 content 可达 1MB，超长截断保证日志可落库） */
   private safeStringify(value: unknown): string | null {
     try {
-      return JSON.stringify(value)
+      const str = JSON.stringify(value)
+      if (str && str.length > 8000) {
+        return `${str.slice(0, 8000)}…(truncated)`
+      }
+      return str
     } catch {
       return null
     }

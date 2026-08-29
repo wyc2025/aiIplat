@@ -121,8 +121,9 @@ export class TransferService {
   }
 
   /**
-   * 覆盖上传（R5）：tmp→正式区 → 更新该行 size/mime/ext/storage_name/update_time → used += 新-旧（差额可负，
-   * $executeRawUnsafe 兜底不为负）→ 删旧物理文件。URL（file id）不变，旧公开 URL 内容即时指向新文件。
+   * 覆盖上传（R5）：tmp→正式区 → 更新行 + used 差额 + 删旧物理 → 复用 FileService.replaceFileContent
+   * 公共实现（P4b §15.5：与在线编辑保存同源，mime/ext 随覆盖上传更新）。URL（file id）不变，
+   * 旧公开 URL 内容即时指向新文件。
    */
   private async overwriteExisting(
     userId: bigint,
@@ -132,49 +133,16 @@ export class TransferService {
     originalName: string,
   ) {
     try {
-      // 覆盖场景配额校验：used + (新 - 旧) 不得超过配额（只多出的部分需要额外空间）
-      const { quota, used } = await this.cloudFileService.getQuota(userId)
-      const delta = BigInt(file.size) - target.size
-      if (delta > BigInt(0) && used + delta > quota) {
-        throw new BusinessException(
-          ErrorCode.CloudQuotaExceeded,
-          `存储配额不足（已用 ${this.formatSize(used)} / 配额 ${this.formatSize(quota)}）`,
-        )
-      }
-
       const ext = this.extractExt(originalName)
       const mime = this.sanitizeMime(file.mimetype)
       const newStorageName = await this.storage.moveToStorage(file.path, ext)
 
-      try {
-        // 更新行 + used 差额记账（事务）；used 用 $executeRawUnsafe 兜底不为负
-        await this.prisma.$transaction(async (tx) => {
-          await tx.cloudFile.update({
-            where: { id: target.id },
-            data: {
-              size: BigInt(file.size),
-              mime,
-              ext: ext || null,
-              storageName: newStorageName,
-              updateTime: new Date(),
-            },
-          })
-          await tx.$executeRawUnsafe(
-            'UPDATE cloud_usage SET used = GREATEST(used + ?, 0), update_time = NOW() WHERE user_id = ?',
-            delta,
-            userId,
-          )
-        })
-        // 事务成功后删除旧物理文件（单个失败 warn 不阻断，覆盖语义优先保证内容更新）
-        if (target.storageName) {
-          await this.storage.remove(target.storageName)
-        }
-        return { id: target.id.toString(), name: originalName, size: file.size, overwritten: true }
-      } catch (error) {
-        // 落库失败：回滚新物理文件，旧文件保留
-        await this.storage.remove(newStorageName)
-        throw error
-      }
+      // 配额差额校验（30003）+ 事务更新行 + used 记账（GREATEST 兜底）+ 删旧物理，均在公共方法内
+      await this.cloudFileService.replaceFileContent(userId, target, newStorageName, BigInt(file.size), {
+        mime,
+        ext: ext || null,
+      })
+      return { id: target.id.toString(), name: originalName, size: file.size, overwritten: true }
     } finally {
       // 覆盖路径自持 tmp 清理（upload 的 finally 已跳过覆盖分支，避免竞态）
       await this.storage.removeTmp(file.path)

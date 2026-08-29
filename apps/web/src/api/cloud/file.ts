@@ -1,4 +1,4 @@
-import instance, { get, post, del } from '@/utils/request'
+import instance, { get, post, put, del } from '@/utils/request'
 import { getAccessToken } from '@/utils/token'
 import type { CloudFile, CloudQuota, CloudFileList, BreadcrumbItem } from '@/types/api'
 
@@ -56,6 +56,10 @@ export const uploadFile = (
 /** 设为公开 / 取消公开（P4a：仅标记自身，子树语义由上溯判定承担） */
 export const setFilePublic = (id: number, isPublic: boolean) =>
   post<{ id: string; isPublic: boolean }>('/cloud/file/set-public', { id, isPublic: isPublic ? 1 : 0 })
+
+/** 在线编辑保存（P4b T43：更新行语义，fileId/URL 不变，开放层立即生效） */
+export const updateFileContent = (id: number, content: string) =>
+  put<{ id: string; name: string; size: number }>(`/cloud/file/${id}/content`, { content })
 
 /**
  * 以 Blob 拉取文件流（预览/下载共用）。必须走 axios 而非 <img>/<iframe>/<a> 原生直链：

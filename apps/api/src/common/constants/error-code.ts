@@ -116,6 +116,10 @@ export const ErrorCode = {
   CloudAuditNotPassed: 30010,
   /** 用户仍有云盘文件，禁止删除 */
   CloudUserHasFiles: 30011,
+  /** 该文件类型不支持在线编辑（非文本白名单扩展名，P4b T43） */
+  CloudFileTypeNotAllowed: 30012,
+  /** 内容超出在线编辑上限（1MB，P4b T43） */
+  CloudContentTooLarge: 30013,
 
   // ========== site 域（40xxx 段，40101 起；40001/40100/40300/40400/42900 为通用码已占用，见 API.md §6.1） ==========
   /** 站点不存在或未开通 */

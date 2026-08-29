@@ -66,3 +66,11 @@ export class RenameDto {
   @Length(1, 64)
   name!: string
 }
+
+/** 在线编辑保存（P4b T43，架构增补 §15.5：@MaxLength 字符级粗拦，字节级在 service 精算） */
+export class UpdateContentDto {
+  @ApiProperty({ description: '完整文件内容（UTF-8 文本，≤1MB）' })
+  @IsString()
+  @MaxLength(1_048_576, { message: '内容超出在线编辑上限（1MB）' })
+  content!: string
+}

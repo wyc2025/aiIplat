@@ -1,11 +1,11 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Query, Res } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query, Res } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import type { Response } from 'express'
 import { CurrentUser } from '../../../gateway/decorators/current-user.decorator'
 import { OperationLog } from '../../../gateway/decorators/operation-log.decorator'
 import { RequirePermission } from '../../../gateway/decorators/require-permission.decorator'
 import { SkipTransform } from '../../../gateway/decorators/skip-transform.decorator'
-import { FileListQueryDto, FilePathQueryDto, MkdirDto, RenameDto, SetPublicDto } from './dto/file.dto'
+import { FileListQueryDto, FilePathQueryDto, MkdirDto, RenameDto, SetPublicDto, UpdateContentDto } from './dto/file.dto'
 import { FileService } from './file.service'
 
 @ApiTags('云盘-我的文件')
@@ -57,6 +57,18 @@ export class FileController {
   @ApiOperation({ summary: '设为公开 / 取消公开（仅标记自身，公开性访问时上溯判定）' })
   setPublic(@CurrentUser('userId') userId: string, @Body() dto: SetPublicDto) {
     return this.fileService.setPublic(BigInt(userId), dto)
+  }
+
+  @Put(':id/content')
+  @RequirePermission('cloud:file:upload')
+  @OperationLog('云盘', '在线编辑保存')
+  @ApiOperation({ summary: '在线编辑保存（更新行语义：fileId/URL 不变，开放层立即生效）' })
+  saveContent(
+    @CurrentUser('userId') userId: string,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateContentDto,
+  ) {
+    return this.fileService.saveFileContent(BigInt(userId), BigInt(id), dto)
   }
 
   @Delete(':id')

@@ -2,7 +2,7 @@
 
 > 本文件由 AI 在每完成一个任务后更新。开工前先读本文件，从"进行中 / 下一个待办"继续。
 
-## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32），P4a 个人网站模块全部完成（T33~~T40）；P4b（AI 编写站点 + 在线编辑器 + 模板库）进行中（T41~~T42 已完成，T43~~T45 待做）
+## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32），P4a 个人网站模块全部完成（T33~~T40）；P4b（AI 编写站点 + 在线编辑器 + 模板库）进行中（T41~~T43 已完成，T44~~T45 待做）
 
 ## 里程碑总览
 
@@ -34,7 +34,7 @@
 | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ---------- |
 | T41  | AI 站点工具三件套 + SiteFacade 站点语义校验层（getMySiteInfo/invalidateSitePaths/listFiles/readFile/writeFiles）+ CloudFacade 机械原语（listSubtreeRaw/readFileRaw/writeFileRaw，mkdir -p 逐段复用）+ 错误码 40113~40116 + 开放静态 Cache-Control 改 no-cache（D28）+ README 契约升级（default 模板）+ PLATFORM-GUIDE 摘要 + 前置动作（走查 9 处文档补丁 / ARCHITECTURE 指针行 / API.md §7 追加） | 已完成 | 2026-08-29 |
 | T42  | AiTool summarize 钩子 + ToolConfirmCard 结构化文件清单 + AI 建站全链路联调（含部分成功/取消/越界回喂）                                                                                                                                                                                                                                                                                            | 已完成 | 2026-08-29 |
-| T43  | CodeMirror 6 编辑器（FileEditorDialog + 云盘页「编辑」入口）+ PUT /api/cloud/file/:id/content（30012/30013，更新行语义）+ 走查 W2 修复（file.list 三态 int + 前端双标签）                                                                                                                                                                                                                         | 待办   |            |
+| T43  | CodeMirror 6 编辑器（FileEditorDialog + 云盘页「编辑」入口）+ PUT /api/cloud/file/:id/content（30012/30013，更新行语义）+ 走查 W2 修复（file.list 三态 int + 前端双标签）                                                                                                                                                                                                                         | 已完成 | 2026-08-29 |
 | T44  | 模板库：assets/site-templates/{default,portfolio,card} 迁移与新增 + template.json + GET /api/site/templates + POST /api/site/mine/apply-template（40116，温和覆盖）+ 站点设置页模板库卡片                                                                                                                                                                                                         | 待办   |            |
 | T45  | 联调验收（对照 PRD-P4B 第 6 节 12 条）+ 文档回写（ARCHITECTURE 并入 §15 并删指针行 / API.md §7 并入 / 资产表 / PLATFORM-GUIDE / PROGRESS）                                                                                                                                                                                                                                                        | 待办   |            |
 
@@ -181,7 +181,7 @@
 
 ## 进行中
 
-T43：CodeMirror 6 编辑器（FileEditorDialog + 云盘页「编辑」入口）+ PUT /api/cloud/file/:id/content（30012/30013）+ 走查 W2 修复（file.list 三态 int + 前端双标签）（P4b；T41~~T42 已完成）
+T44：模板库（assets/site-templates 三套迁移与新增 + template.json + GET /api/site/templates + POST /api/site/mine/apply-template + 站点设置页模板库卡片）（P4b；T41~~T43 已完成）
 
 ## 遗留问题
 
@@ -626,6 +626,38 @@ T43：CodeMirror 6 编辑器（FileEditorDialog + 云盘页「编辑」入口）
 - 测试数据清理核查：t42 文件 0（含回收站软删行，used 差额已回退）、T42 会话/消息/留痕 0、t42nosite 用户已删、admin 会话总数恢复原值 ✓
 
 **遗留（转入 T45）**：① 确认卡文件清单的**浏览器人工复验**（渲染逻辑已由 vue-tsc + 组件分支保证，PRD-P4B 验收第 2 条本就是 T45 联调口径）；② 冒烟产生的 3 个孤儿物理文件（几十字节，无行引用）。
+
+### T43 完成记录（2026-08-29）：CodeMirror 6 编辑器 + 在线编辑接口 + 走查 W2 修复
+
+**落地内容**：
+
+1. **错误码**：30012 该文件类型不支持在线编辑 / 30013 内容超出在线编辑上限（1MB）——cloud 段续位
+2. **PUT /api/cloud/file/:id/content**（file.controller，`cloud:file:upload` + @OperationLog('云盘','在线编辑保存')）：assertOwned（30001）→ 非目录（40001）→ ext 白名单（30012）→ `Buffer.byteLength` ≤1MB（30013）→ writeFromBuffer → replaceFileContent。DTO `UpdateContentDto { content }` @IsString + @MaxLength(1_048_576) 字符级粗拦。**fileId/URL 不变 → site:path 缓存仍有效，开放层立即生效（ETag 随 size/mtime 变化），无需跨域失效**（PRD F4 定论，避开了 cloud→site 门面循环依赖）
+3. **FileService.replaceFileContent 公共方法**（§15.5 纪律：禁止复制粘贴）：配额差额校验（30003）→ 事务更新行（storage_name/size/update_time 必更，mime/ext 仅覆盖上传场景传入）+ used 差额记账（$executeRawUnsafe GREATEST 兜底，R5）→ 删旧物理（不可回滚 D22）；落库失败回滚新物理。**transfer.overwriteExisting 已改为调用它**（原内联事务删除），覆盖上传与在线编辑保存同源
+4. **FileEditorDialog.vue**（CodeMirror 6 全屏弹窗）：basicSetup + 语言包按扩展名动态 import（html/css/js/json/md/xml 高亮，yml/csv/txt 纯文本，vite 自动分包不阻塞首屏，PRD F3）；Ctrl/Cmd+S 保存；保存中按钮 loading；脏检查关闭二次确认（before-close 统一拦 ESC/X/按钮）；视图关闭销毁释放资源
+5. **云盘页「编辑」入口**（file/index.vue）：显示条件 = 非目录 + 白名单扩展名 + size ≤1MB（§15.12 前端同集常量），权限 v-permission cloud:file:upload
+6. **走查 W2 代码修复（R23）**：file.list 的 `isPublic` 由布尔改回**原始三态 int**；前端标签 1→「公开」(warning)、2→「已阻断」(danger)、0→无标签；「设为公开/取消公开」按钮改 `isPublic === 1` 判断（0=继承与 2=阻断 都可设公开）
+7. **新依赖**（D20 已批准，唯一新增）：codemirror + @codemirror/state + @codemirror/view + lang-html/css/javascript/json/markdown/xml（pnpm 严格依赖下 state/view 需显式声明供类型导入）
+
+**冒烟暴露并修复的两个支撑缺陷（均为既有环境缺陷，非本次设计引入）**：
+
+1. **express json body 默认 limit 100KB**：编辑器保存 >100KB 的 content 在进 DTO 前就 PayloadTooLargeError（50000）。修复：main.ts 改 `bodyParser: false` + `useBodyParser('json'/'urlencoded', { limit: '2mb' })`（1MB 上限 + JSON 转义膨胀余量）
+2. **操作日志 params 列溢出**：sys_operation_log.params 为 TEXT（65535 字节），1MB content 序列化后每次保存日志必落库失败。修复：OperationLogInterceptor.safeStringify 超 8000 字符截断（`(truncated)` 标记）
+
+**踩坑/偏差（登记）**：
+
+1. §15.5 说「mime 一律不动」，PRD F4 说「mime 按白名单表重解析」——按架构增补三列最小变更实施（编辑不改扩展名，mime 不影响开放层输出：resolveMime 按 ext）。T45 并入时对齐两文档表述
+2. 冒烟脚本教训：HTTP 层测试用户需同构三件套——绑角色 + **手写 Redis perms 缓存**（`user:perms:{id}` = `["*"]`，登录/userinfo 才会写）+ `bodyParser` 配置与 main.ts 一致；list 接口注意「我的站点」目录是云盘根下子目录，模板文件按 site.rootFolderId 查
+
+**验证（冒烟 11/11 全过后脚本已删；HTTP 实测）**：
+
+- 正常保存：200 + 返回新 size；fileId/URL 不变；used 差额精确（改前 used + (新-旧) = 改后 used）；开放层立即返回新内容（no-cache）；ETag 变化且新 ETag 命中 304 ✓
+- 校验链：非白名单 .exe → 30012；600000 个两字节字符（字节级 1.2MB > 1MB、字符级过 DTO）→ 30013；目录 → 40001；不存在 → 30001 ✓
+- 走查 W2：新建文件 isPublic=0 → 设公开 1 → 取消公开 2（三态 int，不是回到 0）✓
+- `tsc --noEmit` / `nest build` 0 错误 ✓；`vue-tsc --noEmit` 0 错误 ✓；`eslint`（api+web 改动文件）0 错误 0 警告 ✓；read_lints 0 诊断 ✓；操作日志截断后冒烟全程零 ERROR ✓
+- 测试数据清理：t43smoke 用户/角色绑定/站点/文件（含 quota 与 Redis）零残留 ✓
+
+**遗留（转入 T45）**：编辑器弹窗的浏览器人工复验（渲染/快捷键/脏检查逻辑已由 vue-tsc + 冒烟保证；PRD-P4B 验收第 5/6 条本就是 T45 联调口径）。
 
 ### P1 最终状态总结（三句话）
 

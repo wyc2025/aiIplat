@@ -105,12 +105,20 @@
             已分享
           </el-tag>
           <el-tag
-            v-if="row.isPublic"
+            v-if="row.isPublic === 1"
             type="warning"
             size="small"
             style="margin-left: 6px"
           >
             公开
+          </el-tag>
+          <el-tag
+            v-else-if="row.isPublic === 2"
+            type="danger"
+            size="small"
+            style="margin-left: 6px"
+          >
+            已阻断
           </el-tag>
         </template>
       </el-table-column>
@@ -127,7 +135,7 @@
       />
       <el-table-column
         label="操作"
-        width="390"
+        width="440"
         fixed="right"
       >
         <template #default="{ row }">
@@ -150,6 +158,15 @@
             下载
           </el-button>
           <el-button
+            v-if="canEdit(row)"
+            v-permission="'cloud:file:upload'"
+            link
+            type="primary"
+            @click="openEditor(row)"
+          >
+            编辑
+          </el-button>
+          <el-button
             v-permission="'cloud:file:rename'"
             link
             type="primary"
@@ -169,10 +186,10 @@
           <el-button
             v-permission="'cloud:file:public'"
             link
-            :type="row.isPublic ? 'warning' : 'primary'"
+            :type="row.isPublic === 1 ? 'warning' : 'primary'"
             @click="onTogglePublic(row)"
           >
-            {{ row.isPublic ? '取消公开' : '设为公开' }}
+            {{ row.isPublic === 1 ? '取消公开' : '设为公开' }}
           </el-button>
           <el-button
             v-permission="'cloud:file:delete'"
@@ -412,6 +429,13 @@
         </div>
       </div>
     </el-dialog>
+
+    <!-- 在线编辑（P4b T43：CodeMirror 6 全屏弹窗） -->
+    <FileEditorDialog
+      v-model:visible="editorVisible"
+      :file="editorFile"
+      @saved="reload"
+    />
   </div>
 </template>
 
@@ -421,6 +445,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Upload, FolderAdd, Refresh, FolderOpened, Document } from '@element-plus/icons-vue'
 import ProTable from '@/components/ProTable/index.vue'
+import FileEditorDialog from '../components/FileEditorDialog.vue'
 import { formatSize, formatTime } from '@/utils/format'
 import {
   listFiles,
@@ -487,6 +512,28 @@ const previewRow = ref<CloudFile | null>(null)
 const previewUrl = ref('')
 const previewLoading = ref(false)
 let previewObjectUrl = ''
+
+// ========== 在线编辑（P4b T43） ==========
+/** 在线编辑文本扩展名白名单（§15.12：与后端 EDITABLE_TEXT_EXTS / site 域 SITE_FILE_TEXT_EXTS 同集，以架构增补为准对齐） */
+const EDITABLE_EXTS: ReadonlySet<string> = new Set([
+  'html', 'htm', 'css', 'js', 'mjs', 'txt', 'md', 'json', 'svg', 'xml', 'yml', 'yaml', 'csv',
+])
+/** 在线编辑内容上限（§15.12：1MB，按钮显示条件） */
+const EDIT_MAX_BYTES = 1024 * 1024
+const editorVisible = ref(false)
+const editorFile = ref<{ id: string; name: string; ext: string | null; size: string } | null>(null)
+
+/** 是否可在线编辑：非目录 + 文本白名单扩展名 + ≤1MB（§15.12 按钮显示条件） */
+function canEdit(row: CloudFile) {
+  if (row.isDir) return false
+  const ext = (row.ext ?? '').toLowerCase()
+  return EDITABLE_EXTS.has(ext) && Number(row.size) <= EDIT_MAX_BYTES
+}
+
+function openEditor(row: CloudFile) {
+  editorFile.value = { id: row.id, name: row.name, ext: row.ext, size: row.size }
+  editorVisible.value = true
+}
 
 async function loadDir(dir: number) {
   loading.value = true
@@ -652,9 +699,9 @@ async function onRemove(row: CloudFile) {
   reload()
 }
 
-// 设为公开 / 取消公开（P4a：仅标记自身；站点公开目录机制用）
+// 设为公开 / 取消公开（P4a：仅标记自身；站点公开目录机制用；R23 三态：0=继承 / 2=阻断 均可设公开，仅 1 可取消）
 async function onTogglePublic(row: CloudFile) {
-  const makingPublic = !row.isPublic
+  const makingPublic = row.isPublic !== 1
   if (makingPublic) {
     await ElMessageBox.confirm(
       `确认将「${row.name}」设为公开？站点开放层将可访问该${row.isDir ? '目录及其中内容（子目录/文件默认继承）' : '文件'}`,

@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import type { CloudFile } from '@prisma/client'
 import { ErrorCode } from '../../../common/constants/error-code'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { StorageService } from '../../../infra/storage/storage.service'
-import type { FileListQueryDto, MkdirDto, RenameDto, SetPublicDto } from './dto/file.dto'
+import type { FileListQueryDto, MkdirDto, RenameDto, SetPublicDto, UpdateContentDto } from './dto/file.dto'
 
 /** 目录深度上限（R6） */
 const MAX_DEPTH = 10
@@ -12,6 +13,26 @@ const MAX_DEPTH = 10
 export const AVATAR_PARENT_ID = BigInt(-1)
 /** 单目录直接子项上限（R6；TransferService 上传计数复用，故导出） */
 export const MAX_CHILDREN = 500
+
+/** 在线编辑文本扩展名白名单（P4b §15.12：与 site 域 SITE_FILE_TEXT_EXTS 同集，写死代码，两边以架构增补为准对齐） */
+const EDITABLE_TEXT_EXTS: ReadonlySet<string> = new Set([
+  'html',
+  'htm',
+  'css',
+  'js',
+  'mjs',
+  'txt',
+  'md',
+  'json',
+  'svg',
+  'xml',
+  'yml',
+  'yaml',
+  'csv',
+])
+
+/** 在线编辑内容上限（§15.12：1MB，字节级在 service 精算） */
+const EDIT_MAX_BYTES = 1024 * 1024
 
 @Injectable()
 export class FileService {
@@ -64,7 +85,8 @@ export class FileService {
       mime: f.mime,
       updateTime: f.updateTime,
       shared: f.isDir === 0 && sharedSet.has(f.id),
-      isPublic: f.isPublic === 1,
+      // R23（走查 W2 修复）：返回原始三态 int（0=继承 / 1=显式公开 / 2=显式阻断），前端双标签；有效公开性以开放层访问时上溯判定为准
+      isPublic: f.isPublic,
     }))
 
     const { quota, used } = await this.getQuota(userId)
@@ -157,6 +179,78 @@ export class FileService {
     const isPublic = dto.isPublic === 1 ? 1 : 2
     await this.prisma.cloudFile.update({ where: { id }, data: { isPublic } })
     return { id: id.toString(), isPublic: isPublic === 1 }
+  }
+
+  /**
+   * 在线编辑保存（P4b F4/§15.5）：assertOwned（30001）→ 非目录（40001）→ 白名单（30012）→
+   * ≤1MB（30013）→ writeFromBuffer 写新物理 → replaceFileContent（公共行更新）。
+   * 更新行语义（D22）：fileId/URL 不变 → site:path 缓存仍有效，开放层立即生效
+   * （ETag 随 size/mtime 变化自然失效），无需跨域失效（PRD F4 定论）。
+   */
+  async saveFileContent(userId: bigint, id: bigint, dto: UpdateContentDto) {
+    const file = await this.assertOwned(BigInt(id), userId, false)
+    if (file.isDir !== 0) {
+      throw new BusinessException(ErrorCode.ParamInvalid, '目标不是文件，无法在线编辑')
+    }
+    const ext = file.ext ?? ''
+    if (!EDITABLE_TEXT_EXTS.has(ext)) {
+      throw new BusinessException(ErrorCode.CloudFileTypeNotAllowed, '该文件类型不支持在线编辑（仅文本白名单）')
+    }
+    const byteLength = Buffer.byteLength(dto.content, 'utf-8')
+    if (byteLength > EDIT_MAX_BYTES) {
+      throw new BusinessException(ErrorCode.CloudContentTooLarge, '内容超出在线编辑上限（1MB）')
+    }
+    const newStorageName = await this.storage.writeFromBuffer(Buffer.from(dto.content, 'utf-8'), ext)
+    await this.replaceFileContent(userId, file, newStorageName, BigInt(byteLength))
+    return { id: file.id.toString(), name: file.name, size: byteLength }
+  }
+
+  /**
+   * 替换文件内容公共实现（P4b §15.5；R5 覆盖上传与在线编辑保存共用，禁止复制粘贴）：
+   * 配额差额校验（delta>0 且超配额 → 30003）→ 事务更新行（storage_name/size/update_time 必更；
+   * mime/ext 由覆盖上传场景传入，在线编辑场景文件名不变故不动）+ used 差额记账
+   * （$executeRawUnsafe GREATEST 兜底，R5）→ 删旧物理文件（不可回滚，D22）。
+   * 落库失败回滚新物理文件（调用方传入前已写好），旧文件保留。
+   */
+  async replaceFileContent(
+    userId: bigint,
+    target: Pick<CloudFile, 'id' | 'size' | 'storageName'>,
+    newStorageName: string,
+    newSize: bigint,
+    extra?: { mime?: string | null; ext?: string | null },
+  ): Promise<void> {
+    const { quota, used } = await this.getQuota(userId)
+    const delta = newSize - target.size
+    if (delta > BigInt(0) && used + delta > quota) {
+      throw new BusinessException(ErrorCode.CloudQuotaExceeded, '存储配额不足')
+    }
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.cloudFile.update({
+          where: { id: target.id },
+          data: {
+            size: newSize,
+            storageName: newStorageName,
+            updateTime: new Date(),
+            ...(extra?.mime !== undefined ? { mime: extra.mime } : {}),
+            ...(extra?.ext !== undefined ? { ext: extra.ext } : {}),
+          },
+        })
+        await tx.$executeRawUnsafe(
+          'UPDATE cloud_usage SET used = GREATEST(used + ?, 0), update_time = NOW() WHERE user_id = ?',
+          delta,
+          userId,
+        )
+      })
+      // 事务成功后删除旧物理文件（单个失败 warn 不阻断，覆盖语义优先保证内容更新）
+      if (target.storageName) {
+        await this.storage.remove(target.storageName)
+      }
+    } catch (error) {
+      // 落库失败：回滚新物理文件，旧文件保留
+      await this.storage.remove(newStorageName).catch(() => undefined)
+      throw error
+    }
   }
 
   /** 我的配额（cloud_usage 懒创建） */
