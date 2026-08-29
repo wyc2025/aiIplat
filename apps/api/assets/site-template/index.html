@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>我的站点</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <h1 id="site-title">加载中…</h1>
+    <p id="site-description"></p>
+  </header>
+
+  <nav class="column-nav" id="column-nav"></nav>
+
+  <main class="container">
+    <section id="page-home">
+      <div class="article-list" id="article-list"></div>
+      <div class="pager">
+        <button id="prev-btn" disabled>上一页</button>
+        <span id="page-info"></span>
+        <button id="next-btn" disabled>下一页</button>
+      </div>
+    </section>
+
+    <section id="page-article" hidden>
+      <a class="back-link" href="#/">← 返回列表</a>
+      <h2 id="article-title"></h2>
+      <p class="article-meta" id="article-meta"></p>
+      <div class="article-content markdown-body" id="article-content"></div>
+      <hr />
+      <h3>评论</h3>
+      <ul class="comment-list" id="comment-list"></ul>
+      <div class="pager">
+        <button id="c-prev-btn" disabled>上一页</button>
+        <span id="c-page-info"></span>
+        <button id="c-next-btn" disabled>下一页</button>
+      </div>
+      <form id="comment-form" class="comment-form">
+        <h4>发表评论</h4>
+        <input type="text" id="comment-nickname" maxlength="32" placeholder="昵称（必填）" required />
+        <textarea id="comment-content" maxlength="500" rows="4" placeholder="说点什么…（500 字以内）" required></textarea>
+        <button type="submit">提交评论</button>
+        <p class="form-tip">提交后需审核通过才会展示</p>
+      </form>
+    </section>
+  </main>
+
+  <footer class="site-footer">Powered by iplat</footer>
+
+  <!-- markdown 渲染：CDN markdown-it，html:false 禁 raw HTML（防 XSS） -->
+  <script src="https://cdn.jsdelivr.net/npm/markdown-it@14/dist/markdown-it.min.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

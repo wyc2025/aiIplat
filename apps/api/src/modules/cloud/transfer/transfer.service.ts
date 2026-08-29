@@ -26,9 +26,10 @@ export class TransferService {
 
   /**
    * 上传：Multer 已流式落 tmp 区 → 业务校验（归属/数量/配额/同名）→ 移入正式区 → 落 cloud_file + used 记账（R3）。
+   * overwrite=1 且同目录存在同名未删文件 → 物理替换（R5：更新行 + used 差额记账 + 删旧物理文件）；否则同名自动"(1)"。
    * 任一步失败即清理临时/正式区文件，不留孤儿。
    */
-  async upload(userId: bigint, parentId: bigint, file?: Express.Multer.File) {
+  async upload(userId: bigint, parentId: bigint, file?: Express.Multer.File, overwrite = 0) {
     if (!file?.path) {
       throw new BusinessException(ErrorCode.ParamInvalid, '缺少上传文件（multipart 字段名 file）')
     }
@@ -45,10 +46,25 @@ export class TransferService {
       if (parentId !== BigInt(0)) {
         await this.cloudFileService.assertOwned(parentId, userId, true)
       }
-      // 单目录直接子项上限（R6，30006）
+      // 单目录直接子项上限（R6，30006；覆盖不新增子项，不计入）
       const count = await this.prisma.cloudFile.count({
         where: { userId, parentId, deletedAt: null },
       })
+
+      // 覆盖目标探测（R5：仅同名未删文件；命中文件夹或 overwrite=0 时走自动"(1)" 新增路径）
+      const overwriteTarget =
+        overwrite === 1
+          ? await this.prisma.cloudFile.findFirst({
+              where: { userId, parentId, name: originalName, deletedAt: null, isDir: 0 },
+            })
+          : null
+
+      if (overwriteTarget) {
+        // 覆盖路径：tmp 清理由 overwriteExisting 自持（return 子 Promise 与 finally 的 await 会竞态，见下）
+        return this.overwriteExisting(userId, parentId, overwriteTarget, file, originalName)
+      }
+
+      // 新增路径：数量上限校验（覆盖不新增，跳过后避免误判）
       if (count + 1 > MAX_CHILDREN) {
         throw new BusinessException(ErrorCode.CloudDirLimitExceeded, '单个目录下子项不能超过 500 个')
       }
@@ -68,7 +84,7 @@ export class TransferService {
       // tmp → 正式区（yyyyMM/uuid.ext）
       const storageName = await this.storage.moveToStorage(file.path, ext)
 
-      // 落库 + used 记账（事务）；失败则回滚物理文件
+      // 落库 + used 记账（事务）；is_public 不写（默认 0=继承父目录，R2 三态语义：公开目录内新上传自动可访问）
       try {
         const [created] = await this.prisma.$transaction([
           this.prisma.cloudFile.create({
@@ -90,13 +106,77 @@ export class TransferService {
           }),
         ])
         // TODO(P3后续): 触发内容审核事件 cloud.file.uploaded（见 ARCHITECTURE-P3 §13.7，审核引擎下期接入）
-        return { id: created.id.toString(), name, size: file.size }
+        return { id: created.id.toString(), name, size: file.size, overwritten: false }
       } catch (error) {
         await this.storage.remove(storageName)
         throw error
       }
     } finally {
-      // 兜底清理 tmp（校验失败路径；移动成功后 tmp 已不存在，删除静默）
+      // 兜底清理 tmp：仅新增路径（覆盖路径由 overwriteExisting 自持 finally，避免 return 子 Promise 与
+      // 此处 await 竞态导致 tmp 在 moveToStorage 前被误删）。moveToStorage 成功后 tmp 已不存在，删除静默。
+      if (overwrite !== 1) {
+        await this.storage.removeTmp(file.path)
+      }
+    }
+  }
+
+  /**
+   * 覆盖上传（R5）：tmp→正式区 → 更新该行 size/mime/ext/storage_name/update_time → used += 新-旧（差额可负，
+   * $executeRawUnsafe 兜底不为负）→ 删旧物理文件。URL（file id）不变，旧公开 URL 内容即时指向新文件。
+   */
+  private async overwriteExisting(
+    userId: bigint,
+    parentId: bigint,
+    target: { id: bigint; size: bigint; storageName: string | null },
+    file: Express.Multer.File,
+    originalName: string,
+  ) {
+    try {
+      // 覆盖场景配额校验：used + (新 - 旧) 不得超过配额（只多出的部分需要额外空间）
+      const { quota, used } = await this.cloudFileService.getQuota(userId)
+      const delta = BigInt(file.size) - target.size
+      if (delta > BigInt(0) && used + delta > quota) {
+        throw new BusinessException(
+          ErrorCode.CloudQuotaExceeded,
+          `存储配额不足（已用 ${this.formatSize(used)} / 配额 ${this.formatSize(quota)}）`,
+        )
+      }
+
+      const ext = this.extractExt(originalName)
+      const mime = this.sanitizeMime(file.mimetype)
+      const newStorageName = await this.storage.moveToStorage(file.path, ext)
+
+      try {
+        // 更新行 + used 差额记账（事务）；used 用 $executeRawUnsafe 兜底不为负
+        await this.prisma.$transaction(async (tx) => {
+          await tx.cloudFile.update({
+            where: { id: target.id },
+            data: {
+              size: BigInt(file.size),
+              mime,
+              ext: ext || null,
+              storageName: newStorageName,
+              updateTime: new Date(),
+            },
+          })
+          await tx.$executeRawUnsafe(
+            'UPDATE cloud_usage SET used = GREATEST(used + ?, 0), update_time = NOW() WHERE user_id = ?',
+            delta,
+            userId,
+          )
+        })
+        // 事务成功后删除旧物理文件（单个失败 warn 不阻断，覆盖语义优先保证内容更新）
+        if (target.storageName) {
+          await this.storage.remove(target.storageName)
+        }
+        return { id: target.id.toString(), name: originalName, size: file.size, overwritten: true }
+      } catch (error) {
+        // 落库失败：回滚新物理文件，旧文件保留
+        await this.storage.remove(newStorageName)
+        throw error
+      }
+    } finally {
+      // 覆盖路径自持 tmp 清理（upload 的 finally 已跳过覆盖分支，避免竞态）
       await this.storage.removeTmp(file.path)
     }
   }

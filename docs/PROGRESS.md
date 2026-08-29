@@ -2,17 +2,31 @@
 
 > 本文件由 AI 在每完成一个任务后更新。开工前先读本文件，从"进行中 / 下一个待办"继续。
 
-## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32）
+## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32），P4a 个人网站模块全部完成（T33~~T40）；下一阶段 P4b（AI 编写站点 + 在线编辑器）未开始
 
 ## 里程碑总览
 
-| 阶段 | 目标                              | 状态   |
-| ---- | --------------------------------- | ------ |
-| P1   | 后台管理底座                      | 已完成 |
-| P2a  | AI 模块：对话 + 套餐积分（ai 域） | 已完成 |
-| P2b  | AI 模块：工具调用 Agent 化        | 已完成 |
-| P3   | 云盘模块（cloud 域）              | 已完成 |
-| P4   | 个人网站模块（site 域）           | 未开始 |
+| 阶段 | 目标                                     | 状态   |
+| ---- | ---------------------------------------- | ------ |
+| P1   | 后台管理底座                             | 已完成 |
+| P2a  | AI 模块：对话 + 套餐积分（ai 域）        | 已完成 |
+| P2b  | AI 模块：工具调用 Agent 化               | 已完成 |
+| P3   | 云盘模块（cloud 域）                     | 已完成 |
+| P4a  | 个人网站：开放站点 + 文章模块（site 域） | 已完成 |
+| P4b  | 个人网站：AI 编写站点 + 在线编辑器       | 未开始 |
+
+## P4a 任务拆解（个人网站·site 域）
+
+| 编号 | 任务                                                                                                                                                                                                                                                 | 状态   |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| T33  | site 域骨架 + 数据库（site_site/site_column/site_tag/site_article/site_article_tag/site_comment 六表迁移）+ seed（个人网站菜单树及权限、common 角色默认授权）+ site 配置组（三个限流值）+ 错误码 40101~40112 + SiteFacade（hasSite）+ 删用户预检挂接 | 已完成 | 2026-08-29 |
+| T34  | cloud 域公开机制：cloud_file.is_public 迁移 + set-public 接口（cloud:file:public）+ 上传 overwrite 参数（R5）+ file.list 返回 isPublic + CloudFacade 扩展（resolvePublicPath / getPublicStream / createFolder / registerPublicFile）                 | 已完成 | 2026-08-29 |
+| T35  | 开放静态服务：/api/open/:slug 与 :slug/* 通配端点（slug→站点解析缓存、路径→file 解析缓存+负缓存、MIME 白名单、CSP 沙箱头、ETag/304、独立限流、流式输出、socket 空闲超时 30s）                                                                        | 已完成 | 2026-08-29 |
+| T36  | 站点设置后端：创建站点（slug 校验 R11 + 建公开目录 + media/ + 模板复制）+ 查询/编辑（改 slug 联动失效缓存）+ 停用/启用 + 评论开关                                                                                                                    | 已完成 | 2026-08-29 |
+| T37  | 栏目/标签/文章后端 CRUD（栏目 ≤3 级 + 40107 保护、字数 R14、摘要自动生成、封面 cover_path 校验、发布状态机）+ 热数据缓存失效                                                                                                                         | 已完成 | 2026-08-29 |
+| T38  | 评论后端（提交限流 R9、审核流）+ 查看数（R8）+ 开放数据 API v1 七个端点（契约按 API.md §6.3）                                                                                                                                                        | 已完成 | 2026-08-29 |
+| T39  | 前端五页（站点设置/栏目/标签/文章/评论）+ 我的文件"设为公开"按钮与公开标签 + 上传"覆盖同名"复选框 + 菜单接入                                                                                                                                         | 已完成 | 2026-08-29 |
+| T40  | 联调验收（对照 PRD-P4A 第 6 节）+ 文档回写（资产表 / PLATFORM-GUIDE / PROGRESS 完成记录 / ARCHITECTURE.md 并入 §14 并删除开头指针行）                                                                                                                | 已完成 | 2026-08-29 |
 
 ## P2a 任务拆解（AI 模块）
 
@@ -157,7 +171,7 @@
 
 ## 进行中
 
-（空；P3 全部完成（T25~T32），下一阶段 P4 个人网站模块（site 域）未开始）
+（空；P4a 全部完成（T33~T40），下一阶段 P4b 个人网站·AI 编写站点 + 在线编辑器未开始）
 
 ## 遗留问题
 
@@ -326,6 +340,210 @@
 **文档回写**：ARCHITECTURE §4.6 按 T30 实际实现修订（头像经 CloudFacade.saveAvatar 落 cloud_file，遗留 12 关闭）；ARCHITECTURE-P3-增补 新增 §13.14 API 列表风格约定（分页 PageResultDto / 非分页裸数组 / 附带数据才包对象 + 时间列必须 formatter 等纪律）；PROGRESS 里程碑 P3 → 已完成。
 
 **待用户浏览器复验清单（非阻塞，后端均已冒烟通过）**：① 图片/文本/视频预览与下载（Blob 改造后）；② 个人中心头像上传；③ 用户管理调配额后用户侧生效；④ 无痕窗口访问公开链接。
+
+### T33 完成记录（2026-08-29）：P4a 开工（site 域骨架 + 数据库）
+
+**文档指针**：ARCHITECTURE.md 开头已插入「进行中阶段 P4a，须与 ARCHITECTURE-P4A-增补.md 同读」指针行（保留至 T40 并入时删除）；PROGRESS 里程碑 P4 拆分为 P4a（进行中）/ P4b（未开始）+ T33~T40 任务表。
+
+**落地内容**：
+
+1. **数据库（六表迁移）**：`prisma/schema.prisma` 追加 SiteSite / SiteColumn / SiteTag / SiteArticle / SiteArticleTag / SiteComment（严格按架构增补 §14.2：site_site 时间字段为 create_time/update_time，其余表为 created_at 系；site_tag unique(site_id,name)；site_article_tag unique(article_id,tag_id)+双索引；site_comment 双复合索引；延续 relationMode="prisma" 逻辑外键——域内仅保留 column/articleTags/comments→article 的 Prisma relation，跨域 userId/rootFolderId/mediaFolderId 一律逻辑外键不建 relation）。迁移 `20260828170946_add_site_domain` 已应用，DDL 逐字段核对与 §14.2 一致。踩坑：Prisma 空串默认值 `@default('')` 单引号报校验错，须写 `@default("")`（site_article.summary 落库默认 ''）
+2. **site 配置组**：`config/site.config.ts`（SITE_OPEN_STATIC_RATE_LIMIT=120 / SITE_OPEN_API_RATE_LIMIT=60 / SITE_COMMENT_RATE_LIMIT=10，readPositiveInt 容错：非法或缺省回退默认值），注册进 `config/index.ts` 的 configLoaders；.env 未改动（均有默认值，可选覆盖）
+3. **错误码 40101~40112**：error-code.ts 追加 SiteNotFound~SiteUserHasSite 全 12 个（40001/40100/40300/40400/42900 通用码未占用）
+4. **域骨架与门面**：`modules/site/site.module.ts`（聚合模块骨架，子模块随 T35~T38 挂载）+ `modules/site/facade/site-facade.service.ts`（SiteFacade.hasSite：count site_site by userId）；SiteModule 注册进 app.module
+5. **删用户预检挂接（R13/D14）**：UserService 注入 SiteFacade，remove 预检链扩展为 cloud `hasFiles`（30011）→ site `hasSite`（40112）依次询问；UserModule 补 import SiteModule（与 CloudModule 同款域门面纪律，system 域零跨域 import 域内实现）
+6. **seed 增补**：个人网站目录（icon Monitor，path /site）下五页——站点设置（site/setting/index，site:site:manage）/ 栏目管理 / 文章管理 / 标签管理 / 评论管理（组件路径 site/xxx/index，与 seed 既有风格一致），菜单+按钮共 21 个 site:* 标识；云盘「我的文件」下追加「设为公开」按钮（cloud:file:public，sort 7）；common 角色授予「个人网站」整棵子树（BFS 收集，无 admin 专属按钮全量授予），cloud:file:public 由既有云盘子树 BFS 自动纳入（仅排除 cloud:admin:quota 的逻辑不变）
+
+**验证**：`prisma migrate dev` ✓（generate 成功，无 DLL 占用告警）；seed 幂等实测（首跑菜单 +23 条 = 目录 1 + 五页 5 + 按钮 17，重跑 +0 条）✓；SQL 核对（site_* 六表存在 / sys_menu 中 site:* 共 21 条 / common 角色 site:* 授权 21 条全量 / cloud:file:public 已授权 common）✓；`nest build` 0 错误 ✓；`eslint .` 0 错误 0 警告 ✓；read_lints 0 诊断 ✓。
+
+**边界与约束自查**：零新依赖 ✓；site 域未 import 其他域内部文件（SiteFacade 仅依赖全局 PrismaService）✓；未动限流/鉴权等横切逻辑 ✓；表名 site_ 前缀 ✓。
+
+### T34 完成记录（2026-08-29）：cloud 域公开机制
+
+**落地内容**：
+
+1. **cloud_file.is_public 迁移**：schema 新增 `isPublic Int @default(0) @db.TinyInt`（目录/文件均可标记；公开性向下级联、访问时上溯判定，对齐 R2/P4a）。迁移 `20260828181919_add_cloud_file_is_public` 已应用。**与文档偏差**：增补 §14.6 原规划为「新建 cloud_file_public 关联表」，实际落地为「cloud_file 单字段 is_public」，理由见下
+2. **set-public 接口**：`POST /api/cloud/file/set-public`（`cloud:file:public` 权限，与 seed 按钮标识一致）→ `FileService.setPublic`：归属校验（assertOwned，30001）+ 仅更新自身 is_public（**公开性仅标自身**，级联语义由访问时上溯判定承担，不级联写）。DTO `SetPublicDto{id,isPublic}`
+3. **file.list 返回 isPublic**：列表项新增 `isPublic: f.isPublic === 1`（前端公开标签数据源）
+4. **上传 overwrite 参数（R5）**：`UploadQueryDto` 新增 `overwrite`；`TransferService.upload` 改造——`overwrite=1` 且同目录存在同名未删**文件**（命中文件夹或 overwrite=0 走原「同名自动 (1)」）时走 `overwriteExisting`：tmp→正式区 → 更新该行 size/mime/ext/storage_name/update_time → **used 差额记账**（`$executeRawUnsafe GREATEST(used+delta,0)` 兜底不为负）→ 删旧物理文件；**URL（file id）不变**。覆盖场景配额校验用 `used + delta` 而非 `used + size`（只多出的部分需额外空间）。controller 透传 overwrite
+5. **CloudFacade 扩展**：`resolvePublicPath(rootFolderId, path)`（R2 上溯公开链校验 + 有界逐段下行 ≤10 层防环，供 T35 开放静态层）/ `getPublicStream`（供 T35 流式输出）/ `createFolder` + `registerPublicFile`（供 T36 建站点/模板复制，复用 R4 与 used 记账）；CloudModule 补 import StorageModule（CloudFacade 新增 storage 依赖）
+
+**关键坑（记录于下）**：`upload` 的 `finally { await removeTmp(file.path) }` 与 `return this.overwriteExisting(...)`（子 async Promise）存在 **JS 竞态**——`finally` 里的 await 会在 `overwriteExisting` 首个 await（getQuota）挂起时抢跑，把 tmp 文件在 `moveToStorage` 前误删，导致覆盖路径 ENOENT（50000）。修复：覆盖路径的 tmp 清理由 `overwriteExisting` 自持 finally，`upload` 的 finally 仅非覆盖分支兜底。此问题经 `fs.existsSync` 逐点日志精确定位（写盘 callback 时 exists=true → overwriteExisting 时 exists=false，且 _removeFile/fail 均未触发）。
+
+**验证**（Node fetch 冒烟 16 项全过）：mkdir / 上传 / 同名不覆盖→(1) / 覆盖 overwritten=true / 覆盖 URL 不变（同 id）/ 覆盖同名文件夹→(1) / list isPublic 初始 false / set-public 目录公开 / 文件公开 / list isPublic=true / 取消公开 / 不存在 id→30001 / 覆盖差额记账（增大 used 增加、减小 used 减少）/ 覆盖后 size 正确。`nest build` 0 错误 ✓、`eslint` 0 错误 0 警告 ✓、read_lints 0 诊断 ✓。
+
+**约束自查**：零新依赖 ✓；cloud 域无新增跨域 import ✓；未动横切逻辑 ✓。
+
+**与文档偏差（登记）**：增补 §14.6 若规划「cloud_file_public 关联表」——实际采用「cloud_file.is_public 单字段」。理由：公开性语义是「每个文件/目录一个公开开关」的一对一属性，单字段更简洁且满足 R2 上溯判定，无需关联表；且 PRD-P4A 明确「公开性仅标自身」。已在代码注释与本节登记，待 T40 并入 ARCHITECTURE.md 时同步修正 §14.6。
+
+### T35 完成记录（2026-08-29）：开放静态服务
+
+**落地内容**：
+
+1. **RedisKey 增补**（§14.9）：`site:resolve:{slug}`（300s）/ `site:path:{siteId}:{path}`（60s，"404" 负缓存）/ `site:data:{siteId}:{...}` / `site:view:{articleId}:{ip}` / `site:comment:rate:{articleId}:{ip}` / `site:rate:{bucket}:{ip}`（独立限流计数，bucket=static|api|comment）
+2. **MIME 白名单表**（`open/mime.ts`，§14.5）：`resolveMime(ext)` 返回 `{ whitelisted, contentType, sandbox, attachment }`；html/htm/svg/xml 附加 CSP sandbox（`CSP_SANDBOX` 常量）；纯文本强制 `text/plain; charset=utf-8`（沿用 P3 R7）；白名单外 `application/octet-stream` + attachment
+3. **SiteResolveService**（`open/site-resolve.service.ts`，§14.4）：`resolveSite(slug)` → 站点信息（Redis 300s，不存在/停用返回 null）；`resolvePath(siteId, rootFolderId, path)` → fileId（Redis 60s + "404" 负缓存）。**目录不算文件命中**（不写负缓存，避免目录下新增 index.html 被缓存挡住）
+4. **OpenStaticController**（`open/open-static.controller.ts`，核心）：`GET /api/open/:slug` + `GET /api/open/:slug/*path`（Express 5 通配 `*path` 得 string[] join('/')）；流程 = 独立限流 → slug 解析 → 路径规范化（拒绝空段/反斜杠/`.`/`..`，首段 `api` 双保险 40400）→ 目录语义（空→index.html / 尾斜杠→index.html / 无扩展名目录→301 补斜杠）→ 路径解析 → Range 解析（206/416）→ MIME+CSP → ETag/304 → 流式输出（`res.setTimeout(30s)` 空闲超时）。全程 @Public + @SkipTransform + 禁 @OperationLog，一切失败统一 40400
+5. **CloudFacade.getPublicStream 扩展**：新增可选 `range?: { start, end }` 参数（透传 StorageService.createReadStream，避免 Range 场景全量读盘）
+6. **main.ts**（§14.12）：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 改函数式——路径以 `/api/open` 开头反射 `*`（opaque origin 跨源）+ 放行 Content-Type/Range 头（评论提交 preflight），其余维持 CORS_ORIGINS 白名单
+7. **模块挂载**：`open/open.module.ts`（imports CloudModule）+ `site.module.ts` 挂载 SiteOpenModule；OpenApiController 占位待 T38 挂载（§14.4 路由顺序：数据接口先注册，静态端点首段 `api` 双保险兜底）
+
+**关键坑（登记）**：
+
+- **测试数据 size 虚构导致 Content-Length 不匹配**：冒烟初期静态文件返回 200 但 undici 报 "other side closed"——根因是测试造数据时 `cloud_file.size` 写死与真实文件字节数不符（Content-Length 与实际流长度不一致，undici 提前 EOF）。生产链路 size 由上传真实记账，不受影响；教训：造测试数据必须用真实 `Buffer.byteLength`
+- **Redis 缓存未清导致"站点不存在"**：prepare 脚本删了 site_site 但 `site:resolve:{slug}` 缓存残留旧 rootFolderId，导致 resolvePublicPath 用已删目录 → 404。开发阶段需 `FLUSHDB`；生产靠 site 域写操作主动失效（T36 落地）
+- **目录被当作文件命中**：`resolvePublicPath` 对目录也返回 found，导致 getPublicStream(isDir=1) 抛"公开文件不存在" 500。已在 resolvePath 区分 `file===null`（写负缓存）与 `file.isDir===1`（不写负缓存，走目录语义）
+
+**验证**（Node fetch 冒烟 27 项全过 + 专项）：入口 index.html 200+CSP sandbox 头+text/html+no-cache ✓；app.js text/javascript 无 sandbox ✓；style.css text/css + public max-age ✓；secret.txt text/plain ✓；CORS ACAO=* ✓；穿越 `%2e%2e`/`..%2F`/反斜杠一律 40400 ✓；不存在路径 40400 + 负缓存（Redis 可见 `site:path:2:nonexistent-xyz.js`=404 TTL 48s）✓；目录无斜杠 301 补斜杠 ✓；ETag 命中 304 ✓；首段 api 静态层 40400 ✓；不存在 slug 40400 ✓；Range 206 + Content-Range + 前 5 字节正确 ✓；静态限流 120 次/分/IP 超限 42900（125 次请求 5 次 42900）✓。`nest build` 0 错误 ✓、`eslint src` 0 错误 0 警告 ✓、read_lints 0 诊断 ✓。
+
+**约束自查**：零新依赖 ✓；site 域仅经 CloudFacade 交互云盘（未 import cloud 内部实现）✓；开放层禁 @OperationLog ✓；未动限流/鉴权横切逻辑（限流为 site 域自持 Redis 计数，符合"独立限流桶"）✓。
+
+**与文档偏差（登记）**：
+
+1. **限流实现方式**：§14.4 写「ThrottlerGuard：静态桶 120 次/分/IP（site 配置组）」，但 @Throttle 为静态装饰器无法读 ConfigService 动态限流值。实际采用**手动 Redis 计数限流**（`site:rate:{bucket}:{ip}`，与 ai/chat 同款模式），既满足「独立限流桶 + 可配置」本质要求，又避免静态装饰器读不到配置的缺陷。待 T40 并入时修正 §14.4 描述。
+2. **socket 空闲超时实现**：§14.4 写 `socket.setTimeout(30_000)`，但直接对 `req.socket` 设超时在响应完成后不自动清除、会破坏 keep-alive 连接复用（undici 连接池复用时报 "other side closed"）。实际采用 `res.setTimeout(30_000)`（仅针对本响应、finish 自动清除、不影响连接复用）。语义等价（防慢连接占 fd），实现更正确。
+
+### T36 完成记录（2026-08-29）：站点设置后端
+
+**落地内容**：
+
+1. **默认模板四件套**（D16/F6，`apps/api/assets/site-template/`）：index.html（站点头部 + 栏目导航 + 文章卡片分页 + hash 路由 #/article/{id} 详情 + 评论区 + Powered by iplat）/ style.css / app.js（原生 JS：fetch('./api/*') 相对路径调开放 API、markdown-it CDN html:false、用户内容一律 textContent 注入防 XSS、分页与导航高亮）/ README.txt（改造方法 + 开放 API 清单 + 三条注意事项）。运行时读 `process.cwd()/assets/site-template`（cwd=apps/api，dev 与 start:prod 均成立）
+2. **StorageService.writeFromBuffer**（infra 新能力）：内存内容直接写正式区 yyyyMM/uuid.ext（复用 resolveStorage 防穿越），供模板复制场景
+3. **CloudFacade 扩展**：① `createFolder` 增强——R4 同名自动"(1)"（复用 FileService.resolveNameConflict）+ R6 子项上限（500）+ `isPublic` 参数（站点根需公开）；② `discardSiteDraft(userId, drafts)`——创建回滚（软删 cloud_file 行 + 删物理文件 + used 回退）；③ `registerPublicFile` 增加 `isPublic` 参数（**T34 缺陷修复**，见下坑）
+4. **SiteResolveService.invalidateSite(slug)**：DEL `site:resolve:{slug}`；SiteOpenModule 导出 SiteResolveService 供域内 manage 复用
+5. **manage 模块**（`modules/site/manage/`，API.md §6.2）：GET /api/site/mine（未开通返回 null）/ POST（slug 校验 R11：正则+保留字 40103、全局唯一 40102、单站约束 40101 → 建公开目录「我的站点」→ media/ → 模板复制+used 记账 → 落 site_site，失败全回滚）/ PUT（title/description/slug/status/commentAudit；改 slug 排除自身查重并失效旧 slug 缓存；status/commentAudit 变更一并失效缓存）。GET 不挂 @OperationLog，POST/PUT 挂；权限 site:site:manage
+6. **SiteModule 挂载 SiteManageModule**（imports StorageModule + CloudModule + SiteOpenModule）
+
+**关键坑（登记）**：`registerPublicFile`（T34）创建 cloud_file 时未置 is_public（默认 0），而 R2 上溯判定**含目标自身**——模板文件首次经开放层访问即被 404 且写入负缓存。已修复（增加 isPublic 参数，站点模板传 true）。教训：R2 的"每一级 is_public=1"包含目标文件自身，任何写入公开目录树的文件登记都必须显式置公开。
+
+**验证**（Node fetch 冒烟 22 项全过）：未开通 GET mine=null ✓；保留字 slug（admin/open）→ 40103 ✓；格式非法 → 40001 ✓；创建成功含 siteUrl=/api/open/{slug}/ 与 mediaFolderId ✓；已开通再建 → 40101 ✓；云盘根「我的站点」isPublic=true ✓；模板四件套+media 就位（is_public=1，size 与真实字节一致）✓；开放层 index.html 可访问 + CSP sandbox 头 ✓；app.js text/javascript / style.css text/css ✓；**改 slug 后旧 slug 立即 40400（缓存失效实测）+ 新 slug 可访问** ✓；**停用后开放层立即 40400（主动失效实测）+ 恢复启用可访问** ✓；编辑标题/评论开关 ✓；used 记账正常 ✓。`tsc/nest build` 0 错误 ✓、`eslint src` 0 错误 0 警告 ✓、read_lints 0 诊断 ✓。测试数据已清理。
+
+**约束自查**：零新依赖 ✓；site 域经 CloudFacade 操作云盘（未直操 cloud_file/cloud_usage，回滚也经 discardSiteDraft）✓；模板文件读取 fs 仅限应用资产目录 ✓；未动横切逻辑 ✓。
+
+**与文档偏差（登记）**：
+
+1. **§14.7 createFolder 签名扩展**：原 `createFolder(userId, parentId, name)` → 实际 `createFolder(userId, parentId, name, isPublic=false)`（文档注明"复用 R4 同名自动(1)"但 T34 初版未实现，T36 补齐并加 isPublic 与子项上限）。
+2. **§14.7 registerPublicFile 签名扩展**：增加第 5 参 `isPublic=false`（§14.3 说"is_public 继承目录链无需单标"，但 R2 上溯判定含目标自身，站点根下的模板文件必须自身置公开——文档表述与 R2 实际语义有出入，以代码为准，待 T40 并入时修正 §14.3 措辞为"模板文件需显式置公开"）。
+3. **StorageService.writeFromBuffer 新增**：infra 通用能力（模板复制需"内存→正式区"直写，既有 moveToStorage 只支持 tmp 迁移），已属公共资产，T40 回写 ARCHITECTURE §9 资产表。
+
+### T37 完成记录（2026-08-29）：栏目/标签/文章后端 CRUD
+
+**落地内容**（`modules/site/` 下 column/tag/article 三子模块，均直用全局 PrismaService 查 site_* 表，无跨域 import）：
+
+1. **栏目模块**（column/，API.md §6.2）：GET list 平铺裸数组 + articleCount（groupBy 含草稿）/ POST（≤3 级 R6：父深度 ≥3 拒绝）/ PUT（**防环**：换父禁止指向自身或后代——沿新父祖先链上溯遇自身即拒；**层级**：新父深度 + 自身子树高度 ≤3，含移到根场景）/ DELETE（有子栏目或有文章含草稿 → 40107，先查子再查文章，message 区分）
+2. **标签模块**（tag/）：GET list + articleCount / POST（unique(site_id,name) → 40108）/ PUT（改名重名 40108）/ DELETE（事务连带删 site_article_tag）
+3. **文章模块**（article/）：分页列表（筛选 columnId/tagId/status/keyword 标题模糊；tagId 先查关联表得 ID 集，空集短路返回空页；item 含 columnName/tagIds 批量装配）/ 详情（附加 contentMd）/ POST / PUT（提供即更新；tagIds 提供即整体重建）/ PUT :id/status / DELETE（**物理删除** R7：事务连带 site_article_tag + site_comment）
+4. **R14 字数**：`countWordsR14` 剔除 markdown 标记（# * > ` ~ _ - + | [ ] ( ) !）与全部空白后计字符数，中英文均 1；create/update 时后端统计落库。**摘要自动**：`resolveSummary`——留空/空串触发，取正文纯文本（去代码块/图片/链接壳/标记、压缩空白）前 100 字
+5. **封面校验**：coverPath 非空必须 `media/` 前缀 → 40105（按 API.md §6.2"40105 口径"）
+6. **发布状态机**（D8）：`resolvePublishedAt`——0→1 且从未发布写 published_at=now；下架再上架**不刷新**；create 即发布同样写入。PUT 的 status 与 /status 接口共用同一状态机函数
+7. **热数据缓存失效（D12）**：三个 service 的全部写操作后 `scanDel site:data:{siteId}:*`
+8. SiteModule 挂载 SiteColumnModule / SiteTagModule / SiteArticleModule
+
+**验证**（Node fetch 冒烟 36 项全过）：三级树建成功/四级 40107 拒绝/换父到后代 40001（防环）/换父到自身 40001/含子树移动超 3 级 40107/空栏目可删；标签重名 40108/articleCount 正确/删除连带关联；文章字数 R14=26（实测验证：URL 的 `://.` 非 markdown 标记应保留——初版测试预期 21 系算错，修正口径理解后 26 正确）/摘要自动无残留标记/首次发布写 publishedAt/下架再上架不刷新/columnName/tagIds 装配/封面 assets/ 前缀 40105/四维筛选（栏目/标签/关键词/状态）/编辑重建 tagIds/物理删除后详情 40109/**写操作 scanDel 失效 site:data 缓存（Redis 实测 key 消失）**。`nest build` 0 错误 ✓、`eslint src` 0 错误 0 警告 ✓、read_lints 0 诊断 ✓。测试数据已清理。
+
+**约束自查**：零新依赖 ✓；site 域内三模块直查同域 site_* 表（同域数据合法）✓；未动横切逻辑 ✓。
+
+**与文档偏差（登记）**：
+
+1. **"标签不存在"错误码**：错误码表（§14.11/API.md §6.1）未定义"标签不存在"细分码（有栏目 40106/文章 40109/评论 40110，独缺标签）。实际采用通用 40400（资源不存在），影响面：tag PUT/DELETE 不存在、文章 tagIds 含不存在项。待 T40 并入时决定是否补细分码或改文档备案。
+2. **R14 口径澄清**：URL 中的 `:` `/` `.` 不属"markdown 标记符号"（文档用"等"字开放列举），实现按"# * > ` - [ ] ( ) ! ~ _ + |"精确集合剔除，其余字符（含 URL 标点）保留计入。仅作展示前后端不互验（R14 原文），影响可控。
+3. **UpdateArticleDto 允许携带 status**：API.md 写 PUT"同 POST"，实现中 PUT 与 /status 接口共用发布状态机函数（首次发布语义一致），前端可任选其一；状态机行为以 /status 接口为准。
+
+### 修订记录（2026-08-29，T37 后追加）：is_public 二态改三态（R2 修订），修复公开目录新上传 404 的洞
+
+**问题确认（用户指出的洞，核实成立且比 T36 记录的更广）**：T34/T36 完成记录只覆盖了 `registerPublicFile` 打标，但**普通上传（transfer.upload）与 mkdir 创建记录均未写 is_public（默认 0）**，而原 R2 上溯判定要求"每一级=1"——用户在公开的站点目录里正常上传任何新文件/新建任何子目录，开放层一律 404。这是 PRD 主路径（D15：站点文件管理复用云盘页）的致命洞；T35/T36 冒烟未暴露是因为测试数据均显式写了 isPublic=1，普通上传路径从未在公开目录下实测过。二态模型的根本缺陷：`0` 同时被迫承担"新建默认（应跟随父目录）"与"显式不公开"两个矛盾语义。
+
+**修订方案（用户提出并确认的三态继承）**：is_public 三态——`0=继承父目录`（新建默认）/ `1=显式公开`（站点根恒为 1，继承链锚点）/ `2=显式阻断`（"取消公开"落库值）；上溯判定改为"遇第一个非继承节点定生死"（1 放行、2 阻断、一路继承到根由根裁决）。
+
+**代码改动**：
+
+1. `CloudFacade.resolvePublicPath`：判定改写——上溯遇 1 放行（显式公开可穿透父级阻断）/ 遇 2 阻断 / 到根仍继承（异常态）阻断；根查询不再前置要求 isPublic=1（统一由上溯裁决）
+2. `FileService.setPublic`：API 契约保持二元（1=设为公开 / 0=取消公开），落库映射 0→2（显式阻断）；子树语义由上溯自然级联，无需遍历写整棵子树
+3. **T36 打标撤销**：模板 `registerPublicFile` 不再置 1（默认 0=继承站点根）；media/ 与子目录同样继承；`createFolder`/`registerPublicFile` 的 isPublic 参数保留（站点根置 1 场景）
+4. transfer.upload / mkdir 补注释（默认 0=继承）；schema 注释三态
+
+**验证（Node fetch 冒烟 18 项全过）**：模板继承可访问（打标撤销后回归）✓；**普通上传到站点根 → 开放层直接可访问（洞修复）** ✓；子目录+上传继承可访问 ✓；验收第 7 条 private/ 全链路（初始可访问 → 取消公开 40400 → 恢复可访问）✓；**显式穿透**（阻断目录内单文件显式公开 → 可访问）✓；根阻断整树 404 → 恢复 ✓；覆盖上传保持公开性且内容更新 ✓。`nest build` 0 错误 ✓、`eslint src` 0 错误 ✓、read_lints 0 诊断 ✓。测试数据已清理。
+
+**文档同步**：PRD-P4A R2 改写为三态判定描述；架构增补 §14.2（cloud_file 变更三态定义）、§14.4（判定流程第 5 步）同步更新。T40 并入 ARCHITECTURE.md 时按此版本。
+
+### T38 完成记录（2026-08-29）：评论后端 + 查看数 + 开放数据 API v1（P4a 后端收官）
+
+**落地内容**：
+
+1. **管理侧评论模块**（`modules/site/comment/`，API.md §6.2）：GET 分页（筛选 auditStatus/articleId/keyword 昵称模糊；articleTitle 批量装配——评论随文章物理删除无孤立行）/ PUT :id/audit（1 通过 / 2 驳回，40110 不存在）/ DELETE（物理删）；审核结果影响访客可见性 → scanDel site:data 失效（D12）；权限 site:comment:list/audit/delete，写操作挂 @OperationLog
+2. **开放数据 API v1**（`open/open-api.controller.ts` 七端点，API.md §6.3 契约逐字段核对）：site/columns（**后端组嵌套树**，契约例外于平台平铺惯例）/tags/articles（仅已发布、publishedAt 倒序、coverUrl 完整公开路径 `/api/open/{slug}/{coverPath}`、tags 装配、四维筛选）/articles/:id（contentMd + viewCount 实时覆盖缓存）/articles/:id/comments GET（仅 audit_status=1，时间正序）/POST（统一文案"已提交，审核后展示"）。**全部 @Public、零 @OperationLog、资源类失败统一 40400（防探测，不区分 slug/文章/栏目/草稿）**
+3. **路由顺序（§14.4 铁律）**：open.module controllers 数组 [OpenApiController, OpenStaticController]——具体路由 `:slug/api/*` 先注册，通配 `:slug/{*path}` 兜底；T35 静态层首段 api 双保险实测（api 未知端点 → 40400 非 500）
+4. **热数据缓存（§14.6/D12）**：site:data:{siteId}:{接口}:{参数摘要} TTL 60s（columns/tags/articles 列表/article 详情/评论列表）；详情缓存不含 viewCount——返回前读库覆盖保证计数实时性；site 域写操作 scanDel 失效（T37 已铺 + 本次补 manage 改 slug 时 scanDel——coverUrl 内嵌 slug 必须失效）
+5. **R8 查看数**：site:view:{articleId}:{ip} SET NX EX 300 去重，首次命中 view_count+1；IP 取 XFF 首段（extractIp 统一工具）
+6. **R9 评论限流**：独立 comment 桶 10 次/分/IP（site 配置组）+ 同文章同 IP 60s 一条（site:comment:rate SET NX EX 60，命中 40111）；审核开关（site_site.commentAudit）开→待审 0 / 关→直过审 1
+7. **限流工具抽取**：`open/rate-limit.util.ts`（assertRateLimit + extractIp），static/api/comment 三桶共用，静态 controller 同步重构复用
+8. SiteModule 挂载 SiteCommentModule——**P4a 后端 T33~T38 全部子模块就位**
+
+**验证**（Node fetch 冒烟 30 项全过）：七端点契约字段逐一核对 ✓；columns 嵌套树 ✓；articles 仅已发布 + publishedAt 倒序 + coverUrl 拼装 + columnName/tags 装配 ✓；tagId 筛选 ✓；**pageSize=51 → 40001 / =50 通过（分页上限 50）** ✓；**R8**：首次 viewCount=1 → 同 IP 窗口内不重复 → 异 IP +1 ✓；草稿/不存在文章/不存在 slug 一律 40400 ✓；**评论全链路**：提交统一文案 → 待审不可见 → 管理侧审核通过可见 → 驳回不可见 → 审核开关关闭直过审立即可见 ✓；**同文章同 IP 60s → 40111** ✓；**评论桶连发超限 → 42900** ✓；api 未知端点 → 静态双保险 40400 ✓；**开放层零操作日志（sys_operation_log 中 /api/open% 计数 = 0）** ✓。`tsc` 0 错误 ✓、`eslint src` 0 错误 0 警告 ✓、read_lints 0 诊断 ✓。测试数据已清理。
+
+**约束自查**：零新依赖 ✓；开放层无写操作（评论提交除外，写 site_comment 本域表）✓；未动横切逻辑（限流为 site 域自持工具）✓；域内 Service 组合（open.service 复用 SiteResolveService）✓。
+
+**与文档偏差（登记）**：
+
+1. **参数校验失败码**：开放层"一切失败统一 40400"限于资源类（§14.6 列举口径：站点/文章/栏目不存在）；DTO 校验失败仍为通用 40001（如 pageSize=51、昵称超长），属调用方参数错误、无探测风险，保持全局 ValidationPipe 行为。
+2. **限流 42900/40111 为统一 40400 的明确例外**：PRD 验收第 15 条明文要求（评论连发 42900、同 IP 60s 40111），与 R15 并行不悖。
+3. **限流实现沿用 T35 手动 Redis 桶**（§14.4 原文 ThrottlerGuard 的偏差已在 T35 记录）。
+
+### T39 完成记录（2026-08-29）：前端五页 + 云盘公开交互
+
+**落地内容**：
+
+1. **MarkdownView 提升公共组件**：`views/ai/components/MarkdownView.vue` → `components/MarkdownView/index.vue`（site 文章预览跨域复用所需，ai/chat import 同步更新）；资产表已更新。**api/site/site.ts**（14 个接口封装）+ **types/api.d.ts** 追加 site 域五实体与 CloudFile.isPublic
+2. **站点设置页**（site/setting）：未开通 → 引导创建（slug 前端正则+保留字预校验 + siteUrl 实时预览）；已开通 → descriptions 展示（状态/站点地址/siteUrl 链接/评论审核开关/创建时间 formatTime）+ 编辑弹窗（改 slug 提示"旧地址立即失效"）+ 启停（停用二次确认）+ 评论开关切换
+3. **栏目管理页**（site/column）：ProTable 树表格（平铺组树、default-expand-all）+ articleCount + 新增子栏目（下拉按层级禁用防超 3 级）+ 编辑/删除（40107 由后端拦、message 展示）
+4. **标签管理页**（site/tag）：裸数组列表 + articleCount + 新增/编辑/删除
+5. **文章管理页**（site/article）：分页列表（栏目/状态/关键词三维筛选）+ **编辑器弹窗双栏**（左 markdown textarea + 右 **MarkdownView 实时预览**，禁 raw HTML）+ 栏目/标签（多选）/摘要（留空自动生成提示）/封面（media/ 前缀由前端拼接，后端 40105 兜底）+ 存草稿/发布 radio + 列表标题点击只读预览（MarkdownView 渲染 contentMd）+ 发布/下架状态机 + 物理删除确认（提示连带评论）
+6. **评论管理页**（site/comment）：分页筛选（审核状态/昵称）+ articleTitle + 通过/驳回/删除（二次确认）
+7. **云盘页改造**（cloud/file）：名称列「公开」标签（isPublic）+ 操作列「设为公开/取消公开」（cloud:file:public 权限，设为公开时提示子目录/文件默认继承——对齐 R2 三态语义）+ 上传工具栏「覆盖同名」复选框（overwrite=1 透传，成功提示"同名文件已覆盖"）
+8. **菜单接入**：零改动——动态路由按后端菜单 component 字符串映射 views 文件（dynamic.ts），seed 菜单（T33）+ 五个页面文件即自动接入
+
+**验证**：`vue-tsc --noEmit` 0 错误 ✓、`eslint src` 0 错误 0 警告 ✓、read_lints 0 诊断 ✓。**浏览器实测（playwright-cli，§13.14 首屏纪律）**：登录 → 侧边栏「个人网站」五子菜单接入 ✓ → 站点设置页：未开通引导 → 创建弹窗（slug 实时预览）→ 创建成功 → descriptions 完整（siteUrl/时间 formatTime "2026-08-29 11:18:27" 格式）✓ → 栏目页：新增一级栏目成功（时间格式 ✓）→ 文章页：编辑器弹窗结构完整（栏目默认选中/多选标签/media 前缀封面/双栏布局）→ **MarkdownView 预览实测渲染出 h1/strong** → 发布提交 → 库内核验 status=1 + published_at 写入 + 字数/摘要后端统计 ✓ → 栏目/标签/评论页首屏渲染正常（含空态）✓。
+
+**已知残留（登记，不阻塞 T40）**：① 文章编辑弹窗的 Playwright aria 快照偶发捕获不全（dialog 已开但 snapshot 空），改用 DOM eval 验证——为测试工具快照局限，非页面缺陷；② 后端 admin 实例仍在运行（前端联调环境），T40 联调继续复用；③ 标签管理页浏览器快照验证了首屏，增删改交互与栏目页同构（后端冒烟已全过），未逐一浏览器操作。
+
+**约束自查**：零新依赖 ✓（MarkdownView 迁移不引包）；列表风格遵守 §13.14（分页 PageResultDto / 裸数组核对后端实际返回 / 时间列全部 formatTime、无 prop 直出）✓；加载中/空数据/加载失败三态全覆盖（ProTable 内建）✓；v-permission 按钮级权限 ✓；敏感数据无泄漏 ✓。
+
+### T40 完成记录（2026-08-29）：联调验收 + 文档回写（P4a 收官）
+
+**编辑器补齐（T39 偏差，验收条 10/11 前置）**：文章编辑弹窗补"上传封面"（落 media/，回显预览图）与"插入图片（落 media/）"（上传后在正文光标处插入 markdown 图片语法）；coverPath 语义统一为完整相对路径（media/ 前缀后端 40105 兜底）。vue-tsc/eslint 0 错误。
+
+**15 条验收全过（联调实测，46+5 项断言）**：
+
+| 条              | 核验结果                                                                                                                          |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| 1 创建站点      | slug=demo → 云盘根「我的站点」公开 + 四件套/media；mine 返 siteUrl/mediaFolderId ✓                                                |
+| 2 免登录访问    | /api/open/demo/ 200 text/html 模板渲染、无登录跳转；开放 API 免登录可用 ✓                                                         |
+| 3 发布可见/R8   | 列表仅发布；详情 contentMd；viewCount 首次 +1、同 IP 窗口去重 ✓                                                                   |
+| 4 CSP 隔离      | sandbox 头 ✓；**浏览器实测 localStorage 访问抛 SecurityError（opaque origin）** ✓；响应无 Set-Cookie ✓                            |
+| 5 MIME          | 图片 image/png / .zip octet-stream+attachment / .txt text/plain / 子页 .html sandbox / css js ✓                                   |
+| 6 穿越/负缓存   | %2e%2e、..%2F 一律 40400；负缓存 Redis key 可见 ✓                                                                                 |
+| 7 private/ 三态 | 初始可访问 → 取消公开 40400 ✓                                                                                                     |
+| 8 同名/覆盖     | counter.js 同名自动 (1)；覆盖 URL 不变、内容更新、used 差额 +17 ✓                                                                 |
+| 9 栏目          | 三级正常/四级 40107/含文章 40107 ✓                                                                                                |
+| 10 文章         | 开放列表可见（coverUrl 指 media/、字数/时间正确）、**下架后开放层 40400** ✓                                                       |
+| 11 插图         | 编辑器插入图片落 media/、公开 URL 可访问、详情含图片语法 ✓                                                                        |
+| 12 评论         | 全链路（待审不可见→审核通过可见）；40111；42900 ✓                                                                                 |
+| 13 停用         | 静态+数据全 40400，恢复正常 ✓                                                                                                     |
+| 14 删用户       | 有云盘文件 → 30011 ✓；**40112 链路实证**（清光云盘行保留站点 → SiteFacade 预检命中）✓                                             |
+| 15 并发         | 200 并发静态：100×200 + 100×HTTP429（P1 全局 Throttler 双层限流，即刻响应无排队、无 5xx）；期间后台 10 次全部成功、总耗时 456ms ✓ |
+
+**联调发现并修复的真实缺陷（4 处，均最小修复）**：
+
+1. `auth.service.refreshPermsCache` 只收按钮（type=3）perms → **菜单级 perms（site:site:manage）不进权限集合**，common 用户站点设置全 40300（admin `*` 特判掩盖了 P1 以来的缺口）。修复：type=2 同样计入
+2. `CloudFacade.registerPublicFile` 的 used 记账用 update → **全新用户（cloud_usage 行未懒创建）建站 P2025 → 500**。修复：upsert（quota 取 upload.cloudDefaultQuota）
+3. `CloudFacade.getPublicStream` 缓存 fileId 失效（云盘侧删除 60s 窗口内）抛裸 Error → **开放层 500**，违反 R15。修复：BusinessException 40400
+4. `user.service.create` 查重漏软删用户 → username 唯一索引撞 50000。修复：查重含软删（软删仍占名，10201）
+
+**文档回写**：ARCHITECTURE.md **已并入**——§4.8（site 域纪律速览）/ §5（site 六表 + cloud_file.is_public 三态 + seed 增补 P4a）/ §8（SITE_* 三环境变量 + main.ts 增补）/ §9（资产表 7 行 P4a + Redis Key site:* 六条）/ **§14 全文**（14.1~14.15，自增补文档并入）；**开头 P4a 指针行已删除**；增补文档头部标注"已并入，保留为历史细节参考"（同 P3 先例）。PLATFORM-GUIDE.md 增补"个人网站"章节（AI 助手可答站点相关咨询）。
+
+**最终验证**：api `tsc` 0 错误 ✓（nest build 受 safe-delete 环境限制以 tsc 等效，见遗留 2）、web `vue-tsc` 0 错误 ✓、双端 `eslint` 0 错误 0 警告 ✓。验收测试数据已清理（demo 站/t40u* 用户/Redis），临时脚本已删。
+
+**P4a 遗留（转入 P4b 或挂账）**：① 内容审核引擎接入（沿用 P3 遗留，评论与云盘共用）；② 用户删站功能（本期"仅建不删"，删用户预检 40112 挂接完备）；③ F3 编辑器工具栏的粗体/斜体/链接快捷按钮（正文 textarea + 插入图片已实现，格式按钮属增强）；④ u2 用户浏览器全流程手工复核（API 层已全验）；⑤ nest build 的 safe-delete 环境拦截（遗留 2，tsc 等效规避）。
 
 ### P1 最终状态总结（三句话）
 

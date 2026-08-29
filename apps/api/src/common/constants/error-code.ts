@@ -116,6 +116,32 @@ export const ErrorCode = {
   CloudAuditNotPassed: 30010,
   /** 用户仍有云盘文件，禁止删除 */
   CloudUserHasFiles: 30011,
+
+  // ========== site 域（40xxx 段，40101 起；40001/40100/40300/40400/42900 为通用码已占用，见 API.md §6.1） ==========
+  /** 站点不存在或未开通 */
+  SiteNotFound: 40101,
+  /** slug 已被占用 */
+  SiteSlugTaken: 40102,
+  /** slug 格式非法或命中保留字 */
+  SiteSlugInvalid: 40103,
+  /** 站点已停用 */
+  SiteDisabled: 40104,
+  /** 站点根目录不可用（被删或已取消公开） */
+  SiteRootUnavailable: 40105,
+  /** 栏目不存在 */
+  SiteColumnNotFound: 40106,
+  /** 栏目下存在子栏目或文章，不可删除 */
+  SiteColumnInUse: 40107,
+  /** 标签已存在 */
+  SiteTagExists: 40108,
+  /** 文章不存在 */
+  SiteArticleNotFound: 40109,
+  /** 评论不存在 */
+  SiteCommentNotFound: 40110,
+  /** 评论提交过于频繁 */
+  SiteCommentTooFrequent: 40111,
+  /** 用户已开通个人网站，禁止删除（R13 删用户预检） */
+  SiteUserHasSite: 40112,
 } as const
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode]

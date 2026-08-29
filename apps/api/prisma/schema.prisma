@@ -455,6 +455,8 @@ model CloudFile {
   storageName String?   @map("storage_name") @db.VarChar(120)
   /// 0 未审核 / 1 通过 / 2 驳回 / 3 审核中（D13 预留）
   auditStatus Int       @default(0) @map("audit_status") @db.TinyInt
+  /// 公开标记三态：0=继承父目录（新建默认）/ 1=显式公开 / 2=显式阻断（R2 修订：上溯遇第一个非继承节点定生死）
+  isPublic    Int       @default(0) @map("is_public") @db.TinyInt
   /// 非空 = 在回收站（R2 只标记自身）
   deletedAt   DateTime? @map("deleted_at")
   createTime  DateTime  @default(now()) @map("create_time")
@@ -502,4 +504,137 @@ model CloudUsage {
   updateTime DateTime @updatedAt @map("update_time")
 
   @@map("cloud_usage")
+}
+
+// ========== 个人网站域（P4a，表名 site_ 前缀） ==========
+
+/// 站点（每用户一站）
+model SiteSite {
+  id           BigInt   @id @default(autoincrement())
+  /// 属主（逻辑关联 sys_user，禁 JOIN）；单站约束
+  userId       BigInt   @unique @map("user_id")
+  /// 站点标识（R11：格式 + 保留字黑名单 + 全局唯一）
+  slug         String   @unique @map("slug") @db.VarChar(32)
+  /// 站点标题
+  title        String   @map("title") @db.VarChar(50)
+  description  String?  @map("description") @db.VarChar(200)
+  /// 站点根目录（逻辑关联 cloud_file，经 CloudFacade 校验）
+  rootFolderId BigInt   @map("root_folder_id")
+  /// 媒体目录（站点根下 media/），供后台上传定位
+  mediaFolderId BigInt  @map("media_folder_id")
+  /// 1 启用 / 0 停用（停用即开放层全 404，R10）
+  status       Int      @default(1) @map("status") @db.TinyInt
+  /// 评论审核开关（1 开=需审核 / 0 关=直过审）
+  commentAudit Int      @default(1) @map("comment_audit") @db.TinyInt
+  createTime   DateTime @default(now()) @map("create_time")
+  updateTime   DateTime @updatedAt @map("update_time")
+
+  @@map("site_site")
+}
+
+/// 栏目树（≤3 级）
+model SiteColumn {
+  id        BigInt   @id @default(autoincrement())
+  /// 冗余便于按站点过滤
+  siteId    BigInt   @map("site_id")
+  /// 0 = 根；≤3 级（R6）
+  parentId  BigInt   @default(0) @map("parent_id")
+  name      String   @map("name") @db.VarChar(32)
+  /// 同级排序，升序
+  sort      Int      @default(0) @map("sort")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  /// 逻辑关联 site_article（relationMode=prisma，无物理 FK）
+  articles SiteArticle[]
+
+  @@index([siteId, parentId])
+  @@map("site_column")
+}
+
+/// 标签
+model SiteTag {
+  id        BigInt   @id @default(autoincrement())
+  siteId    BigInt   @map("site_id")
+  name      String   @map("name") @db.VarChar(32)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  /// 逻辑关联 site_article_tag（relationMode=prisma，无物理 FK）
+  articleTags SiteArticleTag[]
+
+  @@unique([siteId, name])
+  @@index([siteId])
+  @@map("site_tag")
+}
+
+/// 文章
+model SiteArticle {
+  id          BigInt    @id @default(autoincrement())
+  siteId      BigInt    @map("site_id")
+  /// 逻辑关联 site_column
+  columnId    BigInt    @map("column_id")
+  title       String    @map("title") @db.VarChar(100)
+  /// 留空自动取正文纯文本前 100 字
+  summary     String    @default("") @map("summary") @db.VarChar(200)
+  /// 封面相对站点根路径（必须 media/ 前缀）
+  coverPath   String?   @map("cover_path") @db.VarChar(255)
+  /// markdown 原文（开放层下发原文，渲染由站点代码负责）
+  contentMd   String    @map("content_md") @db.LongText
+  /// 保存时统计（R14 口径）
+  wordCount   Int       @default(0) @map("word_count")
+  /// R8 去重计数
+  viewCount   Int       @default(0) @map("view_count")
+  /// 0 草稿 / 1 已发布
+  status      Int       @default(0) @map("status") @db.TinyInt
+  /// 首次发布时间（下架再上架不刷新）
+  publishedAt DateTime? @map("published_at")
+  /// 无 deleted_at（R7 物理删除）
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  column      SiteColumn       @relation(fields: [columnId], references: [id])
+  articleTags SiteArticleTag[]
+  comments    SiteComment[]
+
+  @@index([siteId, status, publishedAt])
+  @@index([siteId, columnId])
+  @@map("site_article")
+}
+
+/// 文章-标签
+model SiteArticleTag {
+  id        BigInt @id @default(autoincrement())
+  articleId BigInt @map("article_id")
+  tagId     BigInt @map("tag_id")
+
+  article SiteArticle @relation(fields: [articleId], references: [id])
+  tag     SiteTag     @relation(fields: [tagId], references: [id])
+
+  @@unique([articleId, tagId])
+  @@index([articleId])
+  @@index([tagId])
+  @@map("site_article_tag")
+}
+
+/// 评论
+model SiteComment {
+  id          BigInt   @id @default(autoincrement())
+  /// 冗余
+  siteId      BigInt   @map("site_id")
+  articleId   BigInt   @map("article_id")
+  /// 访客昵称
+  nickname    String   @map("nickname") @db.VarChar(32)
+  content     String   @map("content") @db.VarChar(500)
+  /// 0 待审核 / 1 通过 / 2 驳回（审核开关关闭时提交直置 1）
+  auditStatus Int      @default(0) @map("audit_status") @db.TinyInt
+  /// 提交者 IP（R8 取值口径）
+  ip          String   @map("ip") @db.VarChar(50)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  /// 逻辑关联 site_article（relationMode=prisma，无物理 FK）
+  article SiteArticle @relation(fields: [articleId], references: [id])
+
+  @@index([articleId, auditStatus])
+  @@index([siteId, auditStatus])
+  @@map("site_comment")
 }

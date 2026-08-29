@@ -230,7 +230,7 @@ import {
   type SseSession,
   type ToolCallItem,
 } from '@/api/ai/chat'
-import MarkdownView from '../components/MarkdownView.vue'
+import MarkdownView from '@/components/MarkdownView/index.vue'
 import ToolConfirmCard from '../components/ToolConfirmCard.vue'
 import ToolResultTag from '../components/ToolResultTag.vue'
 

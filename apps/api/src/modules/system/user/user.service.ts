@@ -11,6 +11,7 @@ import type { AuthUser } from '../../../gateway/guards/jwt.strategy'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { RedisService } from '../../../infra/redis/redis.service'
 import { CloudFacade } from '../../cloud/facade/cloud-facade.service'
+import { SiteFacade } from '../../site/facade/site-facade.service'
 import type {
   AssignRoleDto,
   CreateUserDto,
@@ -30,6 +31,7 @@ export class UserService {
     private readonly redis: RedisService,
     private readonly config: ConfigService,
     private readonly cloud: CloudFacade,
+    private readonly site: SiteFacade,
   ) {}
 
   /** 分页查询（含部门、角色；剔除 password） */
@@ -60,10 +62,10 @@ export class UserService {
     return new PageResultDto(list, total, query)
   }
 
-  /** 新增用户（bcrypt 存密码，可同时分配角色） */
+  /** 新增用户（bcrypt 存密码，可同时分配角色）；查重含软删用户（username 唯一索引约束，软删仍占名） */
   async create(dto: CreateUserDto) {
     const exists = await this.prisma.sysUser.findFirst({
-      where: { username: dto.username, deletedAt: null },
+      where: { username: dto.username },
     })
     if (exists) throw new BusinessException(ErrorCode.UsernameExists, '用户名已存在')
     if (dto.deptId) await this.assertDeptExists(BigInt(dto.deptId))
@@ -124,7 +126,7 @@ export class UserService {
     return { success: true }
   }
 
-  /** 删除（软删除，admin 不可删除）；清理用户-角色关联；R10：仍有云盘文件者禁止删除 */
+  /** 删除（软删除，admin 不可删除）；清理用户-角色关联；R13：依次经 cloud hasFiles（30011）→ site hasSite（40112）预检 */
   async remove(id: bigint) {
     const user = await this.assertExists(id)
     if (user.username === ADMIN_USERNAME) {
@@ -132,6 +134,9 @@ export class UserService {
     }
     if (await this.cloud.hasFiles(id)) {
       throw new BusinessException(ErrorCode.CloudUserHasFiles, '该用户仍有云盘文件，禁止删除')
+    }
+    if (await this.site.hasSite(id)) {
+      throw new BusinessException(ErrorCode.SiteUserHasSite, '该用户已开通个人网站，禁止删除')
     }
     await this.prisma.sysUserRole.deleteMany({ where: { userId: id } })
     await this.prisma.sysUser.update({ where: { id }, data: { deletedAt: new Date() } })

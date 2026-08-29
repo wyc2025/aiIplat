@@ -49,4 +49,12 @@ export default tseslint.config(
       'no-undef': 'off',
     },
   },
+  {
+    // 站点默认模板（apps/api/assets/site-template）：运行在用户站点的浏览器环境而非 Node，
+    // window/document/fetch 为合法全局；整目录豁免 no-undef
+    files: ['apps/api/assets/**/*.js'],
+    rules: {
+      'no-undef': 'off',
+    },
+  },
 )

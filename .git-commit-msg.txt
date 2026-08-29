@@ -1,0 +1,26 @@
+feat(site): 完成 P4a 个人网站模块 T33~T40（开放站点托管 + 文章数据 + 开放 API）
+
+后端（site 域全新 + cloud 域增量）：
+- site 域六表迁移（site_site/site_column/site_tag/site_article/site_article_tag/site_comment）
+  与 cloud_file.is_public 三态公开性（0 继承/1 显式公开/2 显式阻断，访问时上溯判定）
+- 站点设置：创建（slug 校验 R11 + 建公开目录 + media/ + 模板四件套复制 + 失败回滚）、
+  编辑（改 slug 立即失效旧链接）、启停、评论审核开关
+- 栏目/标签/文章 CRUD：栏目 ≤3 级防环 + 40107 保护、字数 R14、摘要自动生成、
+  封面 media/ 前缀校验、发布状态机（首次发布写 published_at）、物理删除连带评论（R7）
+- 开放层 /api/open/{slug}/*：静态托管（MIME 白名单 + CSP sandbox + ETag/304 + Range +
+  负缓存 + 独立限流）+ 开放数据 API v1 七端点（统一 40400 防探测、热数据缓存 60s）
+- 评论：访客昵称制 + 审核流 + 限流（10 次/分/IP + 同文章同 IP 60s 一条 40111）
+- 查看数 R8（IP+文章 5 分钟窗口去重）；覆盖上传 R5（物理替换 + used 差额记账 + URL 不变）
+- 错误码 40101~40112 + site 配置组（三个限流值）+ seed（个人网站菜单树 + common 角色授权）
+- 域门面：SiteFacade.hasSite 删用户预检挂接（R13）；CloudFacade 扩展五方法
+
+前端：
+- 后台五页：站点设置/栏目管理（树表格）/标签/文章（编辑器双栏 + MarkdownView 预览 + 封面与插图上传落 media/）/评论（审核流）
+- 云盘我的文件：设为公开/取消公开按钮与「公开」标签 + 上传「覆盖同名」复选框
+- MarkdownView 由 ai 域提升为公共组件；eslint 对站点模板资产（浏览器环境）豁免 no-undef
+
+联调修复（T40 验收发现）：
+- 权限缓存漏菜单级 perms 导致 common 用户 40300；建站 used 记账缺配额懒创建 500；
+  开放静态缓存失效 500（违反统一 40400）；建用户查重漏软删 50000
+
+文档：ARCHITECTURE.md 并入 §14（并删除 P4a 指针行）、API.md §6、PRD-P4A、PLATFORM-GUIDE、PROGRESS（P4a 完成，51 项验收断言全过）

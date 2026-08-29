@@ -28,7 +28,7 @@ export class TransferController {
     @Query() query: UploadQueryDto,
     @UploadedFile() file?: Express.Multer.File,
   ) {
-    return this.transferService.upload(BigInt(userId), BigInt(query.parentId ?? 0), file)
+    return this.transferService.upload(BigInt(userId), BigInt(query.parentId ?? 0), file, query.overwrite ?? 0)
   }
 
   @Get('preview/:id')

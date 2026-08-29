@@ -12,6 +12,12 @@
         />
       </div>
       <div class="v-cf-actions">
+        <el-checkbox
+          v-model="overwriteUpload"
+          style="margin-right: 8px"
+        >
+          覆盖同名
+        </el-checkbox>
         <el-button
           v-permission="'cloud:file:upload'"
           type="primary"
@@ -98,6 +104,14 @@
           >
             已分享
           </el-tag>
+          <el-tag
+            v-if="row.isPublic"
+            type="warning"
+            size="small"
+            style="margin-left: 6px"
+          >
+            公开
+          </el-tag>
         </template>
       </el-table-column>
       <el-table-column
@@ -113,7 +127,7 @@
       />
       <el-table-column
         label="操作"
-        width="320"
+        width="390"
         fixed="right"
       >
         <template #default="{ row }">
@@ -151,6 +165,14 @@
             @click="openShare(row)"
           >
             分享管理
+          </el-button>
+          <el-button
+            v-permission="'cloud:file:public'"
+            link
+            :type="row.isPublic ? 'warning' : 'primary'"
+            @click="onTogglePublic(row)"
+          >
+            {{ row.isPublic ? '取消公开' : '设为公开' }}
           </el-button>
           <el-button
             v-permission="'cloud:file:delete'"
@@ -407,6 +429,7 @@ import {
   renameFile,
   removeFile,
   uploadFile,
+  setFilePublic,
   previewFileBlob,
   downloadFileBlob,
 } from '@/api/cloud/file'
@@ -436,6 +459,8 @@ const fileInput = ref<HTMLInputElement>()
 const uploading = ref(false)
 const uploadPercent = ref(0)
 const submitting = ref(false)
+/** 覆盖同名上传（R5：物理替换，URL 不变）；缺省同名自动 (1) */
+const overwriteUpload = ref(false)
 
 const mkdirVisible = ref(false)
 const mkdirName = ref('')
@@ -567,9 +592,9 @@ async function onPick(e: Event) {
   uploadPercent.value = 0
   try {
     for (const f of files) {
-      await uploadFile(currentDir.value, f, (p) => (uploadPercent.value = p))
+      await uploadFile(currentDir.value, f, (p) => (uploadPercent.value = p), overwriteUpload.value)
     }
-    ElMessage.success('上传完成')
+    ElMessage.success(overwriteUpload.value ? '上传完成（同名文件已覆盖）' : '上传完成')
     reload()
   } catch {
     // 错误已由拦截器提示
@@ -625,6 +650,25 @@ async function onRemove(row: CloudFile) {
   await removeFile(Number(row.id))
   ElMessage.success('已删除')
   reload()
+}
+
+// 设为公开 / 取消公开（P4a：仅标记自身；站点公开目录机制用）
+async function onTogglePublic(row: CloudFile) {
+  const makingPublic = !row.isPublic
+  if (makingPublic) {
+    await ElMessageBox.confirm(
+      `确认将「${row.name}」设为公开？站点开放层将可访问该${row.isDir ? '目录及其中内容（子目录/文件默认继承）' : '文件'}`,
+      '提示',
+      { type: 'info' },
+    )
+  }
+  try {
+    await setFilePublic(Number(row.id), makingPublic)
+    ElMessage.success(makingPublic ? '已设为公开' : '已取消公开')
+    reload()
+  } catch {
+    // 拦截器提示
+  }
 }
 
 // 分享管理

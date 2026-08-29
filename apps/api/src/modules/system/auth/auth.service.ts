@@ -179,7 +179,9 @@ export class AuthService {
         ...new Set(
           roleMenus
             .map((rm) => rm.menu)
-            .filter((menu) => menu.status === 1 && menu.type === 3 && menu.perms)
+            // 菜单级（type=2）perms 同样计入权限集合：如 site:site:manage 挂在"站点设置"菜单上，
+            // 该页全部接口以它鉴权；仅收按钮（type=3）会导致 common 用户 40300（T40 联调发现）
+            .filter((menu) => menu.status === 1 && (menu.type === 2 || menu.type === 3) && menu.perms)
             .map((menu) => menu.perms as string),
         ),
       ]

@@ -25,7 +25,8 @@ export const renameFile = (id: number, name: string) =>
 export const removeFile = (id: number) => del(`/cloud/file/${id}`)
 
 /**
- * 上传文件（multipart/form-data，全程流式，配额校验，同名自动 (1)）。
+ * 上传文件（multipart/form-data，全程流式，配额校验）。
+ * overwrite=1 且同目录存在同名文件时物理替换（URL 不变）；缺省同名自动 (1)。
  * onProgress 回调用于展示上传进度（0~100）。
  * 注意：request 响应拦截器已对 code===0 解包为业务 data，故此处直接返回 CloudFile。
  */
@@ -33,6 +34,7 @@ export const uploadFile = (
   parentId: number,
   file: File,
   onProgress?: (percent: number) => void,
+  overwrite?: boolean,
 ): Promise<CloudFile> => {
   const form = new FormData()
   form.append('file', file)
@@ -40,7 +42,7 @@ export const uploadFile = (
   // 用原始 axios 实例：request 的 post 封装不接受第 3 个 config 参数（无法透传 onUploadProgress），
   // 且实例自带 baseURL（/api），此处用相对路径，避免拼出 /api/api/... 双前缀。
   return instance.post<CloudFile>(
-    `/cloud/file/upload?parentId=${parentId}`,
+    `/cloud/file/upload?parentId=${parentId}${overwrite ? '&overwrite=1' : ''}`,
     form,
     {
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
@@ -50,6 +52,10 @@ export const uploadFile = (
     },
   ) as unknown as Promise<CloudFile>
 }
+
+/** 设为公开 / 取消公开（P4a：仅标记自身，子树语义由上溯判定承担） */
+export const setFilePublic = (id: number, isPublic: boolean) =>
+  post<{ id: string; isPublic: boolean }>('/cloud/file/set-public', { id, isPublic: isPublic ? 1 : 0 })
 
 /**
  * 以 Blob 拉取文件流（预览/下载共用）。必须走 axios 而非 <img>/<iframe>/<a> 原生直链：

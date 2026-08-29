@@ -343,9 +343,23 @@ apps/api/src/
 | 30010 | 文件未通过内容审核，禁止分享                           | 提示（开关开启后生效）   |
 | 30011 | 用户仍有云盘文件，禁止删除                             | 提示（R10 删用户预检）   |
 
+### 4.8 个人网站（site 域）架构约定（P4a）
+
+> 完整设计（目录结构 / 六表 DDL / 创建流程 / 开放链路逐行流程 / MIME 表 / 门面签名 / Redis Key / seed 树 / 错误码 / 环境变量 / 演进预留）见 **§14**（由 ARCHITECTURE-P4A-增补.md §14 并入）。本节为核心纪律速览。
+
+- **表前缀**：`site_`；域边界同 R6：site 域禁止 import cloud/system/ai 内部实现，云盘能力只经 `CloudFacade`，system 删用户预检只经 `SiteFacade.hasSite`
+- **静态托管复用云盘（D4）**：不设独立站点存储。`cloud_file.is_public` **三态**：0=继承父目录（新建默认）/ 1=显式公开（站点根恒为 1）/ 2=显式阻断（"取消公开"落库值）；公开性**访问时上溯判定**——遇第一个非继承节点定生死（R2 修订）。收益：公开目录内新上传/新建内容零操作自动可访问；子树取消公开仅标自身
+- **开放层（/api/open/\*）**：访客侧唯一出口，全部 `@Public`、禁挂 `@OperationLog`、资源类失败统一 40400（限流 42900 / 评论间隔 40111 为验收明文例外）。**路由顺序铁律**：数据 API（`:slug/api/*`）必须先于静态通配（`:slug/{*path}`）注册，静态层首段 `api` 双保险兜底
+- **脚本隔离（D3）**：html/svg/xml 输出强制 `CSP: sandbox allow-scripts allow-forms allow-popups allow-downloads`（opaque origin，页面读不到主域凭证）；MIME 白名单 + nosniff；白名单外 octet-stream + attachment；CORS 对 /api/open 反射 `*`（main.ts 函数式，其余路径白名单不变）；`trust proxy` 开启
+- **缓存体系（D11/D12）**：`site:resolve:{slug}`（300s）/ `site:path:{siteId}:{path}`（60s + "404" 负缓存）/ `site:data:{siteId}:*`（60s 热数据）；site 域写操作主动失效（改 slug/启停 → DEL resolve + scanDel data；内容变更 → scanDel data），cloud 域变更靠 60s TTL 被动失效（R12：云盘侧改动最长 60 秒在公开站点生效）
+- **覆盖上传（R5）**：`overwrite=1` 且同名未删文件 → 物理替换 + used 差额记账（`GREATEST(used+delta,0)` 兜底）+ URL（file id）不变
+- **文章模块**：栏目树 ≤3 级（防环+40107 保护）；字数 R14（去 markdown 标记与空白计字符，仅展示）；摘要留空自动取正文纯文本前 100 字；发布状态机（首次发布写 published_at，下架再上架不刷新）；物理删除连带标签关联与评论（R7）
+- **评论（R9）**：昵称制；站点级审核开关（关=直过审）；开放层仅返回已过审；限流 10 次/分/IP + 同文章同 IP 60s 一条（40111）；查看数 R8（`site:view:{articleId}:{ip}` SET NX EX 300 去重，IP 取 XFF 首段）
+- **错误码**：site 域 40101~40112（表见 §14.11）；开放层对外统一 40400 防探测
+
 ---
 
-## 5. 数据库设计（sys_ 前缀为 P1 底座；P2a 新增 7 张 ai_ 表；P3 新增 3 张 cloud_ 表）
+## 5. 数据库设计（sys_ 前缀为 P1 底座；P2a 新增 7 张 ai_ 表；P3 新增 3 张 cloud_ 表；P4a 新增 6 张 site_ 表）
 
 > Prisma model 用 PascalCase + `@@map("sys_user")`，字段 camelCase + `@map("user_name")`。以下为数据库层结构。时间字段统一 `created_at / updated_at`，软删除用 `deleted_at`。
 >
@@ -592,6 +606,11 @@ apps/api/src/
 | used        | bigint default 0 | 字节（R3 记账规则）                   |
 | update_time | datetime         |                                       |
 
+### site_ 域六表（P4a 新增，DDL 详见 §14.2）
+
+`site_site`（站点，每用户一行，user_id unique，slug unique，root_folder_id/media_folder_id 关联 cloud_file，status/comment_audit 开关，create_time/update_time）、`site_column`（栏目树 ≤3 级，索引 (site_id,parent_id)）、`site_tag`（unique(site_id,name)）、`site_article`（含 cover_path/word_count/view_count/status/published_at，索引 (site_id,status,published_at) 与 (site_id,column_id)，无 deleted_at——R7 物理删除）、`site_article_tag`（unique(article_id,tag_id)+双索引）、`site_comment`（audit_status/ip，索引 (article_id,audit_status) 与 (site_id,audit_status)）。
+`cloud_file` 加列 `is_public tinyint default 0`（三态语义，见 §4.8 / §14.2）。全部 relationMode="prisma" 逻辑外键，域内仅 article→column/articleTags/comments 三条 Prisma relation，跨域一律逻辑外键。
+
 ### 索引约定
 
 - 唯一键：sys_user.username、sys_role.code、sys_dict_type.type、两张关联表的联合唯一
@@ -639,6 +658,12 @@ apps/api/src/
 - 云盘菜单树（见 §4.7 / §5 接口约定）：云盘管理目录（我的文件 / 公开链接 / 回收站三页及 cloud:* 按钮权限标识）
 - 系统管理/用户管理下追加按钮"调整配额"（cloud:admin:quota）
 - common 角色授予「云盘管理」整棵子树（不含 cloud:admin:quota，仅 admin 可调整）；超管 `*` 自动覆盖
+
+### seed 增补（P4a 个人网站）
+
+- 「个人网站」目录（/site，icon Monitor）+ 五页（站点设置/栏目/文章/标签/评论，site/xxx/index）+ 16 个 site:* 按钮权限标识；站点设置为菜单级 perms（site:site:manage）
+- 云盘「我的文件」下追加按钮"设为公开"（cloud:file:public）
+- common 角色授予「个人网站」整棵子树；cloud:file:public 由既有云盘子树 BFS 自动纳入；超管 `*` 自动覆盖
 
 ---
 
@@ -691,6 +716,14 @@ P3 增补（upload 配置组，见 `apps/api/src/config/upload.config.ts`）：
 - `CLOUD_AUDIT_ENABLED`：内容审核开关（默认 `false`，预留）
 - `CLOUD_PUBLIC_SHARE_RATE_LIMIT`：公开分享限流（待补）
 
+P4a 增补（site 配置组，见 `apps/api/src/config/site.config.ts`，均有默认值）：
+
+- `SITE_OPEN_STATIC_RATE_LIMIT`：开放静态限流（次/分/IP，默认 120）
+- `SITE_OPEN_API_RATE_LIMIT`：开放数据限流（次/分/IP，默认 60）
+- `SITE_COMMENT_RATE_LIMIT`：评论提交限流（次/分/IP，默认 10）
+
+main.ts 增补：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 函数式（/api/open 反射 `*` + 放行 Content-Type/Range，其余维持 CORS_ORIGINS 白名单）。
+
 ---
 
 ## 9. 公共资产表（优先复用，禁止重复造；新增后必须回写登记）
@@ -730,21 +763,33 @@ P3 增补（upload 配置组，见 `apps/api/src/config/upload.config.ts`）：
 | CreditService                                               | api/src/modules/ai/credit                            | 积分预检/结算/余额                                                                                                                                                                                        | 已建（T14）                       |
 | @SkipTransform                                              | api/src/gateway/decorators                           | SSE 接口跳过统一响应                                                                                                                                                                                      | 已建（T14）                       |
 | sse                                                         | web/src/views/ai/utils/sse.ts                        | 前端 SSE 客户端                                                                                                                                                                                           | 已建（T17）                       |
-| MarkdownView                                                | web/src/views/ai/components                          | markdown-it 渲染封装（禁 raw HTML）                                                                                                                                                                       | 已建（T17）                       |
+| MarkdownView                                                | web/src/components/MarkdownView                      | markdown-it 渲染封装（禁 raw HTML）；T39 由 ai 域提升为公共组件（site 文章编辑预览复用）                                                                                                                  | 已建（T17），已提升（T39）        |
 | AiTool / ToolRegistry                                       | api/src/modules/ai/tool                              | 工具类型与注册表（新增工具 = tools/ 下加一个文件并注册）                                                                                                                                                  | 已建（T19）                       |
 | PermissionService                                           | api/src/gateway/services                             | 权限判定共用服务（PermissionGuard 与工具层同源）                                                                                                                                                          | 已建（T19）                       |
 | PLATFORM-GUIDE                                              | docs/PLATFORM-GUIDE.md                               | AI 平台手册，注入 system prompt；功能变更必须同步更新                                                                                                                                                     | 已建（T23）                       |
 | SystemPromptService                                         | api/src/modules/ai/chat                              | system prompt 拼装（手册缓存 + 用户上下文 + 工具原则）                                                                                                                                                    | 已建（T23）                       |
 | ToolConfirmCard                                             | web/src/views/ai/components                          | 确认卡片组件（参数摘要 + 确认/取消 + 过期态）                                                                                                                                                             | 已建（T24）                       |
 | ToolResultTag                                               | web/src/views/ai/components                          | 工具结果折叠标签                                                                                                                                                                                          | 已建（T24）                       |
+| SiteFacade                                                  | api/src/modules/site/facade                          | 跨域门面：hasSite（R13 删用户预检）；随 SiteModule 导出                                                                                                                                                   | 已建（T33）                       |
+| CloudFacade 扩展（P4a）                                     | api/src/modules/cloud/facade                         | resolvePublicPath（三态继承判定）/ getPublicStream（Range + 缓存失效 40400）/ createFolder（重名自动(1)）/ registerPublicFile（used upsert）/ discardSiteDraft（建站回滚）                                | 已建（T34/T36，三态随修订记录）   |
+| SiteResolveService                                          | api/src/modules/site/open                            | slug/路径解析 + 正/负缓存（resolve 300s、path 60s）                                                                                                                                                       | 已建（T35）                       |
+| StorageService.writeFromBuffer                              | api/src/infra/storage                                | 内存内容直写正式区（模板复制等应用内生成文件场景）                                                                                                                                                        | 已建（T36）                       |
+| 站点默认模板                                                | apps/api/assets/site-template                        | 一键建站四件套（原生 JS + CDN markdown-it，textContent 防 XSS）                                                                                                                                           | 已建（T36）                       |
+| rate-limit.util                                             | api/src/modules/site/open                            | 开放层限流工具（Redis 计数，static/api/comment 三桶共用）+ extractIp                                                                                                                                      | 已建（T38）                       |
 
 ### Redis Key 增补约定（写入 RedisKey 常量）
 
-| Key                       | 类型/TTL                                                 | 用途                                                                                         |
-| ------------------------- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `online:{userId}`         | hash，30min 滑动                                         | 在线用户（username/nickname/ip/loginAt/lastActiveAt），JwtAuthGuard 校验通过时刷新，登出删除 |
-| `ai:chatting:{userId}`    | string，TTL 300s（兜底防进程崩溃残留），流结束时主动删除 | 单用户并发流限制（存在即拒绝新流，20007）                                                    |
-| `ai:confirm:{toolCallId}` | string（JSON），TTL 600s                                 | write 工具确认单：{ userId, conversationId, toolName, params }，确认/取消/过期即失效         |
+| Key                                  | 类型/TTL                                                 | 用途                                                                                         |
+| ------------------------------------ | -------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `online:{userId}`                    | hash，30min 滑动                                         | 在线用户（username/nickname/ip/loginAt/lastActiveAt），JwtAuthGuard 校验通过时刷新，登出删除 |
+| `ai:chatting:{userId}`               | string，TTL 300s（兜底防进程崩溃残留），流结束时主动删除 | 单用户并发流限制（存在即拒绝新流，20007）                                                    |
+| `ai:confirm:{toolCallId}`            | string（JSON），TTL 600s                                 | write 工具确认单：{ userId, conversationId, toolName, params }，确认/取消/过期即失效         |
+| `site:resolve:{slug}`                | string（JSON），TTL 300s                                 | slug → 站点信息；site 域写操作（改 slug/启停）主动 DEL                                       |
+| `site:path:{siteId}:{path}`          | string，TTL 60s                                          | 路径 → fileId；"404" 为负缓存；cloud 侧变更靠 TTL 被动失效（R12）                            |
+| `site:data:{siteId}:{...}`           | string（JSON），TTL 60s                                  | 开放数据热缓存；site 域内容变更 scanDel 前缀失效                                             |
+| `site:view:{articleId}:{ip}`         | string，SET NX EX 300                                    | 查看数去重窗口（R8）                                                                         |
+| `site:comment:rate:{articleId}:{ip}` | string，TTL 60s                                          | 同文章同 IP 评论间隔（R9，命中即 40111）                                                     |
+| `site:rate:{bucket}:{ip}`            | counter，60s 窗口                                        | 开放层独立限流计数（bucket = static/api/comment）                                            |
 
 ---
 
@@ -807,3 +852,148 @@ export interface AiTool {
 3. 当前用户上下文：昵称、角色名列表、当前日期（不注入权限标识明细，权限由工具过滤兜底）
 4. 工具使用原则：read 类直接执行；write 类必须先经用户确认；不确定的操作路径引导用户查看菜单，禁止编造
 ```
+
+---
+
+## 14. 个人网站（site 域）完整架构（P4a，自 ARCHITECTURE-P4A-增补.md 并入；增补文档保留为历史细节参考）
+
+### 14.1 后端目录结构
+
+```
+api/src/modules/site/
+├── site.module.ts            # 域模块：exports SiteFacade（门面）
+├── facade/
+│   └── site-facade.service.ts # SiteFacade：hasSite(userId)（R13 删用户预检，供 system 域）
+├── manage/                   # 站点设置（GET/POST/PUT /api/site/mine）
+├── column/                   # 栏目树（≤3 级）
+├── tag/                      # 标签
+├── article/                  # 文章（封面/字数/发布状态）
+├── comment/                  # 评论（审核流）
+└── open/                     # ★ 开放层：访客侧唯一出口，全部 @Public
+    ├── open-api.controller.ts   # /api/open/:slug/api/*（数据接口，先注册，见 14.4 路由顺序）
+    ├── open-static.controller.ts# /api/open/:slug 与 /api/open/:slug/{*path}（静态文件）
+    ├── open.service.ts          # 数据接口编排 + 热数据缓存
+    ├── site-resolve.service.ts  # slug→站点、路径→cloud_file 解析（缓存与负缓存）
+    ├── rate-limit.util.ts       # 限流工具（static/api/comment 三桶）+ extractIp
+    └── mime.ts                  # MIME 白名单 + CSP sandbox 常量
+
+apps/api/assets/site-template/  # 默认模板（应用静态资产；读取可用 fs，写入用户站点必须经 StorageService）
+├── index.html  ├── style.css  ├── app.js  └── README.txt
+```
+
+纪律：site 域**禁止** import cloud/system/ai 内部实现；开放层只允许读 + 评论提交；物理文件读写只经 StorageService。
+
+### 14.2 数据表（6 张 site_ + cloud_file 加列；relationMode="prisma" 逻辑外键）
+
+**site_site —— 站点（每用户一站）**：`id` / `user_id`（unique，逻辑关联 sys_user）/ `slug`（unique varchar32，R11）/ `title` varchar50 / `description` varchar200 null / `root_folder_id`（逻辑关联 cloud_file）/ `media_folder_id` / `status` tinyint（1 启用 0 停用，R10）/ `comment_audit` tinyint / `create_time` `update_time`。
+
+**site_column —— 栏目树**：`id` / `site_id` / `parent_id`（0=根，≤3 级 R6）/ `name` varchar32 / `sort` / `created_at` `updated_at`；索引 `(site_id,parent_id)`；同级同名不去重。
+
+**site_tag**：`id` / `site_id` / `name` / `created_at`；`unique(site_id,name)`，索引 `(site_id)`。
+
+**site_article —— 文章**：`id` / `site_id` / `column_id` / `title` varchar100 / `summary` varchar200（留空自动取正文纯文本前 100 字）/ `cover_path` varchar255 null（必须 media/ 前缀）/ `content_md` longtext / `word_count`（R14）/ `view_count`（R8）/ `status`（0 草稿 1 发布）/ `published_at` null（首次发布写，下架再上架不刷新）/ `created_at` `updated_at`（无 deleted_at，R7 物理删除）；索引 `(site_id,status,published_at)`、`(site_id,column_id)`。
+
+**site_article_tag**：`id` / `article_id` / `tag_id`；`unique(article_id,tag_id)` + 双索引。
+
+**site_comment —— 评论**：`id` / `site_id` / `article_id` / `nickname` varchar32 / `content` varchar500 / `audit_status`（0 待审 1 通过 2 驳回）/ `ip` varchar50 / `created_at`；索引 `(article_id,audit_status)`、`(site_id,audit_status)`。
+
+**cloud_file 变更**：`is_public tinyint default 0` **三态**：0=继承父目录（新建默认）/ 1=显式公开（站点根恒为 1）/ 2=显式阻断。公开性上溯判定见 14.4。域内 Prisma relation 仅 article→column / articleTags / comments 三条，跨域一律逻辑外键。
+
+### 14.3 站点创建流程（manage.service）
+
+1. 校验 slug（R11 正则 + 保留字黑名单 + 全局唯一 40102/40103）；校验当前用户无站点（40101）
+2. 经 CloudFacade 建目录「我的站点」（重名自动"(1)"）`is_public=1`（继承锚点）→ media/ 子目录
+3. 模板复制：读 assets 四文件 → StorageService.writeFromBuffer → CloudFacade.registerPublicFile（used 记账 upsert，兼容懒创建）
+4. 落 site_site 行
+5. 任一步失败回滚：`discardSiteDraft`（软删行 + 删物理文件 + used 回退）+ 不建站点行
+
+改 slug：更新后 `DEL site:resolve:{旧slug}` + scanDel `site:data:*`（coverUrl 内嵌 slug）。停用/启用：DEL resolve。任何编辑均失效 resolve 缓存。
+
+### 14.4 公开访问链路（开放层核心）
+
+**路由顺序铁律**：controllers 数组 `OpenApiController`（`:slug/api/*` 具体路由）必须先于 `OpenStaticController`（`:slug` 与 `:slug/{*path}`，Express 5 通配得 string[]）；静态层首段 `api` 双保险 40400。
+
+```
+GET /api/open/{slug}/[path]
+ 1. 独立限流（static 桶 120 次/分/IP，site 配置组；rate-limit.util）
+ 2. slug 解析：site:resolve:{slug}（TTL 300s）；不存在/停用 → 40400
+ 3. 路径规范化：拒绝空段/反斜杠/./..（R3 防穿越）；首段 api 双保险 40400
+ 4. 目录语义（R4）：空→index.html；尾斜杠→+index.html；无扩展名目录命中 → 301 补斜杠
+ 5. 路径解析：site:path:{siteId}:{path}（TTL 60s，fileId 或 "404" 负缓存）
+    经 CloudFacade.resolvePublicPath：下行逐段（深度≤10 防环）→ 上溯三态判定（R2 修订）；
+    目录不算文件命中（不写负缓存）；getPublicStream 对失效 fileId 抛 40400（禁 500）
+ 6. ETag（W/"size-mtime"）/304；Cache-Control：html no-cache、白名单 public max-age=3600
+ 7. 输出：getPublicStream 管道；MIME 表 + nosniff + ACAO:*；Range 206/416；res.setTimeout(30s)
+ 8. 全程禁挂 @OperationLog
+```
+
+**缓存失效**：site 域写操作主动失效（改 slug/启停 → DEL resolve + scanDel data；内容变更 → scanDel data）；cloud 域变更靠 `site:path` 60s TTL 被动失效（R12：最长 60 秒生效，文档明示）。
+
+### 14.5 MIME 白名单与安全响应头
+
+| 类别       | 扩展名                                           | Content-Type              | 附加头                          |
+| ---------- | ------------------------------------------------ | ------------------------- | ------------------------------- |
+| 可执行文档 | html / htm / svg / xml                           | 各自标准 mime             | **CSP sandbox**                 |
+| 脚本       | js / mjs                                         | text/javascript           | —                               |
+| 样式       | css                                              | text/css                  | —                               |
+| 数据       | json                                             | application/json          | —                               |
+| 纯文本     | txt / md / log / yml / yaml / csv                | text/plain; charset=utf-8 | —                               |
+| 图片       | jpg / jpeg / png / gif / webp / ico / bmp / avif | 各自标准 mime             | —                               |
+| 字体       | woff / woff2 / ttf / otf                         | font/*                    | —                               |
+| 音视频     | mp4 / mp3 / webm / ogg / wav / m4a               | 各自标准 mime             | —                               |
+| 文档       | pdf                                              | application/pdf           | —                               |
+| 其他一切   | *                                                | application/octet-stream  | Content-Disposition: attachment |
+
+CSP sandbox 固定值 `sandbox allow-scripts allow-forms allow-popups allow-downloads`（opaque origin 读不到主域凭证；对 P3 R7 文本铁律的收窄豁免——仅限本开放链路、白名单类型、必配 sandbox+nosniff；后台预览链路 R7 不变）。CORS：/api/open 反射 `*` 并放行 Content-Type/Range（main.ts 函数式），其余路径白名单不变。
+
+### 14.6 开放数据 API（契约详见 API.md §6.3）
+
+统一 `/api/open/:slug/api/`；@Public；api 桶 60 次/分/IP（评论 10 次/分/IP + 同文章同 IP 60s 一条 → 40111）；资源类失败统一 40400 防探测（参数校验 40001、限流 42900、评论间隔 40111 为例外）；分页 pageSize ≤50；文章仅 status=1、评论仅 audit_status=1；热数据缓存 60s（详情缓存不含 view_count，返回前读库覆盖）；columns 后端组嵌套树（消费者是用户站点代码）；详情触发查看数（R8）。
+
+### 14.7 域门面扩展
+
+**CloudFacade**：`setPublic`（仅标自身，0→落库 2）/ `resolvePublicPath`（三态上溯）/ `getPublicStream`（可选 Range；失效 fileId → 40400）/ `createFolder`（重名自动"(1)"+R6+isPublic 锚点）/ `registerPublicFile`（used upsert 懒创建）/ `discardSiteDraft`（建站回滚）。
+**SiteFacade**：`hasSite(userId)`（R13 预检，system remove 依次 hasFiles → hasSite）。
+
+### 14.8 覆盖上传（R5）
+
+`overwrite=1` 且同目录同名未删文件 → tmp→新正式区 → 更新行 → used 差额（`$executeRawUnsafe GREATEST(used+delta,0)`）→ 删旧物理文件；URL（file id）不变；命中文件夹或缺省维持自动"(1)"。
+
+### 14.9 Redis Key（见 §9 Redis Key 增补约定表，site:* 六条）
+
+### 14.10 seed 菜单树（P4a 增量，见 §5 seed 增补；common 授「个人网站」整棵子树）
+
+### 14.11 错误码 40xxx 段
+
+| code  | 含义                                       | 处理                                     |
+| ----- | ------------------------------------------ | ---------------------------------------- |
+| 40101 | 站点不存在或未开通                         | 后台引导创建；开放层不出现（统一 40400） |
+| 40102 | slug 已被占用                              | 提示更换                                 |
+| 40103 | slug 格式非法或命中保留字                  | 提示规则                                 |
+| 40104 | 站点已停用                                 | 后台提示（开放层统一 40400）             |
+| 40105 | 站点根目录不可用 / 封面不在 media/         | 提示去云盘检查目录                       |
+| 40106 | 栏目不存在                                 | 刷新栏目列表                             |
+| 40107 | 栏目下存在子栏目或文章 / 超 3 级，不可操作 | 提示先清空                               |
+| 40108 | 标签已存在                                 | 提示更换名称                             |
+| 40109 | 文章不存在                                 | 刷新文章列表                             |
+| 40110 | 评论不存在                                 | 刷新评论列表                             |
+| 40111 | 评论提交过于频繁                           | 提示稍后再试                             |
+| 40112 | 用户已开通个人网站，禁止删除（R13 预检）   | 提示先删除站点                           |
+
+### 14.12 环境变量与配置（见 §8 P4a 增补）
+
+### 14.13 资产表（见 §9 公共资产表 P4a 行）
+
+### 14.14 与 AI 域的关系（P4b 预留）
+
+P4b"AI 编写站点文件"按既有 AiTool 框架加工具：write 类必走确认卡片、经 CloudFacade 写文件、消耗积分；禁止 ai 域 import site/cloud 内部 Service。
+
+### 14.15 演进预留（本期不做，架构不堵路）
+
+| 项                         | 触发条件           | 预留设计                                                   |
+| -------------------------- | ------------------ | ---------------------------------------------------------- |
+| `/s/{slug}` 短路径         | 部署侧有反向代理后 | 新增控制器映射同一 service                                 |
+| 子域名 `{slug}.sites.域名` | 多用户真实部署     | slug 唯一 + 保留字已铺路；接入层按 Host 解析               |
+| X-Accel-Redirect           | 公开流量显著增长   | 鉴权解析与字节输出分离（nginx sendfile）                   |
+| CDN                        | 盗链/流量大        | 开放静态天然可缓存                                         |
+| 开放层拆独立进程           | 可靠性隔离诉求     | /api/open 无鉴权无状态只读为主，模块化单体拆分第一个实践点 |

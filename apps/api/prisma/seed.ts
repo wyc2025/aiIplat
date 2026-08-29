@@ -275,6 +275,8 @@ const menuTree: MenuSeed[] = [
           { name: '重命名', type: 3, perms: 'cloud:file:rename', sort: 4 },
           { name: '删除', type: 3, perms: 'cloud:file:delete', sort: 5 },
           { name: '创建分享', type: 3, perms: 'cloud:share:create', sort: 6 },
+          // P4a：设为公开（站点公开目录机制，cloud 域接口 site 装配复用）
+          { name: '设为公开', type: 3, perms: 'cloud:file:public', sort: 7 },
         ],
       },
       {
@@ -306,7 +308,86 @@ const menuTree: MenuSeed[] = [
       },
     ],
   },
-  // 个人中心：路由存在但不进侧边栏菜单（visible=0）
+  // 个人网站（P4a）：登录用户均可访问的目录，走正常 RBAC（site:* 权限标识，结构见架构增补 §14.10）
+  {
+    name: '个人网站',
+    type: 1,
+    path: '/site',
+    icon: 'Monitor',
+    sort: 6,
+    children: [
+      {
+        name: '站点设置',
+        type: 2,
+        path: 'site/setting',
+        component: 'site/setting/index',
+        perms: 'site:site:manage',
+        icon: 'Operation',
+        sort: 1,
+      },
+      {
+        name: '栏目管理',
+        type: 2,
+        path: 'site/column',
+        component: 'site/column/index',
+        perms: 'site:column:list',
+        icon: 'Menu',
+        sort: 2,
+        children: [
+          { name: '栏目查询', type: 3, perms: 'site:column:list', sort: 1 },
+          { name: '栏目新增', type: 3, perms: 'site:column:create', sort: 2 },
+          { name: '栏目修改', type: 3, perms: 'site:column:update', sort: 3 },
+          { name: '栏目删除', type: 3, perms: 'site:column:delete', sort: 4 },
+        ],
+      },
+      {
+        name: '文章管理',
+        type: 2,
+        path: 'site/article',
+        component: 'site/article/index',
+        perms: 'site:article:list',
+        icon: 'Document',
+        sort: 3,
+        children: [
+          { name: '文章查询', type: 3, perms: 'site:article:list', sort: 1 },
+          { name: '文章新增', type: 3, perms: 'site:article:create', sort: 2 },
+          { name: '文章修改', type: 3, perms: 'site:article:update', sort: 3 },
+          { name: '发布/下架', type: 3, perms: 'site:article:publish', sort: 4 },
+          { name: '文章删除', type: 3, perms: 'site:article:delete', sort: 5 },
+        ],
+      },
+      {
+        name: '标签管理',
+        type: 2,
+        path: 'site/tag',
+        component: 'site/tag/index',
+        perms: 'site:tag:list',
+        icon: 'Collection',
+        sort: 4,
+        children: [
+          { name: '标签查询', type: 3, perms: 'site:tag:list', sort: 1 },
+          { name: '标签新增', type: 3, perms: 'site:tag:create', sort: 2 },
+          { name: '标签修改', type: 3, perms: 'site:tag:update', sort: 3 },
+          { name: '标签删除', type: 3, perms: 'site:tag:delete', sort: 4 },
+        ],
+      },
+      {
+        name: '评论管理',
+        type: 2,
+        path: 'site/comment',
+        component: 'site/comment/index',
+        perms: 'site:comment:list',
+        icon: 'ChatDotSquare',
+        sort: 5,
+        children: [
+          { name: '评论查询', type: 3, perms: 'site:comment:list', sort: 1 },
+          { name: '评论审核', type: 3, perms: 'site:comment:audit', sort: 2 },
+          { name: '评论删除', type: 3, perms: 'site:comment:delete', sort: 3 },
+        ],
+      },
+    ],
+  },
+  // 个人中心：路由存在但不进侧边栏菜单（visible=0，hidden 不参与侧边栏排序）
   {
     name: '个人中心',
     type: 2,
@@ -409,6 +490,32 @@ async function main() {
       }
     }
     for (const menuId of cloudMenuIds) {
+      await prisma.sysRoleMenu.upsert({
+        where: { roleId_menuId: { roleId: commonRole.id, menuId } },
+        update: {},
+        create: { roleId: commonRole.id, menuId },
+      })
+    }
+  }
+
+  // P4a：common 角色授予「个人网站」整棵子树（无 admin 专属按钮，全部授予）；
+  // cloud:file:public（设为公开）已由上方云盘子树 BFS 一并纳入（仅排除 cloud:admin:quota）
+  const siteDir = await prisma.sysMenu.findFirst({
+    where: { parentId: BigInt(0), name: '个人网站' },
+  })
+  if (siteDir) {
+    // 收集个人网站整棵子树（目录 + 菜单 + 按钮）
+    const siteMenuIds: bigint[] = [siteDir.id]
+    const sitePending: bigint[] = [siteDir.id]
+    while (sitePending.length > 0) {
+      const parentId = sitePending.pop()!
+      const children = await prisma.sysMenu.findMany({ where: { parentId } })
+      for (const child of children) {
+        siteMenuIds.push(child.id)
+        sitePending.push(child.id)
+      }
+    }
+    for (const menuId of siteMenuIds) {
       await prisma.sysRoleMenu.upsert({
         where: { roleId_menuId: { roleId: commonRole.id, menuId } },
         update: {},
@@ -592,7 +699,7 @@ async function main() {
   }
 
   console.log(
-    `seed 完成：角色 2 个，菜单新增 ${createdMenuIds.length} 条，admin 用户就绪，内置字典 2 组，AI 厂商 4 家、示例模型 7 个、套餐 2 个，云盘菜单树 + common 授权已就绪`,
+    `seed 完成：角色 2 个，菜单新增 ${createdMenuIds.length} 条，admin 用户就绪，内置字典 2 组，AI 厂商 4 家、示例模型 7 个、套餐 2 个，云盘菜单树 + 个人网站菜单树 + common 授权已就绪`,
   )
 }
 

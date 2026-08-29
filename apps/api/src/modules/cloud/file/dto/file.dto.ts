@@ -36,6 +36,21 @@ export class MkdirDto {
   name!: string
 }
 
+/** 设为公开 / 取消公开（P4a：公开性仅标记自身，级联语义由访问时上溯判定承担） */
+export class SetPublicDto {
+  @ApiProperty({ description: '文件/文件夹 ID' })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  id!: number
+
+  @ApiProperty({ description: '是否公开（1 设为公开 / 0 取消公开=显式阻断；子树语义由上溯判定承担）' })
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  isPublic!: number
+}
+
 /** 重命名 */
 export class RenameDto {
   @ApiProperty({ description: '文件/文件夹 ID' })

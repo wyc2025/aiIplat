@@ -5,7 +5,7 @@ import { CurrentUser } from '../../../gateway/decorators/current-user.decorator'
 import { OperationLog } from '../../../gateway/decorators/operation-log.decorator'
 import { RequirePermission } from '../../../gateway/decorators/require-permission.decorator'
 import { SkipTransform } from '../../../gateway/decorators/skip-transform.decorator'
-import { FileListQueryDto, FilePathQueryDto, MkdirDto, RenameDto } from './dto/file.dto'
+import { FileListQueryDto, FilePathQueryDto, MkdirDto, RenameDto, SetPublicDto } from './dto/file.dto'
 import { FileService } from './file.service'
 
 @ApiTags('云盘-我的文件')
@@ -49,6 +49,14 @@ export class FileController {
   @ApiOperation({ summary: '重命名（同名冲突阻止）' })
   rename(@CurrentUser('userId') userId: string, @Body() dto: RenameDto) {
     return this.fileService.rename(BigInt(userId), dto)
+  }
+
+  @Post('set-public')
+  @RequirePermission('cloud:file:public')
+  @OperationLog('云盘', '设为公开')
+  @ApiOperation({ summary: '设为公开 / 取消公开（仅标记自身，公开性访问时上溯判定）' })
+  setPublic(@CurrentUser('userId') userId: string, @Body() dto: SetPublicDto) {
+    return this.fileService.setPublic(BigInt(userId), dto)
   }
 
   @Delete(':id')

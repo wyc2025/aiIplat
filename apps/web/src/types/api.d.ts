@@ -161,6 +161,8 @@ export interface CloudFile {
   updateTime: string
   /** 是否存在有效公开链接（仅 list 接口返回；文件夹恒 false；upload/mkdir/rename 单对象返回无此字段） */
   shared?: boolean
+  /** 是否显式公开（仅 list 接口返回；P4a 三态语义下仅显式置公开为 true，新建项继承父目录不显示标签） */
+  isPublic?: boolean
 }
 
 /** 面包屑节点 */
@@ -238,5 +240,80 @@ export interface OperationLogItem {
   status: number | null
   errorMsg: string | null
   duration: number | null
+  createdAt: string
+}
+
+// ========== site 域实体（P4a） ==========
+
+/** 我的站点（mine 接口；未开通为 null） */
+export interface SiteSiteInfo {
+  id: string
+  slug: string
+  title: string
+  description: string | null
+  /** 1 启用 / 0 停用 */
+  status: number
+  /** 评论审核开关：1 开 / 0 关 */
+  commentAudit: number
+  /** 开放入口完整路径（/api/open/{slug}/） */
+  siteUrl: string
+  rootFolderId: string
+  mediaFolderId: string
+  createdAt: string
+}
+
+/** 栏目平铺项（list 返回裸数组，前端组树） */
+export interface SiteColumnItem {
+  id: string
+  parentId: string
+  name: string
+  sort: number
+  articleCount: number
+  createdAt: string
+  /** 前端组树用（children 由前端构造） */
+  children?: SiteColumnItem[]
+}
+
+/** 标签项（list 返回裸数组） */
+export interface SiteTagItem {
+  id: string
+  name: string
+  articleCount: number
+  createdAt: string
+}
+
+/** 文章列表项 */
+export interface SiteArticleItem {
+  id: string
+  columnId: string
+  columnName: string
+  title: string
+  summary: string
+  coverPath: string | null
+  tagIds: string[]
+  wordCount: number
+  viewCount: number
+  /** 0 草稿 / 1 已发布 */
+  status: number
+  publishedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** 文章详情（列表项字段 + 正文） */
+export interface SiteArticleDetail extends SiteArticleItem {
+  contentMd: string
+}
+
+/** 评论列表项 */
+export interface SiteCommentItem {
+  id: string
+  articleId: string
+  articleTitle: string
+  nickname: string
+  content: string
+  ip: string
+  /** 0 待审核 / 1 已通过 / 2 已驳回 */
+  auditStatus: number
   createdAt: string
 }

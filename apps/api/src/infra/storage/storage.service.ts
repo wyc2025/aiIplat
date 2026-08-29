@@ -1,5 +1,5 @@
 import { createReadStream } from 'node:fs'
-import { mkdir, rename, stat, unlink } from 'node:fs/promises'
+import { mkdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import type { Readable } from 'node:stream'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -53,6 +53,22 @@ export class StorageService implements OnModuleInit {
     const target = this.resolveStorage(storageName)
     await mkdir(dirname(target), { recursive: true })
     await rename(tmpPath, target)
+    return storageName
+  }
+
+  /**
+   * 将内存内容直接写入正式区（yyyyMM/uuid.ext）；供模板复制等应用内生成文件场景（P4a T36）。
+   * @param content 文件内容
+   * @param ext 目标扩展名（小写不带点；仅允许字母数字，非法一律视为无扩展名）
+   * @returns 正式区相对路径 storage_name（yyyyMM/uuid.ext）
+   */
+  async writeFromBuffer(content: Buffer, ext: string): Promise<string> {
+    const safeExt = /^[a-z0-9]{1,20}$/.test(ext) ? ext : ''
+    const now = new Date()
+    const monthDir = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`
+    const storageName = `${monthDir}/${randomUUID()}${safeExt ? `.${safeExt}` : ''}`
+    const target = this.resolveStorage(storageName)
+    await writeFile(target, content)
     return storageName
   }
 

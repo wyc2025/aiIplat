@@ -4,7 +4,7 @@ import { ErrorCode } from '../../../common/constants/error-code'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { StorageService } from '../../../infra/storage/storage.service'
-import type { FileListQueryDto, MkdirDto, RenameDto } from './dto/file.dto'
+import type { FileListQueryDto, MkdirDto, RenameDto, SetPublicDto } from './dto/file.dto'
 
 /** 目录深度上限（R6） */
 const MAX_DEPTH = 10
@@ -64,6 +64,7 @@ export class FileService {
       mime: f.mime,
       updateTime: f.updateTime,
       shared: f.isDir === 0 && sharedSet.has(f.id),
+      isPublic: f.isPublic === 1,
     }))
 
     const { quota, used } = await this.getQuota(userId)
@@ -105,7 +106,7 @@ export class FileService {
       throw new BusinessException(ErrorCode.CloudDirLimitExceeded, '单个目录下子项不能超过 500 个')
     }
 
-    // 同名冲突：自动追加 "(1)"、"(2)"
+    // 同名冲突：自动追加 "(1)"、"(2)"；is_public 不写（默认 0=继承父目录，R2 三态语义）
     const name = await this.resolveNameConflict(userId, parentId, dto.name)
 
     const created = await this.prisma.cloudFile.create({
@@ -143,6 +144,19 @@ export class FileService {
       data: { deletedAt: new Date() },
     })
     return { success: true }
+  }
+
+  /**
+   * 设为公开 / 取消公开（P4a/R2 修订·三态继承）：仅标记自身，不级联写。
+   * API 契约保持二元（1=设为公开 / 0=取消公开），落库映射三态：1→1（显式公开）、0→2（显式阻断）；
+   * 子树内新建项默认 0（继承），故阻断/公开均由上溯判定自然级联，无需遍历子树。
+   */
+  async setPublic(userId: bigint, dto: SetPublicDto) {
+    const id = BigInt(dto.id)
+    await this.assertOwned(id, userId, false)
+    const isPublic = dto.isPublic === 1 ? 1 : 2
+    await this.prisma.cloudFile.update({ where: { id }, data: { isPublic } })
+    return { id: id.toString(), isPublic: isPublic === 1 }
   }
 
   /** 我的配额（cloud_usage 懒创建） */
