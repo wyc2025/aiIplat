@@ -262,6 +262,22 @@ export interface SiteSiteInfo {
   createdAt: string
 }
 
+/** 模板列表项（P4b T44；id = 模板目录名） */
+export interface SiteTemplateItem {
+  id: string
+  name: string
+  description: string
+}
+
+/** 应用模板的逐文件结果（部分成功语义；action 为 created/overwritten） */
+export interface SiteTemplateApplyResult {
+  path: string
+  ok: boolean
+  action?: 'created' | 'overwritten'
+  size?: number
+  error?: string
+}
+
 /** 栏目平铺项（list 返回裸数组，前端组树） */
 export interface SiteColumnItem {
   id: string

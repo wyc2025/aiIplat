@@ -1,6 +1,8 @@
 import { get, post, put, del } from '@/utils/request'
 import type {
   SiteSiteInfo,
+  SiteTemplateItem,
+  SiteTemplateApplyResult,
   SiteColumnItem,
   SiteTagItem,
   SiteArticleItem,
@@ -26,6 +28,15 @@ export const updateMySite = (data: {
   status?: number
   commentAudit?: number
 }) => put<SiteSiteInfo>('/site/mine', data)
+
+// ========== 模板库（site:site:manage，P4b T44） ==========
+
+/** 模板列表（读 assets/site-templates，实时不缓存） */
+export const listTemplates = () => get<SiteTemplateItem[]>('/site/templates')
+
+/** 应用模板（温和覆盖：同名文件软删进回收站，media/ 与模板外文件不动） */
+export const applyTemplate = (templateId: string) =>
+  post<SiteTemplateApplyResult[]>('/site/mine/apply-template', { templateId })
 
 // ========== 栏目（site:column:*，裸数组由前端组树） ==========
 

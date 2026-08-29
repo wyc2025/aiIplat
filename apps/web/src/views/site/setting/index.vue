@@ -97,6 +97,51 @@
         >
           编辑站点信息
         </el-button>
+
+        <!-- 模板库（P4b T44） -->
+        <div class="v-ss-templates">
+          <h3 class="v-ss-templates-title">
+            模板库
+          </h3>
+          <div
+            v-loading="templatesLoading"
+            class="v-ss-tpl-grid"
+          >
+            <div
+              v-for="tpl in templates"
+              :key="tpl.id"
+              class="v-ss-tpl-card"
+              :class="{ selected: selectedTemplateId === tpl.id }"
+              @click="selectedTemplateId = tpl.id"
+            >
+              <div class="v-ss-tpl-name">
+                {{ tpl.name }}
+              </div>
+              <div class="v-ss-tpl-desc">
+                {{ tpl.description }}
+              </div>
+            </div>
+            <el-empty
+              v-if="!templatesLoading && templates.length === 0"
+              description="暂无可用模板"
+              :image-size="60"
+            />
+          </div>
+          <div class="v-ss-tpl-actions">
+            <el-button
+              v-permission="'site:site:manage'"
+              type="primary"
+              :disabled="!selectedTemplateId"
+              :loading="applying"
+              @click="onApplyTemplate"
+            >
+              应用所选模板
+            </el-button>
+            <span class="v-ss-tip">
+              应用后：模板自带文件覆盖站点同名文件（旧版进回收站可还原），media/ 与模板外文件不受影响
+            </span>
+          </div>
+        </div>
       </template>
     </div>
 
@@ -226,8 +271,8 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { formatTime } from '@/utils/format'
-import { getMySite, createMySite, updateMySite } from '@/api/site/site'
-import type { SiteSiteInfo } from '@/types/api'
+import { getMySite, createMySite, updateMySite, listTemplates, applyTemplate } from '@/api/site/site'
+import type { SiteSiteInfo, SiteTemplateItem } from '@/types/api'
 
 const loading = ref(false)
 const loadError = ref(false)
@@ -341,7 +386,52 @@ async function toggleCommentAudit() {
   ElMessage.success(next === 1 ? '已开启评论审核' : '已关闭评论审核（新评论直接展示）')
 }
 
-onMounted(reload)
+// ========== 模板库（P4b T44） ==========
+const templates = ref<SiteTemplateItem[]>([])
+const templatesLoading = ref(false)
+const selectedTemplateId = ref('')
+const applying = ref(false)
+
+async function loadTemplates() {
+  templatesLoading.value = true
+  try {
+    templates.value = await listTemplates()
+  } catch {
+    // 拦截器提示
+  } finally {
+    templatesLoading.value = false
+  }
+}
+
+async function onApplyTemplate() {
+  const tpl = templates.value.find((t) => t.id === selectedTemplateId.value)
+  if (!tpl) return
+  await ElMessageBox.confirm(
+    `确认应用「${tpl.name}」？同名文件将被覆盖，旧版可在回收站还原；media/ 与模板外文件不受影响。`,
+    '应用模板',
+    { type: 'warning', confirmButtonText: '应用' },
+  )
+  applying.value = true
+  try {
+    const results = await applyTemplate(tpl.id)
+    const okCount = results.filter((r) => r.ok).length
+    const failCount = results.length - okCount
+    if (failCount > 0) {
+      ElMessage.warning(`已应用 ${okCount} 个文件，${failCount} 个失败`)
+    } else {
+      ElMessage.success(`模板应用成功（${okCount} 个文件）`)
+    }
+  } catch {
+    // 拦截器提示（40101 未开通 / 40116 模板不存在）
+  } finally {
+    applying.value = false
+  }
+}
+
+onMounted(() => {
+  reload()
+  loadTemplates()
+})
 </script>
 
 <style scoped>
@@ -358,5 +448,52 @@ onMounted(reload)
   color: #909399;
   font-size: 12px;
   margin-left: 10px;
+}
+
+/* 模板库卡片（P4b T44） */
+.v-ss-templates {
+  max-width: 760px;
+  margin-top: 36px;
+  padding-top: 20px;
+  border-top: 1px solid #ebeef5;
+}
+.v-ss-templates-title {
+  font-size: 16px;
+  margin-bottom: 14px;
+}
+.v-ss-tpl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  min-height: 80px;
+}
+.v-ss-tpl-card {
+  padding: 14px 16px;
+  border: 1px solid #dcdfe6;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.v-ss-tpl-card:hover {
+  border-color: #409eff;
+}
+.v-ss-tpl-card.selected {
+  border-color: #409eff;
+  box-shadow: 0 0 0 1px #409eff inset;
+}
+.v-ss-tpl-name {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.v-ss-tpl-desc {
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.v-ss-tpl-actions {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 </style>

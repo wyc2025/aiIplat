@@ -2,7 +2,7 @@
 
 > 本文件由 AI 在每完成一个任务后更新。开工前先读本文件，从"进行中 / 下一个待办"继续。
 
-## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32），P4a 个人网站模块全部完成（T33~~T40）；P4b（AI 编写站点 + 在线编辑器 + 模板库）进行中（T41~~T43 已完成，T44~~T45 待做）
+## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32），P4a 个人网站模块全部完成（T33~~T40）；P4b（AI 编写站点 + 在线编辑器 + 模板库）进行中（T41~~T44 已完成，T45 待做）
 
 ## 里程碑总览
 
@@ -35,7 +35,7 @@
 | T41  | AI 站点工具三件套 + SiteFacade 站点语义校验层（getMySiteInfo/invalidateSitePaths/listFiles/readFile/writeFiles）+ CloudFacade 机械原语（listSubtreeRaw/readFileRaw/writeFileRaw，mkdir -p 逐段复用）+ 错误码 40113~40116 + 开放静态 Cache-Control 改 no-cache（D28）+ README 契约升级（default 模板）+ PLATFORM-GUIDE 摘要 + 前置动作（走查 9 处文档补丁 / ARCHITECTURE 指针行 / API.md §7 追加） | 已完成 | 2026-08-29 |
 | T42  | AiTool summarize 钩子 + ToolConfirmCard 结构化文件清单 + AI 建站全链路联调（含部分成功/取消/越界回喂）                                                                                                                                                                                                                                                                                            | 已完成 | 2026-08-29 |
 | T43  | CodeMirror 6 编辑器（FileEditorDialog + 云盘页「编辑」入口）+ PUT /api/cloud/file/:id/content（30012/30013，更新行语义）+ 走查 W2 修复（file.list 三态 int + 前端双标签）                                                                                                                                                                                                                         | 已完成 | 2026-08-29 |
-| T44  | 模板库：assets/site-templates/{default,portfolio,card} 迁移与新增 + template.json + GET /api/site/templates + POST /api/site/mine/apply-template（40116，温和覆盖）+ 站点设置页模板库卡片                                                                                                                                                                                                         | 待办   |            |
+| T44  | 模板库：assets/site-templates/{default,portfolio,card} 迁移与新增 + template.json + GET /api/site/templates + POST /api/site/mine/apply-template（40116，温和覆盖）+ 站点设置页模板库卡片                                                                                                                                                                                                         | 已完成 | 2026-08-29 |
 | T45  | 联调验收（对照 PRD-P4B 第 6 节 12 条）+ 文档回写（ARCHITECTURE 并入 §15 并删指针行 / API.md §7 并入 / 资产表 / PLATFORM-GUIDE / PROGRESS）                                                                                                                                                                                                                                                        | 待办   |            |
 
 ## P2a 任务拆解（AI 模块）
@@ -181,7 +181,7 @@
 
 ## 进行中
 
-T44：模板库（assets/site-templates 三套迁移与新增 + template.json + GET /api/site/templates + POST /api/site/mine/apply-template + 站点设置页模板库卡片）（P4b；T41~~T43 已完成）
+T45：联调验收（对照 PRD-P4B 第 6 节 12 条）+ 文档回写（ARCHITECTURE 并入 §15 并删指针行 / API.md §7 并入 / 资产表 / PLATFORM-GUIDE / PROGRESS）（P4b 收官；T41~~T44 已完成）
 
 ## 遗留问题
 
@@ -658,6 +658,35 @@ T44：模板库（assets/site-templates 三套迁移与新增 + template.json + 
 - 测试数据清理：t43smoke 用户/角色绑定/站点/文件（含 quota 与 Redis）零残留 ✓
 
 **遗留（转入 T45）**：编辑器弹窗的浏览器人工复验（渲染/快捷键/脏检查逻辑已由 vue-tsc + 冒烟保证；PRD-P4B 验收第 5/6 条本就是 T45 联调口径）。
+
+### T44 完成记录（2026-08-29）：模板库（三套模板 + 列表/应用接口 + 设置页卡片）
+
+**落地内容**：
+
+1. **资产迁移与新增**（assets/site-templates/，旧单数目录已删）：`default/`（git mv 保历史 + 补 template.json）、`portfolio/`（作品集：首屏介绍 + 作品网格=已发布文章 + 详情弹层 + 关于区）、`card/`（名片站：头像位 media/avatar.png + 一句话介绍 + 社交链接 + 最近 5 篇）——每套四件套 + template.json（name/description/version/preview:null）；三套 README.txt 均为字段级契约（R22：主体与 default 逐字一致，仅首段与「模板当前行为」节随主题差异）；模板纪律全部遵守（相对路径 ./api/*、textContent、markdown html:false、alert/confirm）
+2. **SiteFacadeModule 独立模块**（facade/site-facade.module.ts）：原 SiteFacade 注册在 SiteModule 聚合层，子模块（template）无法注入父聚合 provider；独立成模块后 SiteTemplateModule 直接 imports（同域直注零循环），SiteModule 仍 re-export——**对外契约不变**（ToolModule/SystemModule import SiteModule 注入 SiteFacade 的既有路径零改动）
+3. **GET /api/site/templates**（site:site:manage）：readdir → 逐目录读 template.json → `[{ id, name, description }]`；缺失/解析失败跳过并记运行日志；实时读不缓存（§15.7）
+4. **POST /api/site/mine/apply-template**（site:site:manage + @OperationLog('个人网站','应用模板')）：未开通 40101（先于模板校验）→ DTO 正则 `^[A-Za-z0-9_-]{1,64}$` 挡穿越（40001）→ 目录不存在 40116 → 遍历模板文件（排除 template.json）→ **SiteFacade.writeFiles 批量写入**（同路径软删旧版 + 新建 R20/D23，media/ 与模板外文件不动，writeFiles 内部已精确失效 site:path，service 不重复失效）→ 返回逐文件清单（含 ok/action/size）
+5. **manage.create 模板源改读** `assets/site-templates/default/`（discardSiteDraft 回滚逻辑不变）
+6. **前端**：站点设置页「模板库」卡片（三套单选 + 描述 + 应用按钮）——应用前二次确认（"同名文件将被覆盖，旧版可在回收站还原"），成功提示应用文件数、部分失败 warning；api/site + types 同步
+
+**踩坑/偏差（登记）**：
+
+1. §15.1 注释「template.module.ts imports SiteModule 内的 facade 即可（同域直注）」在 Nest 语义下不可直接实现（子模块无法注入父聚合 provider，imports SiteModule 会与聚合层循环）——落地为 **SiteFacadeModule 独立模块**，语义等价且对外契约零改动；T45 并入 §15.1 时按此修订表述
+2. 冒烟脚本 `*/` 写进块注释（`templates/*/template.json`）导致 TS1127 非法字符（注释被提前终止）——已改写；同教训：冒烟 .mjs 里不能写 TS 类型注解
+3. 冒烟 HTTP 层完整同构三要素再确认：ValidationPipe（whitelist+transform）+ bodyParser 配置 + Redis perms 缓存——4c 穿越 case 在无 pipe 的裸实例下返回 40116（service readdir 兜底），补 pipe 后正确 40001（DTO 拦截），双保险成立
+
+**验证（冒烟 9/9 全过后脚本已删；HTTP 实测）**：
+
+- 模板列表：card/default/portfolio 三套齐全（name/description 完整）✓
+- 建站读新源：t44smoke 建站即得 default 四件套 + media/ ✓
+- apply portfolio：4 文件全部 ok（index.html 等为 overwritten）；重复应用 card 全部再次覆盖（幂等）✓
+- 温和覆盖：media/ 在、模板外 extra-t44.txt 在且内容未变 ✓
+- 校验链：nope → 40116；未开通用户 → 40101；`../package` 穿越 → 40001（DTO 正则）✓
+- `tsc --noEmit` / `nest build` / `vue-tsc --noEmit` 0 错误 ✓；`eslint`（改动文件）0 错误 0 警告 ✓；read_lints 0 诊断 ✓
+- 测试数据清理：t44smoke/t44nosite 用户/角色/站点/文件/配额/Redis 零残留 ✓
+
+**遗留（转入 T45）**：模板库卡片与三套模板的浏览器人工复验（含应用模板后开放层立即可见）；三套 README 与 §6.3 的逐字段一致性抽查。
 
 ### P1 最终状态总结（三句话）
 

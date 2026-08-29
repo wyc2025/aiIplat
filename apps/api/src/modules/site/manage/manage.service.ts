@@ -16,8 +16,8 @@ const SLUG_BLACKLIST = new Set([
   'api', 'www', 'admin', 'manage', 'system', 'open', 'static', 'assets', 'public', 'login', 's', 'site',
 ])
 
-/** 默认模板目录（应用静态资产，读取可用 fs；见架构增补 §14.1 纪律） */
-const TEMPLATE_DIR = join(process.cwd(), 'assets', 'site-template')
+/** 建站默认模板目录（P4b T44 迁移：assets/site-template → assets/site-templates/default，§15.7） */
+const TEMPLATE_DIR = join(process.cwd(), 'assets', 'site-templates', 'default')
 
 /** 模板四件套（D16）：文件名 → 扩展名 / MIME */
 const TEMPLATE_FILES = [

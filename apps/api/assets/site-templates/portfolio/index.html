@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>作品集</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <!-- 顶部导航（单页锚点） -->
+  <nav class="top-nav">
+    <span id="site-title" class="brand"></span>
+    <span class="nav-links">
+      <a href="#works">作品</a>
+      <a href="#about">关于</a>
+    </span>
+  </nav>
+
+  <!-- 首屏：自我介绍 -->
+  <header class="hero">
+    <h1 id="hero-title"></h1>
+    <p id="hero-description" class="hero-description"></p>
+    <a class="cta" href="#works">查看作品 ↓</a>
+  </header>
+
+  <!-- 作品网格 -->
+  <main id="works" class="section">
+    <h2>作品</h2>
+    <div id="work-grid" class="work-grid">
+      <p class="loading-tip">加载中…</p>
+    </div>
+    <p id="work-more" class="more-tip" hidden></p>
+  </main>
+
+  <!-- 关于区 -->
+  <section id="about" class="section about">
+    <h2>关于</h2>
+    <p id="about-text" class="about-text"></p>
+    <p id="about-stats" class="about-stats"></p>
+  </section>
+
+  <!-- 作品详情弹层（点击作品卡打开） -->
+  <div id="work-modal" class="modal" hidden>
+    <div class="modal-mask" data-close="1"></div>
+    <div class="modal-body">
+      <button class="modal-close" type="button" data-close="1">×</button>
+      <h3 id="work-title"></h3>
+      <p id="work-meta" class="work-meta"></p>
+      <div id="work-content" class="work-content"></div>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <p>© <span id="year"></span> <span id="footer-title"></span> · 由 iplat 驱动</p>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/markdown-it@14/dist/markdown-it.min.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
