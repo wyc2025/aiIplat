@@ -4,8 +4,12 @@
  * html/htm/svg/xml 附加 CSP sandbox 头（opaque origin，读不到主域凭证）。
  */
 
-/** CSP sandbox 固定值（D3/§14.5：html/svg/xml 附加，杜绝脚本读取主域 localStorage/cookie/JWT） */
-export const CSP_SANDBOX = 'sandbox allow-scripts allow-forms allow-popups allow-downloads'
+/**
+ * CSP sandbox 固定值（D3/§14.5：html/svg/xml 附加，杜绝脚本读取主域 localStorage/cookie/JWT）。
+ * 必须携带 allow-modals：访客页交互反馈（如评论提交后的 alert 提示）依赖弹窗 API；
+ * 缺失时浏览器静默忽略 alert 且不产生报错，访客得不到任何成功/失败反馈（2026-08-29 修复）。
+ */
+export const CSP_SANDBOX = 'sandbox allow-scripts allow-forms allow-popups allow-downloads allow-modals'
 
 /** 需附加 CSP sandbox 头的可执行文档扩展名 */
 const SANDBOX_EXTS = new Set(['html', 'htm', 'svg', 'xml'])

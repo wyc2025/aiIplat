@@ -83,22 +83,28 @@ export class OpenStaticController {
       throw new BusinessException(ErrorCode.NotFound, '资源不存在')
     }
 
-    // 4. 目录语义（R4）：空 → index.html；尾斜杠 → index.html；文件未命中但目录命中 → 301 补斜杠
+    // 4. 目录语义（R4）：根请求带斜杠 → index.html；根请求无斜杠 → 301 补斜杠（修正相对引用基址，
+    //    Location 含挂载点前缀）。normalized 已无尾斜杠（normalizePath 吃掉空段），原始斜杠信息取自 req.path
+    const hasTrailingSlash = req.path.endsWith('/')
     let target = normalized
     if (target === '') {
+      if (!hasTrailingSlash) {
+        res.status(301).set('Location', `/api/open/${slug}/`).end()
+        return
+      }
       target = 'index.html'
-    } else if (target.endsWith('/')) {
-      target = `${target}index.html`
     }
 
     let resolved = await this.resolveService.resolvePath(site.siteId, site.rootFolderId, target)
     if (!resolved.found) {
-      // 文件未命中：尝试目录语义（去尾斜杠 / 补尾斜杠找 index.html）
+      // 文件未命中：尝试目录语义（index.html 命中 → 按请求形态直出或 301 补斜杠；目录存在但无 index.html → 404）
       const dirResult = await this.tryDirectoryRedirect(
+        slug,
         site.siteId,
         site.rootFolderId,
         target,
         normalized,
+        hasTrailingSlash,
         res,
       )
       if (dirResult === 'redirected') {
@@ -131,7 +137,9 @@ export class OpenStaticController {
     // 6. MIME 白名单 + 安全头（§14.5）
     const mime = resolveMime(file.ext)
 
-    // 7. ETag / 304（Cache-Control：html no-cache，其余白名单 public max-age）
+    // 7. ETag / 304（Cache-Control：D28/P4b 修订——全部白名单统一 no-cache，ETag/304 协商保留。
+    //    原 §14.4"白名单 public max-age=3600"在 AI/编辑器高频迭代下不成立：js/css 最长 1 小时旧版，
+    //    "改完立即可见"必然失败；no-cache 下未变资源仅 304 头部零字节体，个人站点量级成本可接受）
     const etag = `W/"${file.size.toString()}-${file.updateTime.getTime()}"`
     const ifNoneMatch = req.headers['if-none-match']
     if (ifNoneMatch === etag) {
@@ -139,8 +147,8 @@ export class OpenStaticController {
       return
     }
 
-    const isHtml = mime.contentType.startsWith('text/html')
-    const cacheControl = isHtml ? 'no-cache' : mime.whitelisted ? 'public, max-age=3600' : 'no-store'
+    // 白名单（含 html）→ no-cache；白名单外（octet-stream + attachment 下载类）→ no-store
+    const cacheControl = mime.whitelisted ? 'no-cache' : 'no-store'
 
     // 8. 公共响应头（nosniff 已由 helmet 全局开启；ACAO 由 main.ts CORS 函数式统一）
     res.set({
@@ -207,26 +215,30 @@ export class OpenStaticController {
    * 返回 ResolvedPath，或 'redirected'（已 301 补斜杠）。
    */
   private async tryDirectoryRedirect(
+    slug: string,
     siteId: string,
     rootFolderId: string,
     target: string,
     normalized: string,
+    hasTrailingSlash: boolean,
     res: Response,
   ): Promise<ResolvedPath | 'redirected'> {
-    // 尝试目录下 index.html（path/ 与 path 两种形态）
-    const asDirIndex = `${normalized.replace(/\/$/, '')}/index.html`
+    // 目录下 index.html 命中：请求带斜杠 → 直出（基址正确）；无斜杠 → 301 补斜杠（修正相对引用基址，
+    // Location 必须带挂载点前缀 /api/open/{slug}，否则浏览器会跟随到不存在的根路径，2026-08-29 修复）
+    const asDirIndex = `${normalized}/index.html`
     if (asDirIndex !== target) {
       const r = await this.resolveService.resolvePath(siteId, rootFolderId, asDirIndex)
-      if (r.found) return r
-    }
-    // 无扩展名且未命中文件：若目录存在 → 301 补斜杠（相对引用依赖正确基址）
-    const noExt = !/\.[a-z0-9]+$/i.test(normalized) && normalized !== ''
-    if (noExt) {
-      const dirResolved = await this.cloudFacade.resolvePublicPath(BigInt(rootFolderId), normalized)
-      if (dirResolved && dirResolved.isDir === 1) {
-        res.status(301).set('Location', `/${normalized}/`).end()
+      if (r.found) {
+        if (hasTrailingSlash) return r
+        res.status(301).set('Location', `/api/open/${slug}/${normalized}/`).end()
         return 'redirected'
       }
+    }
+    // 目录本身存在（但目录下无 index.html）→ 40400（nginx 无 autoindex 语义；
+    // 若 301 补斜杠，Location 与请求 URL 相同会造成无限重定向循环，2026-08-29 修复）
+    const dirResolved = await this.cloudFacade.resolvePublicPath(BigInt(rootFolderId), normalized)
+    if (dirResolved && dirResolved.isDir === 1) {
+      throw new BusinessException(ErrorCode.NotFound, '资源不存在')
     }
     return { found: false }
   }

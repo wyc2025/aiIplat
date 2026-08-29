@@ -8,6 +8,7 @@
 > - seed 权限标识（已统一为 `cloud:admin:quota`）→ §5
 > - upload 环境变量 → §8
 > - 公共资产（CloudFacade / 通用 tmp StorageEngine / StorageService 扩展 / 前端组件）→ §9
+> - 列表风格约定（§13.14，2026-08-28 追加）→ ARCHITECTURE.md §13（2026-08-29 补并入）
 >
 > 后续维护请直接改 `ARCHITECTURE.md`，本文件保留仅作历史对照，不再作为权威源。
 

@@ -27,6 +27,14 @@ export interface AiTool {
   risk: 'read' | 'write'
   /** 执行逻辑，返回值会被序列化后回喂模型 */
   handler: (ctx: ToolContext, params: Record<string, unknown>) => Promise<unknown>
+  /**
+   * write 工具确认卡结构化摘要（P4b §15.6，可选）：返回值 JSON 序列化进确认单与
+   * tool_confirm 事件，前端确认卡渲染为结构化清单；返回 null/undefined 或抛错时
+   * 由 chat.service 回退 P2b 现状（params 截断字符串）。缺省 = 现状，既有工具零改动。
+   * （实现注：相比 §15.6 草图 (params) => any 补充了 ctx 入参——summarize 需要按当前用户
+   * 查数据，如 write_site_files 预判 action 需以 userId 查站点文件树，T42 已登记。）
+   */
+  summarize?: (params: Record<string, unknown>, ctx: ToolContext) => unknown
 }
 
 /** 工具风险级别 */

@@ -29,12 +29,22 @@ export interface ConversationItem {
   updatedAt: string
 }
 
+/** write 工具确认卡结构化摘要项（P4b T42，write_site_files；action/size 为预判，以执行结果为准） */
+export interface ToolSummaryItem {
+  path: string
+  /** 动作预判：created 新建 / overwritten 覆盖 */
+  action?: 'created' | 'overwritten'
+  /** 预估大小（字节）：created = 新内容大小，overwritten = 旧文件大小 */
+  size?: number
+}
+
 /** 工具调用记录（消息内嵌，用于恢复卡片/标签） */
 export interface ToolCallItem {
   toolCallId: string
   toolName: string
   title: string
-  summary: string
+  /** P2b：截断字符串；P4b T42：summarize 钩子可返回结构化清单 */
+  summary: string | ToolSummaryItem[]
   params: Record<string, unknown>
   status: string
   /** read / write */

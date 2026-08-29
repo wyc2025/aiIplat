@@ -2,18 +2,18 @@
 
 > 本文件由 AI 在每完成一个任务后更新。开工前先读本文件，从"进行中 / 下一个待办"继续。
 
-## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32），P4a 个人网站模块全部完成（T33~~T40）；下一阶段 P4b（AI 编写站点 + 在线编辑器）未开始
+## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32），P4a 个人网站模块全部完成（T33~~T40）；P4b（AI 编写站点 + 在线编辑器 + 模板库）进行中（T41~~T42 已完成，T43~~T45 待做）
 
 ## 里程碑总览
 
-| 阶段 | 目标                                     | 状态   |
-| ---- | ---------------------------------------- | ------ |
-| P1   | 后台管理底座                             | 已完成 |
-| P2a  | AI 模块：对话 + 套餐积分（ai 域）        | 已完成 |
-| P2b  | AI 模块：工具调用 Agent 化               | 已完成 |
-| P3   | 云盘模块（cloud 域）                     | 已完成 |
-| P4a  | 个人网站：开放站点 + 文章模块（site 域） | 已完成 |
-| P4b  | 个人网站：AI 编写站点 + 在线编辑器       | 未开始 |
+| 阶段 | 目标                                        | 状态   |
+| ---- | ------------------------------------------- | ------ |
+| P1   | 后台管理底座                                | 已完成 |
+| P2a  | AI 模块：对话 + 套餐积分（ai 域）           | 已完成 |
+| P2b  | AI 模块：工具调用 Agent 化                  | 已完成 |
+| P3   | 云盘模块（cloud 域）                        | 已完成 |
+| P4a  | 个人网站：开放站点 + 文章模块（site 域）    | 已完成 |
+| P4b  | 个人网站：AI 编写站点 + 在线编辑器 + 模板库 | 进行中 |
 
 ## P4a 任务拆解（个人网站·site 域）
 
@@ -27,6 +27,16 @@
 | T38  | 评论后端（提交限流 R9、审核流）+ 查看数（R8）+ 开放数据 API v1 七个端点（契约按 API.md §6.3）                                                                                                                                                        | 已完成 | 2026-08-29 |
 | T39  | 前端五页（站点设置/栏目/标签/文章/评论）+ 我的文件"设为公开"按钮与公开标签 + 上传"覆盖同名"复选框 + 菜单接入                                                                                                                                         | 已完成 | 2026-08-29 |
 | T40  | 联调验收（对照 PRD-P4A 第 6 节）+ 文档回写（资产表 / PLATFORM-GUIDE / PROGRESS 完成记录 / ARCHITECTURE.md 并入 §14 并删除开头指针行）                                                                                                                | 已完成 | 2026-08-29 |
+
+## P4b 任务拆解（个人网站·AI 编写站点 + 在线编辑器 + 模板库）
+
+| 编号 | 任务                                                                                                                                                                                                                                                                                                                                                                                              | 状态   | 完成日期   |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ---------- |
+| T41  | AI 站点工具三件套 + SiteFacade 站点语义校验层（getMySiteInfo/invalidateSitePaths/listFiles/readFile/writeFiles）+ CloudFacade 机械原语（listSubtreeRaw/readFileRaw/writeFileRaw，mkdir -p 逐段复用）+ 错误码 40113~40116 + 开放静态 Cache-Control 改 no-cache（D28）+ README 契约升级（default 模板）+ PLATFORM-GUIDE 摘要 + 前置动作（走查 9 处文档补丁 / ARCHITECTURE 指针行 / API.md §7 追加） | 已完成 | 2026-08-29 |
+| T42  | AiTool summarize 钩子 + ToolConfirmCard 结构化文件清单 + AI 建站全链路联调（含部分成功/取消/越界回喂）                                                                                                                                                                                                                                                                                            | 已完成 | 2026-08-29 |
+| T43  | CodeMirror 6 编辑器（FileEditorDialog + 云盘页「编辑」入口）+ PUT /api/cloud/file/:id/content（30012/30013，更新行语义）+ 走查 W2 修复（file.list 三态 int + 前端双标签）                                                                                                                                                                                                                         | 待办   |            |
+| T44  | 模板库：assets/site-templates/{default,portfolio,card} 迁移与新增 + template.json + GET /api/site/templates + POST /api/site/mine/apply-template（40116，温和覆盖）+ 站点设置页模板库卡片                                                                                                                                                                                                         | 待办   |            |
+| T45  | 联调验收（对照 PRD-P4B 第 6 节 12 条）+ 文档回写（ARCHITECTURE 并入 §15 并删指针行 / API.md §7 并入 / 资产表 / PLATFORM-GUIDE / PROGRESS）                                                                                                                                                                                                                                                        | 待办   |            |
 
 ## P2a 任务拆解（AI 模块）
 
@@ -171,7 +181,7 @@
 
 ## 进行中
 
-（空；P4a 全部完成（T33~T40），下一阶段 P4b 个人网站·AI 编写站点 + 在线编辑器未开始）
+T43：CodeMirror 6 编辑器（FileEditorDialog + 云盘页「编辑」入口）+ PUT /api/cloud/file/:id/content（30012/30013）+ 走查 W2 修复（file.list 三态 int + 前端双标签）（P4b；T41~~T42 已完成）
 
 ## 遗留问题
 
@@ -187,9 +197,13 @@
 10. （P2a 环境）`prisma generate` / `migrate dev` 末尾会报 `EPERM: rename query_engine-windows.dll.node.tmp* -> query_engine-windows.dll.node`——原因是运行中的 api 进程（`node dist/main.js`）占用该 dll；**类型生成与迁移本身均成功**（index.d.ts 已含新模型、迁移已应用），仅最后一步引擎 dll 替换失败，残留 `.tmp*` 文件在 node_modules 内无害。规避：如需完全干净可先停 api 服务再 generate，或忽略该告警
 11. （P2b 经验）DeepSeek 思考模式（V4 系列，如 deepseek-v4-flash）多轮工具调用有两个硬约束，已处理但后续接新模型/厂商需注意：① 回喂 assistant 消息的 tool_calls 必须用嵌套结构 `{ id, type:'function', function:{ name, arguments } }`（引擎层 `toOpenAIMessages` 已转换）；② 若模型返回了 `reasoning_content`（思考过程），回喂时必须原样回传，否则 400 `The reasoning_content in the thinking mode must be passed back to the API`（ai_message 已加 reasoning_content 字段持久化跨 confirm 请求回传）。接入非思考型模型（如 kimi/qwen/glm 标准版）时不受此约束，但代码已兼容
 12. ~~（T27 核实的既有偏差）ARCHITECTURE §4.6 规划的 system 域通用上传口 `POST /api/system/file/upload`（Multer 10MB，落 sys_file）文档存在、代码从未实现~~ **已处理（2026-08-28）**：T30 头像上传实际经 `CloudFacade.saveAvatar` 落 cloud_file（虚拟 parentId=-1）实现，ARCHITECTURE §4.6 已修订为实际方案，本遗留关闭；sys_file 表暂无写入方，通用上传口如有新增消费场景再另起任务
+13. ~~（2026-08-29 发现）open-static.controller.ts 目录 301 补斜杠的 `Location: /{path}/` 丢失 `/api/open/{slug}` 前缀，访客直连 API 部署形态下目录形态链接会重定向到不存在的根路径~~ **已处理（2026-08-29）**：修复 Location 前缀；顺带根治同函数两处既有缺陷：① 目录存在但无 index.html 时 301 的 Location 与请求 URL 相同 → 浏览器无限重定向循环（现按 nginx 无 autoindex 语义改 40400）；② 根路径无斜杠（手输 `/api/open/{slug}`）直接出 index.html 导致相对引用（./api/*）基址错误（现 301 补斜杠修正）。临时实例（PORT=3001）实测六场景全过（根/目录 × 有无斜杠 × 有无 index.html + 不存在路径），ARCHITECTURE §14.4 R4 描述已同步，测试数据（cloud_file testdir）已清理
 
 ## 完成记录
 
+- 2026-08-29 修复：个人站点访客页永远停在"加载中…"。根因：模板 index.html 带 CSP sandbox（无 allow-same-origin）→ opaque origin，其 style.css/app.js 子资源按 no-cors 跨源校验，被 helmet 默认响应头 `Cross-Origin-Resource-Policy: same-origin` 拦截（浏览器控制台报 "Specify a more permissive Cross-Origin Resource Policy"），app.js 未执行故站点信息/文章均未加载。修复：main.ts 在 helmet 之后新增中间件，对 /api/open 路径响应改写 CORP 为 cross-origin（与 CORS 反射 * 同口径，其余路径维持默认）；同步回写 ARCHITECTURE §4.8 D3 / §14.4 输出步骤 / §14.5 安全响应头说明
+- 2026-08-29 修复（续）：访客提交评论"疑似 CORS 报错"。排查结论：curl 实测 preflight/GET/POST/业务报错响应均带 ACAO:*，CORS 配置无问题；agent-browser 真实浏览器复现提交成功（表单清空、console 零报错）。真正问题：CSP sandbox 缺 `allow-modals`，评论提交成功后的 `alert('已提交，审核后展示')` 被浏览器静默忽略，访客得不到任何反馈，console 仅打 sandbox 警告被误读为 CORS 错误；重复提交还会撞 60s 限流（40111 的 alert 同样被吞）。修复：mime.ts 的 CSP_SANDBOX 增加 `allow-modals`（服务端动态响应头，已生成站点重启后立即生效，无需动云盘文件）；同步回写 ARCHITECTURE §4.8 D3 / §14.5
+- 2026-08-29 排查（续 2）：① 从 `localhost:5173`（web dev server）打开站点时评论提交报 "Failed to fetch"——站点链接为相对路径 `/api/open/{slug}/`，落在 dev server 上经代理；sandbox 页面请求 Origin 为 null，**Vite 默认 cors（仅放行 localhost 系源）把 preflight OPTIONS 拦成不带 ACAO 的 204**，请求未到 api（GET 简单请求可穿透代理由 api 加 ACAO 故页面数据正常）。修复：`apps/web/vite.config.ts` `server.cors: true`（反射 Origin 含 null，仅 dev server 生效，生产反代同域无此问题）；起临时 Vite 实测 preflight 204+ACAO:*、POST 201 单 ACAO 头、入库成功。② 评论"乱码"非产品 bug：库表 HEX 校验，用户浏览器提交的评论（id=19"我是一只猫"）为完美 UTF-8；乱码数据为 AI 调试用 agent-browser 输入中文（CDP 逐键输入缺陷）及 PowerShell 本地编码写坏测试文件所致，脏数据（id=18/20）已物理删除。经验：agent-browser 自动化填中文表单不可信，验证中文链路须查库 HEX 或改用英文
 - 2026-08-16 T1：monorepo 初始化完成。pnpm workspace（apps/web、apps/api、packages/shared）；web 骨架（Vite 7 + Vue 3.5 + TS + Element Plus 按需引入 + Tailwind 4 + Pinia），`vue-tsc + vite build` 通过；api 骨架（NestJS 11 + ConfigModule + helmet + 全局前缀 /api），`nest build` 通过；docker-compose（MySQL 8.0 + Redis 7，含健康检查与数据卷）；ESLint 9 flat config + Prettier + husky + lint-staged 配置完成，`eslint .` 0 错误 0 警告；已按 ARCHITECTURE.md 建好前后端目录骨架（.gitkeep 占位）；`apps/api/.env` 已生成（含随机 64 位 JWT 双密钥）
 - 2026-08-17 T2：api 骨架完成。gateway 层：JwtAuthGuard（@Public 放行）/ PermissionGuard（@RequirePermission，权限从 Redis `user:perms:{userId}` 读取，超管 `*` 通配，T4 登录时写入）/ TransformInterceptor（统一 { code, message, data }，bigint 转字符串）/ GlobalExceptionFilter（BusinessException 恒 200 + 错误码，HttpException 按映射，未知异常 500 + 日志）/ 装饰器组（@Public @RequirePermission @CurrentUser @OperationLog）；common 层：ErrorCode、RedisKey、BusinessException、PageQueryDto/PageResultDto；config 层：database/redis/jwt/upload 配置 + validate.ts 环境变量校验；infra 层：PrismaService / RedisService（全局模块，懒连接，无中间件也可启动）；限流 300 次/分/IP；Swagger `/api/docs`；prisma/schema.prisma 骨架（模型待 T3）。验证：`prisma generate` ✓、`nest build` ✓、`vue-tsc + vite build` ✓、`eslint .` 0 错误 0 警告 ✓；冒烟：无 MySQL/Redis 可启动，404 → `{"code":40400,...}` 统一格式 ✓、Swagger 200 ✓。经用户确认新增 devDependency `@types/express`（gateway 层 Request/Response 类型）
 - 2026-08-17 T3：数据库层完成。Docker 基础设施就绪（MySQL 8.0.46 + Redis 7，均 healthy）；`prisma/schema.prisma` 定义 11 张 sys_* 表（SysUser/SysRole/SysUserRole/SysMenu/SysRoleMenu/SysDept/SysDictType/SysDictData/SysLoginLog/SysOperationLog/SysFile），采用 `relationMode="prisma"` 逻辑外键（sys_menu/sys_dept 以 parent_id=0 表示根、软删除场景，物理 FK 无法满足），按建议补齐关联字段索引；迁移 `20260817020431_init` 已应用，11 张表全部创建；`prisma/seed.ts`（tsx 运行，幂等）：admin 用户（Admin@123，bcrypt salt 10）、admin/common 两角色、菜单树 34 条（含 23 个按钮权限标识，命名 `域:模块:操作`）、common→首页工作台、admin→admin 角色关联；验证：表结构 ✓、数据计数 ✓（中文存储正常）、seed 幂等（重跑新增 0 条）✓、`nest build` ✓、`eslint .` ✓
@@ -544,6 +558,74 @@
 **最终验证**：api `tsc` 0 错误 ✓（nest build 受 safe-delete 环境限制以 tsc 等效，见遗留 2）、web `vue-tsc` 0 错误 ✓、双端 `eslint` 0 错误 0 警告 ✓。验收测试数据已清理（demo 站/t40u* 用户/Redis），临时脚本已删。
 
 **P4a 遗留（转入 P4b 或挂账）**：① 内容审核引擎接入（沿用 P3 遗留，评论与云盘共用）；② 用户删站功能（本期"仅建不删"，删用户预检 40112 挂接完备）；③ F3 编辑器工具栏的粗体/斜体/链接快捷按钮（正文 textarea + 插入图片已实现，格式按钮属增强）；④ u2 用户浏览器全流程手工复核（API 层已全验）；⑤ nest build 的 safe-delete 环境拦截（遗留 2，tsc 等效规避）。
+
+### T41 完成记录（2026-08-29）：AI 站点工具三件套 + 门面扩展（P4b 开工）
+
+**前置动作（全部完成）**：走查 W1/W3/W4/W5/W6/W7/W8/W9/W10 共 9 处文档补丁已套（W1 = 主文档新增 §13「API 列表风格约定」补断档 + P3 增补头部标注；W2 仅文档部分，代码随 T43）；ARCHITECTURE.md 开头插入 P4b 指针行（T45 并入后删）；API.md 末尾追加 §7 全文 + 头部覆盖行补 P4b。
+
+**修订记录（对 P4a §14.4 步骤 6 的修订，D28）**：开放静态 Cache-Control 由「html no-cache、白名单 public max-age=3600」统一改为 **no-cache**（ETag/304 协商保留；白名单外 attachment 下载类维持 no-store）。理由：AI/编辑器高频迭代要求"改完立即可见"，max-age 下 js/css 最长 1 小时旧版；no-cache 下未变资源仅 304 头部零字节体，个人站点量级成本可接受。实现位置 open-static.controller.ts 响应头常量一处全局生效，已生成站点零改动；T45 并入时同步修订 ARCHITECTURE §14.4 步骤 6 表述。
+
+**落地内容**：
+
+1. **错误码**：40113 站点文件路径非法 / 40114 文件类型不允许 / 40115 内容超限（写 >256KB、单次 >10、读 >64KB）/ 40116 模板不存在（T44 用）——40xxx 段续位，40001/40100/40300/40400/42900 通用码未占用
+2. **SiteFacade 扩展**（站点语义校验层，抛 site 段码；SiteModule imports CloudModule）：`getMySiteInfo`（null=未开通）/ `invalidateSitePaths`（逐路径 DEL site:path，含 "404" 负缓存）/ `listFiles` / `readFile`（cloud 30001 → 站点层统一 40400）/ `writeFiles`（部分成功语义：逐文件 40113/40114/40115 校验 → 机械写入 → cloud 码捕获为 per-file error → 全部完成后仅对 ok 路径失效缓存）；`SITE_FILE_TEXT_EXTS` 白名单与 256KB/10 个/64KB 常量写死代码（§15.12，不进配置组）
+3. **CloudFacade 机械原语**（管理侧语义，只抛 30xxx）：`listSubtreeRaw`（BFS 有界下行，默认 maxDepth 10 / limit 500，超限 truncated=true，不含回收站）/ `readFileRaw`（逐段下行 ≤10，是目录 30001，读盘返回 Buffer）/ `writeFileRaw`（配额预检 30003 → **mkdir -p：逐段下行，已存在目录直接复用、不存在才 createFolder，严禁无脑逐段建** → 中间段撞同名文件 / 末段撞同名目录 30001 → R6 子项上限 → 同路径旧文件软删进回收站（used 不动，可回滚）→ writeFromBuffer → registerPublicFile（used += size，upsert；is_public 默认 0=继承）→ 登记失败删物理文件防孤儿）
+4. **AI 工具三件套**（tools/ 三文件 + tool.bootstrap 注册 + ToolModule import SiteModule）：list_site_files（read）/ read_site_file（read）/ write_site_files（write 走确认卡）；handler 只注入 SiteFacade，零跨域 import 内部实现；perms=site:site:manage；description 按 §15.2 纪律（操作的是用户自己的站点、先 read README.txt 获取契约、README 缺失按 PLATFORM-GUIDE 保守操作、读取类并行一轮发出、只能写文本/图片引导用户上传 media/、>10 个分批每批一张确认卡）；门禁失败回喂 `{ ok:false, errorCode, message }` 不抛栈
+5. **README.txt 升级字段级 AI 契约**（先落 assets/site-template/，T44 迁移带走）：站点地址与目录语义（尾斜杠 / index.html / 301 补斜杠 / 目录无 index 404）+ 七端点逐字段契约（以 ./api/ 相对路径视角书写，与 API.md §6.3 逐字段一致：columns 嵌套树 / articles 分页字段与 coverUrl、publishedAt 倒序 / 详情 contentMd 与查看数 / 评论 1~~32、1~~500 与统一文案 / 统一响应与 40400、40001、42900、40111）+ 三条纪律（相对路径 fetch / CSP sandbox 无凭证、alert/confirm 可用 / textContent 防 XSS、markdown html:false）
+6. **PLATFORM-GUIDE**：「个人网站」追加 AI 站点工具摘要（120 字）；全文精简至 1997 字（见踩坑 2）
+
+**踩坑/偏差（登记）**：
+
+1. writeFileRaw 的 R6 子项上限计数必须**排除将被软删的同名旧文件**——否则"目录满 500 项时覆盖其中之一"会被误拒（覆盖不新增子项）
+2. 平台手册 2000 字上限在 T40 增补「个人网站」章节后实际已达 2035（当时未复测总长），T41 追加摘要前先还债——措辞压缩（事实不减）至 1997；后续任何动手册的任务必须跑字数核查
+3. readFile 的 64KB 上限按 DB size 判定（先读盘后判），超大文件场景有小浪费——个人站点量级可接受，不为它给机械原语加 limit 参数（保持 §15.3 签名一致）
+4. 冒烟脚本需以 apps/api 为 cwd 运行（模板目录/文档相对路径均按 process.cwd() 解析；遗留 7 的 GBK 问题同样要求命令内不写中文路径）
+
+**验证（临时冒烟脚本：直调工具 handler + HTTP 实测，30/30 全过后脚本已删）**：
+
+- 未开通：三件套 handler 均回喂 40101 引导文案（"用户尚未开通个人网站，请引导其到「个人网站 → 站点设置」创建"），无栈 ✓
+- 越界（构造参数直调 handler，不经真实模型）：read `../etc/passwd`、`/index.html` → 40113；write `/abs.txt`、`a\b.txt`、`pages/../x.txt` → per-file error ✓；write app.exe → 40114 语义 per-file error ✓；单文件 256KB+1 → per-file error ✓；一次 11 个文件 → 顶层 40115 ✓；read 不存在 → 40400 ✓
+- mkdir -p：write pages/about.html 两次 → created→overwritten、文件树无 "pages (1)" 平行目录、二次内容生效 ✓；中间段撞同名文件（conflict.html/about.html）→ per-file error ✓；末段撞同名目录（d1.html）→ per-file error ✓
+- 缓存失效：预置 site:path 负缓存（"404"）与假 fileId 键 → 写入后两键被精确 DEL，未涉路径的 key 原值保留 ✓
+- 部分成功：ok1.txt 落盘可读 + bad.exe 项 error 共存 ✓
+- D28 响应头：app.js / style.css / README.txt / index.html 全部 `Cache-Control: no-cache`；ETag 命中 → 304 零字节体 ✓；根无斜杠 301 补斜杠（P4a 行为回归）✓
+- README 契约 26 项关键串机械核对全命中（与 API.md §6.3 对齐）；PLATFORM-GUIDE 摘要 120 字 / 全文 1997 字 ✓
+- `tsc --noEmit` 0 错误 ✓、`nest build` 0 错误 ✓（遗留 2 规避方式先清 dist）、`eslint src` 0 错误 0 警告 ✓、read_lints 0 诊断 ✓
+- 测试数据清理：t41smoke 用户/站点/cloud_file/cloud_usage/Redis 键 DB+Redis 核查零残留（库中现存 1 站点为用户自有数据，未触碰）✓
+
+**约束自查**：零新依赖 ✓；ai 域只经 SiteFacade（ToolModule→SiteModule→CloudModule 依赖链，无域内 import）✓；SiteFacade 抛 40xxx、CloudFacade 只抛 30xxx、无 site 段码出现在 cloud 域 ✓；未写统一响应例外、未动限流/鉴权/日志横切 ✓；工具确认链路复用 P2b 既有机制（T42 才加 summarize）✓。
+
+### T42 完成记录（2026-08-29）：AiTool summarize 钩子 + 确认卡结构化文件清单 + AI 建站全链路联调
+
+**落地内容**：
+
+1. **AiTool.summarize 钩子**（tool.types.ts，可选）：write 工具确认卡结构化摘要入口；缺省 = P2b 现状，既有 7 个工具零改动
+2. **write_site_files.summarize**：复用 SiteFacade.listFiles（属主文件树，只读不写）逐路径预判 action——树中同名文件 → `overwritten`（带旧文件大小），否则 `created`（带入参内容字节大小）；未开通 / 无有效文件 / 查询失败 → 返回 null 回退现状
+3. **chat.service.emitWriteToolConfirm**：工具有 summarize → await 结构化摘要（抛错/null 回退 params 截断字符串）；summary 写入 Redis 确认单（TTL 600s 内过期恢复用）与 tool_confirm 事件；**ai_tool_call.params 仍存原始 params（content 全文）**，不加列不改表
+4. **恢复链路**（conversation.service.buildToolSummary 异步化）：write + pending 优先 summarize 结构化（刷新页面后确认卡仍渲染文件清单），终态 / read 回退字符串摘要；最小工具上下文 `{ user: { userId } }`
+5. **前端**：`ToolSummaryItem` 类型 + `ToolCallItem.summary` 联合类型；ToolConfirmCard 数组摘要渲染迷你 el-table（路径 / 动作标签：新建=绿、覆盖=橙 / 大小 formatSize）+「动作为预估，以执行结果为准」标注；字符串摘要维持 P2b 渲染；ToolResultTag summary prop 放宽对齐联合类型；chat/index.vue 两处 tool_confirm 事件与恢复链路类型对齐
+6. 资产表不动（§15.13 已预留「AiTool.summarize｜已建 T42」行，T45 并入时回写主文档）
+
+**踩坑/偏差（登记）**：
+
+1. **summarize 签名较 §15.6 草图补充 ctx 入参**（`(params) => any` → `(params, ctx) => unknown`）：预判 action 需按当前用户查站点文件树，userId 必须经 ctx 传入（纪律：handler 与 summarize 只注入 SiteFacade）。T45 并入时同步修订 §15.6
+2. **summary 存储口径**：§15.6 原文「JSON 序列化进确认单与 ai_tool_call」与同节「params 仍存原始 params 留痕、确认卡只展示摘要」矛盾（ai_tool_call 无 summary 列）——落地方案：确认单 + tool_confirm 事件 + **恢复链路按 params 重算**（pending 状态可确定性重放出摘要），不动表结构。T45 并入时在 §15.6 写明
+3. **DeepSeek v4 thinking 模式契约**：assistant(tool_calls) 消息必须回传 reasoning_content，否则上游 400——buildConfirmContext 已按「有则回传」实现（P2b T24），真实链路不受影响；但**手工构造测试消息必须同构补 reasoningContent**，否则 confirm 总结流 400。未改既有代码
+4. **模型工具触发随机性**：同一提示词多次运行偶现纯文字回复（不调工具，deepseek-v4-flash thinking 模式）——冒烟脚本 A 段重试最多 3 次。属上游模型行为，非平台缺陷；T45 联调如高频出现可考虑在工具 description 上再强化（本期不动）
+5. 冒烟覆盖残留教训：write 覆盖旧文件产生**软删行（回收站）**，测试清理必须覆盖 deletedAt 非 null 行并回退 used 差额；本轮 3 个软删行的物理文件成孤儿（合计几十字节、无行引用，无业务影响）
+
+**验证（冒烟 15/15 全过后脚本已删；真实模型 DeepSeek V4 Flash，admin 身份）**：
+
+- S1 直调 summarize 预判：README.txt → overwritten（size=2377，树中真实大小）/ 新文件 → created（size=入参字节）✓
+- S2 未开通站点 summarize → null（回退现状字符串摘要，确认链路不断）✓
+- S3 恢复链路：pending write 卡 summary 为结构化数组（2 项）/ executed 终态回退字符串 ✓
+- A 真实模型全链路：tool_confirm.summary 为结构化数组且**模型按工具纪律自行剔除了 .exe**（description 约束生效）；confirm 执行 SSE done；留痕 executed + result 逐文件明细；2 个文件落站、exe 不存在 ✓
+- B 真实模型取消链路：done + 留痕 rejected + 文件未落盘 + 确认卡摘要结构化数组 ✓
+- C 坏参数确认单（手工构造、与真实链路同构含 reasoning_content）：confirm 执行 → **部分成功回喂进 result**（good `ok:true` 落盘 / exe `ok:false` +「文件类型不允许（仅文本白名单扩展名）」明细，模型上下文可转述）✓
+- `tsc --noEmit` / `nest build` 0 错误 ✓；`eslint`（api + web 改动文件）0 错误 0 警告 ✓；`vue-tsc --noEmit` 0 错误 ✓；read_lints 0 诊断 ✓
+- 测试数据清理核查：t42 文件 0（含回收站软删行，used 差额已回退）、T42 会话/消息/留痕 0、t42nosite 用户已删、admin 会话总数恢复原值 ✓
+
+**遗留（转入 T45）**：① 确认卡文件清单的**浏览器人工复验**（渲染逻辑已由 vue-tsc + 组件分支保证，PRD-P4B 验收第 2 条本就是 T45 联调口径）；② 冒烟产生的 3 个孤儿物理文件（几十字节，无行引用）。
 
 ### P1 最终状态总结（三句话）
 

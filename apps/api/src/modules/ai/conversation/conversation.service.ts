@@ -4,6 +4,7 @@ import { PageResultDto } from '../../../common/dto/page-result.dto'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { ToolRegistry } from '../tool/tool.registry'
+import type { AuthUser } from '../../../gateway/guards/jwt.strategy'
 import type { ConversationQueryDto, UpdateConversationDto } from './dto/conversation.dto'
 
 @Injectable()
@@ -102,33 +103,61 @@ export class ConversationService {
       toolCallsByMessage.set(key, list)
     }
 
-    return ordered.map((m) => ({
-      id: m.id.toString(),
-      role: m.role,
-      content: m.content,
-      tokensInput: m.tokensInput,
-      tokensOutput: m.tokensOutput,
-      credits: m.credits,
-      modelDisplayName: m.model?.displayName ?? null,
-      status: m.status,
-      createdAt: m.createdAt,
-      toolCalls: (toolCallsByMessage.get(m.id.toString()) ?? []).map((tc) => ({
-        toolCallId: tc.id.toString(),
-        toolName: tc.toolName,
-        title: this.toolRegistry.get(tc.toolName)?.title ?? tc.toolName,
-        summary: this.buildToolSummary(tc),
-        params: tc.params,
-        status: tc.status,
-        risk: tc.risk,
+    return await Promise.all(
+      ordered.map(async (m) => ({
+        id: m.id.toString(),
+        role: m.role,
+        content: m.content,
+        tokensInput: m.tokensInput,
+        tokensOutput: m.tokensOutput,
+        credits: m.credits,
+        modelDisplayName: m.model?.displayName ?? null,
+        status: m.status,
+        createdAt: m.createdAt,
+        toolCalls: await Promise.all(
+          (toolCallsByMessage.get(m.id.toString()) ?? []).map(async (tc) => ({
+            toolCallId: tc.id.toString(),
+            toolName: tc.toolName,
+            title: this.toolRegistry.get(tc.toolName)?.title ?? tc.toolName,
+            summary: await this.buildToolSummary(tc, userId),
+            params: tc.params,
+            status: tc.status,
+            risk: tc.risk,
+          })),
+        ),
       })),
-    }))
+    )
   }
 
-  /** 工具调用摘要：read 工具用执行结果摘要，write 工具用参数摘要 */
-  private buildToolSummary(tc: { risk: string; params: unknown; result: string | null }): string {
-    const raw = tc.risk === 'read' ? tc.result : JSON.stringify(tc.params)
-    const str = raw ?? ''
-    return str.length > 200 ? `${str.slice(0, 200)}…` : str
+  /**
+   * 工具调用摘要：read 工具用执行结果摘要；write 工具在 pending（待确认）状态下优先取
+   * summarize 结构化摘要（P4b §15.6——刷新页面后确认卡仍渲染文件清单），查询失败或已终态
+   * 回退 P2b 参数摘要字符串。
+   */
+  private async buildToolSummary(
+    tc: { toolName: string; risk: string; status: string; params: unknown; result: string | null },
+    userId: bigint,
+  ): Promise<unknown> {
+    const fallback = (): string => {
+      const raw = tc.risk === 'read' ? tc.result : JSON.stringify(tc.params)
+      const str = raw ?? ''
+      return str.length > 200 ? `${str.slice(0, 200)}…` : str
+    }
+    if (tc.risk === 'write' && tc.status === 'pending') {
+      const tool = this.toolRegistry.get(tc.toolName)
+      if (tool?.summarize && tc.params && typeof tc.params === 'object') {
+        try {
+          // 恢复链路工具只见 userId（AuthUser 其余字段不参与工具逻辑，最小上下文即可）
+          const summary = await tool.summarize(tc.params as Record<string, unknown>, {
+            user: { userId: userId.toString() } as AuthUser,
+          })
+          if (summary != null) return summary
+        } catch {
+          // 静默回退字符串摘要
+        }
+      }
+    }
+    return fallback()
   }
 
   /** 校验会话存在且归属当前用户，否则抛 20004 */

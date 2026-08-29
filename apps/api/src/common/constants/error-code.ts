@@ -142,6 +142,14 @@ export const ErrorCode = {
   SiteCommentTooFrequent: 40111,
   /** 用户已开通个人网站，禁止删除（R13 删用户预检） */
   SiteUserHasSite: 40112,
+  /** 站点文件路径非法（越出站点根 / 含 .. / 绝对路径 / 空段，P4b R17） */
+  SiteFilePathInvalid: 40113,
+  /** 文件类型不允许（非文本白名单扩展名，P4b R17） */
+  SiteFileTypeNotAllowed: 40114,
+  /** 内容超限（AI 写单文件 >256KB / 单次 >10 个 / 读 >64KB，P4b R17） */
+  SiteContentTooLarge: 40115,
+  /** 模板不存在（P4b T44 apply-template） */
+  SiteTemplateNotFound: 40116,
 } as const
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode]

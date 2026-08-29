@@ -655,6 +655,16 @@ export class ChatService {
     params: Record<string, unknown>,
     res: Response,
   ): Promise<void> {
+    // P4b §15.6：工具有 summarize → 结构化确认卡摘要（返回 null/抛错则回退 P2b 现状字符串）；
+    // 既有 7 个工具未实现钩子，走现状分支，零改动。params 始终存原始参数（content 全文）留痕，摘要只进确认单与事件。
+    let structuredSummary: unknown
+    try {
+      structuredSummary = tool.summarize ? await tool.summarize(params, { user }) : undefined
+    } catch {
+      structuredSummary = undefined
+    }
+    const summary = structuredSummary ?? this.truncate(JSON.stringify(params), 200)
+
     // 留痕 pending（id 即确认单 ID）
     const record = await this.prisma.aiToolCall.create({
       data: {
@@ -668,7 +678,7 @@ export class ChatService {
       },
     })
 
-    // 写确认单（TTL 10 分钟）
+    // 写确认单（TTL 10 分钟，含 summary：过期前刷新页面恢复卡片用）
     await this.redis.client.set(
       RedisKey.aiConfirm(record.id.toString()),
       JSON.stringify({
@@ -676,6 +686,7 @@ export class ChatService {
         conversationId: conversationId.toString(),
         toolName: tool.name,
         params,
+        summary,
       }),
       'EX',
       CONFIRM_TTL_SEC,
@@ -685,7 +696,7 @@ export class ChatService {
       toolCallId: record.id.toString(),
       toolName: tool.name,
       title: tool.title,
-      summary: this.truncate(JSON.stringify(params), 200),
+      summary,
       params,
     })
   }

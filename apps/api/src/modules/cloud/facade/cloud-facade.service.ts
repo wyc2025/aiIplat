@@ -6,7 +6,7 @@ import { ErrorCode } from '../../../common/constants/error-code'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { StorageService } from '../../../infra/storage/storage.service'
-import { FileService, AVATAR_PARENT_ID } from '../file/file.service'
+import { FileService, AVATAR_PARENT_ID, MAX_CHILDREN } from '../file/file.service'
 
 /** 头像元数据（由调用方经 StorageService 落盘后传入） */
 export interface AvatarMeta {
@@ -36,6 +36,53 @@ export interface PublicFileStream {
 
 /** 公开路径解析的最大下行深度（§14.4 有界逐段下行） */
 const RESOLVE_MAX_DEPTH = 10
+
+/** 机械原语默认参数（§15.3：子树遍历默认 maxDepth 10 / limit 500，超限 truncated=true） */
+const SUBTREE_DEFAULT_MAX_DEPTH = 10
+const SUBTREE_DEFAULT_LIMIT = 500
+
+/** 机械写入的 mime 推导（原语级最小映射，白名单外 octet-stream；开放层实际输出以 ext + mime.ts 白名单为准） */
+const RAW_MIME_MAP: Record<string, string> = {
+  html: 'text/html',
+  htm: 'text/html',
+  css: 'text/css',
+  js: 'text/javascript',
+  mjs: 'text/javascript',
+  json: 'application/json',
+  txt: 'text/plain',
+  md: 'text/markdown',
+  svg: 'image/svg+xml',
+  xml: 'application/xml',
+  yml: 'text/plain',
+  yaml: 'text/plain',
+  csv: 'text/plain',
+}
+
+/** 子树条目（listSubtreeRaw 返回项；path 为相对站点根的 '/' 连接路径） */
+export interface SubtreeEntry {
+  path: string
+  isDir: boolean
+  size: number
+  updatedAt: Date
+}
+
+/** 子树遍历结果（超限截断 truncated=true，§15.3） */
+export interface SubtreeListResult {
+  files: SubtreeEntry[]
+  truncated: boolean
+}
+
+/** 机械写入结果（D22 软删旧版 + 新建：同路径覆盖时 action=overwritten） */
+export interface RawWriteResult {
+  action: 'created' | 'overwritten'
+  size: number
+}
+
+/** 从文件名提取小写扩展名（无扩展名返回 ''） */
+function extOfName(name: string): string {
+  const dot = name.lastIndexOf('.')
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : ''
+}
 
 /**
  * 云盘域门面：跨域（system/site 等）只通过本门面与 cloud 交互，禁止直接 import 内部 FileService（R6）。
@@ -248,5 +295,214 @@ export class CloudFacade {
       where: { userId },
       data: { used: next < BigInt(0) ? BigInt(0) : next },
     })
+  }
+
+  // ==================== P4b 机械原语（T41，架构增补 §15.3） ====================
+  // 管理侧语义：属主操作，不做公开性判定（R2 上溯）、不做站点语义校验（路径/白名单/大小由
+  // SiteFacade 负责，本层假设调用方已校验）；仅抛 cloud 段自有码（30001/30003/30006），
+  // 禁止抛 site 段码（错误码分段归位纪律）。
+
+  /** 机械原语的统一根目录校验（根目录不存在/已删 → 30001） */
+  private async assertRawRoot(rootFolderId: bigint): Promise<CloudFile> {
+    const root = await this.prisma.cloudFile.findFirst({
+      where: { id: rootFolderId, deletedAt: null, isDir: 1 },
+    })
+    if (!root) {
+      throw new BusinessException(ErrorCode.CloudFileNotFound, '目录不存在或无权访问')
+    }
+    return root
+  }
+
+  /** 机械原语的路径段规范化（split 后拒绝空段/./..；越界深度由各方法按语义处理） */
+  private rawSegments(path: string): string[] {
+    const segments = path.split('/').filter((s) => s.length > 0 && s !== '.')
+    if (segments.some((s) => s === '..')) {
+      throw new BusinessException(ErrorCode.CloudFileNotFound, '文件不存在')
+    }
+    return segments
+  }
+
+  /**
+   * 站点子树遍历（管理侧，不含回收站）：自 rootFolderId 有界 BFS 下行，
+   * 默认 maxDepth 10 / limit 500，超限 truncated=true（§15.3）。
+   */
+  async listSubtreeRaw(
+    rootFolderId: bigint,
+    opts?: { maxDepth?: number; limit?: number },
+  ): Promise<SubtreeListResult> {
+    const maxDepth = opts?.maxDepth ?? SUBTREE_DEFAULT_MAX_DEPTH
+    const limit = opts?.limit ?? SUBTREE_DEFAULT_LIMIT
+    const root = await this.assertRawRoot(rootFolderId)
+
+    const files: SubtreeEntry[] = []
+    let truncated = false
+    // BFS 逐层下行（路径相对站点根，'/' 连接；文件夹在前按名称升序，输出稳定）
+    let queue: Array<{ id: bigint; path: string; depth: number }> = [{ id: root.id, path: '', depth: 0 }]
+    while (queue.length > 0 && !truncated) {
+      const nextQueue: typeof queue = []
+      for (const node of queue) {
+        if (truncated) break
+        if (node.depth >= maxDepth) continue // 不再下行（有界防环）
+        const children = await this.prisma.cloudFile.findMany({
+          where: { userId: root.userId, parentId: node.id, deletedAt: null },
+          orderBy: [{ isDir: 'desc' }, { name: 'asc' }],
+        })
+        for (const child of children) {
+          if (files.length >= limit) {
+            truncated = true
+            break
+          }
+          const path = node.path ? `${node.path}/${child.name}` : child.name
+          files.push({
+            path,
+            isDir: child.isDir === 1,
+            size: Number(child.size),
+            updatedAt: child.updateTime,
+          })
+          if (child.isDir === 1) {
+            nextQueue.push({ id: child.id, path, depth: node.depth + 1 })
+          }
+        }
+      }
+      queue = nextQueue
+    }
+    return { files, truncated }
+  }
+
+  /**
+   * 按路径读文件（管理侧）：逐段下行解析（有界 ≤10）；不存在/是目录 → 30001；
+   * 读盘返回 Buffer（UTF-8 解码由调用方负责）。
+   */
+  async readFileRaw(rootFolderId: bigint, path: string): Promise<{ size: number; content: Buffer }> {
+    const root = await this.assertRawRoot(rootFolderId)
+    const segments = this.rawSegments(path)
+    if (segments.length === 0 || segments.length > RESOLVE_MAX_DEPTH) {
+      throw new BusinessException(ErrorCode.CloudFileNotFound, '文件不存在')
+    }
+
+    // 逐段下行（有界 ≤10）
+    let current: CloudFile = root
+    for (const seg of segments) {
+      if (current.isDir !== 1) {
+        throw new BusinessException(ErrorCode.CloudFileNotFound, '文件不存在')
+      }
+      const next = await this.prisma.cloudFile.findFirst({
+        where: { userId: root.userId, parentId: current.id, name: seg, deletedAt: null },
+      })
+      if (!next) {
+        throw new BusinessException(ErrorCode.CloudFileNotFound, '文件不存在')
+      }
+      current = next
+    }
+    if (current.isDir === 1 || !current.storageName) {
+      throw new BusinessException(ErrorCode.CloudFileNotFound, '文件不存在')
+    }
+
+    // 读盘 → Buffer
+    const chunks: Buffer[] = []
+    for await (const chunk of this.storage.createReadStream(current.storageName)) {
+      chunks.push(Buffer.from(chunk))
+    }
+    return { size: Number(current.size), content: Buffer.concat(chunks) }
+  }
+
+  /**
+   * 按路径写文件（管理侧，R18/D22 软删旧版 + 新建）：
+   * - 中间目录 mkdir -p 语义：逐段下行，已存在目录直接复用，不存在才经 createFolder 创建
+   *   （R4 同名"(1)"仅在并发撞名时兜底 + R6 子项上限）。严禁无脑逐段 createFolder——
+   *   同路径二次写入会造出 "pages (1)" 平行目录，站点路径即 URL 下是致命错误。
+   * - 中间段撞同名文件、目标末段撞同名目录 → 30001（调用方记为该文件 per-file error）。
+   * - 同路径未删文件 → 软删（回收站，used 不动，可回滚）→ writeFromBuffer → registerPublicFile
+   *   （used += size，upsert 懒创建；is_public 默认 0=继承父目录，公开根下新文件自动可访问）。
+   * - 配额：used + size > quota → 30003（软删旧版不动 used，按增量判断）。
+   */
+  async writeFileRaw(
+    userId: bigint,
+    rootFolderId: bigint,
+    path: string,
+    content: Buffer,
+  ): Promise<RawWriteResult> {
+    const root = await this.assertRawRoot(rootFolderId)
+    const segments = this.rawSegments(path)
+    if (segments.length === 0 || segments.length > RESOLVE_MAX_DEPTH) {
+      throw new BusinessException(ErrorCode.CloudDirLimitExceeded, '超出目录限制（深度>10）')
+    }
+    const dirSegments = segments.slice(0, -1)
+    const name = segments[segments.length - 1]
+    const size = BigInt(content.length)
+
+    // 配额预检（R3；check-then-act 竞态按平台口径接受）
+    const usage = await this.prisma.cloudUsage.findUnique({ where: { userId } })
+    const quota = usage
+      ? usage.quota
+      : BigInt(this.config.get<number>('upload.cloudDefaultQuota', 1024 * 1024 * 1024))
+    const used = usage ? usage.used : BigInt(0)
+    if (used + size > quota) {
+      throw new BusinessException(ErrorCode.CloudQuotaExceeded, '存储配额不足')
+    }
+
+    // 中间目录 mkdir -p：逐段下行复用，不存在才建
+    let parent: CloudFile = root
+    for (const seg of dirSegments) {
+      const next = await this.prisma.cloudFile.findFirst({
+        where: { userId, parentId: parent.id, name: seg, deletedAt: null },
+      })
+      if (!next) {
+        parent = await this.createFolder(userId, parent.id, seg)
+      } else if (next.isDir === 1) {
+        parent = next
+      } else {
+        // 中间段撞同名文件：无法下穿
+        throw new BusinessException(ErrorCode.CloudFileNotFound, '同名路径存在文件，无法创建目录')
+      }
+    }
+
+    // 目标末段：撞同名目录 → 无法以文件覆盖目录
+    const existing = await this.prisma.cloudFile.findFirst({
+      where: { userId, parentId: parent.id, name, deletedAt: null },
+    })
+    if (existing && existing.isDir === 1) {
+      throw new BusinessException(ErrorCode.CloudFileNotFound, '同名目录已存在，无法写入文件')
+    }
+
+    // R6 单目录子项上限（排除将被软删的同名旧文件，覆盖场景不新增子项）
+    const childCount = await this.prisma.cloudFile.count({
+      where: {
+        userId,
+        parentId: parent.id,
+        deletedAt: null,
+        ...(existing ? { id: { not: existing.id } } : {}),
+      },
+    })
+    if (childCount >= MAX_CHILDREN) {
+      throw new BusinessException(ErrorCode.CloudDirLimitExceeded, '单个目录下子项不能超过 500 个')
+    }
+
+    // 写物理文件（失败则零副作用）
+    const ext = extOfName(name)
+    const storageName = await this.storage.writeFromBuffer(content, ext)
+
+    try {
+      // 同路径已存在未删文件 → 软删旧版（进回收站，used 不动，可回滚）
+      if (existing) {
+        await this.prisma.cloudFile.update({
+          where: { id: existing.id },
+          data: { deletedAt: new Date() },
+        })
+      }
+      // 登记新行 + used 记账（upsert 懒创建；is_public 默认 0=继承父目录）
+      await this.registerPublicFile(userId, parent.id, name, {
+        size,
+        ext,
+        mime: RAW_MIME_MAP[ext] ?? 'application/octet-stream',
+        storageName,
+      })
+    } catch (e) {
+      // 登记失败：删刚写的物理文件防孤儿（旧版已软删，可从回收站还原）
+      await this.storage.remove(storageName).catch(() => undefined)
+      throw e
+    }
+
+    return { action: existing ? 'overwritten' : 'created', size: Number(size) }
   }
 }

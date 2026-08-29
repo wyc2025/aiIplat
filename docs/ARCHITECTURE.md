@@ -1,5 +1,7 @@
 # iplat —— 技术架构约定（ARCHITECTURE.md）
 
+> ⚠️ 进行中阶段：P4b。本文件尚未包含 P4b 内容，须与 ARCHITECTURE-P4B-增补.md 同读（T45 并入后删除本行）。
+
 > 本文档是 iplat 的技术宪法。代码生成与审查以本文档为准；与对话中的口头约定冲突时，以本文档为准。
 
 ---
@@ -8,21 +10,21 @@
 
 ### 1.1 前端（apps/web）
 
-| 类别          | 选型                                      | 约束                                                                |
-| ------------- | ----------------------------------------- | ------------------------------------------------------------------- |
-| 框架          | Vue 3.5 + TypeScript                      | 全部 `<script setup>`，禁止 Options API                             |
-| 构建          | Vite 7                                    | dev 代理 `/api` → `http://localhost:3000`                           |
-| 组件库        | Element Plus 2.x                          | unplugin-vue-components 按需自动引入，禁止全量 import               |
-| 图标          | @element-plus/icons-vue                   | 菜单图标选择器使用                                                  |
-| 路由          | Vue Router 4                              | 静态路由 + 动态路由（后端菜单驱动）                                 |
-| 状态          | Pinia                                     | 固定四个 store：user / permission / tabs / settings                 |
-| HTTP          | Axios                                     | 业务代码只允许使用 `src/utils/request.ts` 的封装实例                |
-| 样式          | Tailwind CSS 4 + SCSS + CSS 变量          | Tailwind 只做布局/间距/对齐工具类；组件风格、主题用 SCSS + CSS 变量 |
-| 图表          | ECharts 5                                 | 按需引入                                                            |
-| 工具库        | VueUse、dayjs、lodash-es                  | 时间格式化统一用 dayjs                                              |
-| 规范          | ESLint 9 + Prettier + husky + lint-staged | 提交时自动校验                                                      |
-| 环境          | Node ≥ 20，pnpm 9                         |                                                                     |
-| Markdown 渲染 | markdown-it                               | 仅用于 AI 回复渲染；渲染输出必须防 XSS（不允许 raw HTML）           |
+| 类别          | 选型                                      | 约束                                                                                                               |
+| ------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| 框架          | Vue 3.5 + TypeScript                      | 全部 `<script setup>`，禁止 Options API                                                                            |
+| 构建          | Vite 7                                    | dev 代理 `/api` → `http://localhost:3000`；dev cors 反射 Origin（沙箱站点页预检 Origin 为 null，须放行，见 §14.5） |
+| 组件库        | Element Plus 2.x                          | unplugin-vue-components 按需自动引入，禁止全量 import                                                              |
+| 图标          | @element-plus/icons-vue                   | 菜单图标选择器使用                                                                                                 |
+| 路由          | Vue Router 4                              | 静态路由 + 动态路由（后端菜单驱动）                                                                                |
+| 状态          | Pinia                                     | 固定四个 store：user / permission / tabs / settings                                                                |
+| HTTP          | Axios                                     | 业务代码只允许使用 `src/utils/request.ts` 的封装实例                                                               |
+| 样式          | Tailwind CSS 4 + SCSS + CSS 变量          | Tailwind 只做布局/间距/对齐工具类；组件风格、主题用 SCSS + CSS 变量                                                |
+| 图表          | ECharts 5                                 | 按需引入                                                                                                           |
+| 工具库        | VueUse、dayjs、lodash-es                  | 时间格式化统一用 dayjs                                                                                             |
+| 规范          | ESLint 9 + Prettier + husky + lint-staged | 提交时自动校验                                                                                                     |
+| 环境          | Node ≥ 20，pnpm 9                         |                                                                                                                    |
+| Markdown 渲染 | markdown-it                               | 仅用于 AI 回复渲染；渲染输出必须防 XSS（不允许 raw HTML）                                                          |
 
 ### 1.2 后端（apps/api）
 
@@ -319,7 +321,7 @@ apps/api/src/
   - 状态机：pending（tmp，无记录）→ active（正式区，有记录，@SkipTransform）→ deleted（软删）
 - **回收站语义（R2）**：只标自身（OWNER 不可删他人文件），顶层被删项并列展示，还原回原父（父已删则归位根目录），彻底删除递归 children
 - **配额记账（R3）**：上传成功 `+size`；彻底删除/清空 `-size`；软删、还原、重命名、新建文件夹不动；头像登记 `+size` 并软删旧头像回退 `-size`；校验与记账存在 check-then-act 竞态，个人单用户场景接受轻微超额（≤单文件上限），不做分布式锁；admin 调整配额下限=当前 used
-- **分享端点安全**：访客侧 `GET /cloud/share/:token`（返回分享基本信息）与 `GET /cloud/share/:token/download`（流式下载）为 `@Public` 独立 controller（`share-public.controller.ts`，免登录、独立限流 30 次/分/IP），凭 token 访问（token 经 path，而非 query/Referer）。下载前校验 token 有效性 / status=1 / 未过期 / 文件存在且未删 /（开关开启）审核门禁；下载成功 `visit_count + 1`。当前**不区分「登录可见 / 免密公开」**（`is_public` 字段预留，本期待定）。**访问次数上限（max_visits：下载达 N 次自动失效）待实现**。前端访客页 `/share/:token` 须同时：① 后端接口 `@Public()`；② 前端 `router/guard.ts` 的 `isPublicRoute` 将 `share-visitor` 加入免登录白名单（详见 §3.2）——任一侧缺失都会匿名不可访问。
+- **分享端点安全**：访客侧 `GET /cloud/share/:token`（返回分享基本信息）与 `GET /cloud/share/:token/download`（流式下载）为 `@Public` 独立 controller（`share-public.controller.ts`，免登录、独立限流 30 次/分/IP），凭 token 访问（token 经 path，而非 query/Referer）。下载前校验 token 有效性 / status=1 / 未过期 / 文件存在且未删 /（开关开启）审核门禁；下载成功 `visit_count + 1`。当前**不区分「登录可见 / 免密公开」**（分享可见性分级待做，**注意与 P4a 的 `cloud_file.is_public` 公开托管无关，勿混淆**）。**访问次数上限（max_visits：下载达 N 次自动失效）待实现**。前端访客页 `/share/:token` 须同时：① 后端接口 `@Public()`；② 前端 `router/guard.ts` 的 `isPublicRoute` 将 `share-visitor` 加入免登录白名单（详见 §3.2）——任一侧缺失都会匿名不可访问。
 - **文件预览**：活跃且通过内容审核才可读；`transfer/preview` 用 `createReadStream`（支持 Range，`Content-Type` 取 `mime`）；`file/avatar/:id` 仅当前用户自己的头像记录可读
 - **内容审核（开关）**：`CloudContentAuditService` 预留（AI 文本/图片识别），默认关闭；开启后未过审文件禁止分享
 - **前端结构**：`views/cloud/FileExplorer.vue`（面包屑/双击/URL 同步/上传进度/预览弹层）、`Recycle.vue`、`Share.vue`，访客分享页独立路由 `share/:token`；复用 `ProTable` / `useTable` 等公共资产
@@ -350,7 +352,7 @@ apps/api/src/
 - **表前缀**：`site_`；域边界同 R6：site 域禁止 import cloud/system/ai 内部实现，云盘能力只经 `CloudFacade`，system 删用户预检只经 `SiteFacade.hasSite`
 - **静态托管复用云盘（D4）**：不设独立站点存储。`cloud_file.is_public` **三态**：0=继承父目录（新建默认）/ 1=显式公开（站点根恒为 1）/ 2=显式阻断（"取消公开"落库值）；公开性**访问时上溯判定**——遇第一个非继承节点定生死（R2 修订）。收益：公开目录内新上传/新建内容零操作自动可访问；子树取消公开仅标自身
 - **开放层（/api/open/\*）**：访客侧唯一出口，全部 `@Public`、禁挂 `@OperationLog`、资源类失败统一 40400（限流 42900 / 评论间隔 40111 为验收明文例外）。**路由顺序铁律**：数据 API（`:slug/api/*`）必须先于静态通配（`:slug/{*path}`）注册，静态层首段 `api` 双保险兜底
-- **脚本隔离（D3）**：html/svg/xml 输出强制 `CSP: sandbox allow-scripts allow-forms allow-popups allow-downloads`（opaque origin，页面读不到主域凭证）；MIME 白名单 + nosniff；白名单外 octet-stream + attachment；CORS 对 /api/open 反射 `*`（main.ts 函数式，其余路径白名单不变）；`trust proxy` 开启
+- **脚本隔离（D3）**：html/svg/xml 输出强制 `CSP: sandbox allow-scripts allow-forms allow-popups allow-downloads allow-modals`（opaque origin，页面读不到主域凭证）；MIME 白名单 + nosniff；白名单外 octet-stream + attachment；CORS 对 /api/open 反射 `*`（main.ts 函数式，其余路径白名单不变）；CORP 对 /api/open 改写为 `cross-origin`（main.ts 中间件，helmet 默认 same-origin 会拦截 opaque origin 页面的子资源）；`trust proxy` 开启
 - **缓存体系（D11/D12）**：`site:resolve:{slug}`（300s）/ `site:path:{siteId}:{path}`（60s + "404" 负缓存）/ `site:data:{siteId}:*`（60s 热数据）；site 域写操作主动失效（改 slug/启停 → DEL resolve + scanDel data；内容变更 → scanDel data），cloud 域变更靠 60s TTL 被动失效（R12：云盘侧改动最长 60 秒在公开站点生效）
 - **覆盖上传（R5）**：`overwrite=1` 且同名未删文件 → 物理替换 + used 差额记账（`GREATEST(used+delta,0)` 兜底）+ URL（file id）不变
 - **文章模块**：栏目树 ≤3 级（防环+40107 保护）；字数 R14（去 markdown 标记与空白计字符，仅展示）；摘要留空自动取正文纯文本前 100 字；发布状态机（首次发布写 published_at，下架再上架不刷新）；物理删除连带标签关联与评论（R7）
@@ -561,20 +563,21 @@ apps/api/src/
 
 ### cloud_file —— 文件树（P3 新增，文件+文件夹统一建模）
 
-| 字段                      | 类型              | 说明                                                      |
-| ------------------------- | ----------------- | --------------------------------------------------------- |
-| id                        | bigint PK         |                                                           |
-| user_id                   | bigint            | 属主（逻辑关联 sys_user，禁 JOIN）                        |
-| parent_id                 | bigint            | 0 = 根目录                                                |
-| name                      | varchar(64)       | 文件/文件夹名（不含路径）                                 |
-| is_dir                    | tinyint           | 1 文件夹 / 0 文件                                         |
-| size                      | bigint default 0  | 字节；文件夹恒 0                                          |
-| mime                      | varchar(100) null |                                                           |
-| ext                       | varchar(20) null  | 小写不带点，预览白名单判断用                              |
-| storage_name              | varchar(120) null | StorageService 相对路径（yyyyMM/uuid.ext）；文件夹为 null |
-| audit_status              | tinyint default 0 | 0 未审核 / 1 通过 / 2 驳回 / 3 审核中（D13 预留）         |
-| deleted_at                | datetime null     | 非空 = 在回收站（R2 只标记自身）                          |
-| create_time / update_time | datetime          |                                                           |
+| 字段                      | 类型              | 说明                                                                   |
+| ------------------------- | ----------------- | ---------------------------------------------------------------------- |
+| id                        | bigint PK         |                                                                        |
+| user_id                   | bigint            | 属主（逻辑关联 sys_user，禁 JOIN）                                     |
+| parent_id                 | bigint            | 0 = 根目录                                                             |
+| name                      | varchar(64)       | 文件/文件夹名（不含路径）                                              |
+| is_dir                    | tinyint           | 1 文件夹 / 0 文件                                                      |
+| size                      | bigint default 0  | 字节；文件夹恒 0                                                       |
+| mime                      | varchar(100) null |                                                                        |
+| ext                       | varchar(20) null  | 小写不带点，预览白名单判断用                                           |
+| storage_name              | varchar(120) null | StorageService 相对路径（yyyyMM/uuid.ext）；文件夹为 null              |
+| audit_status              | tinyint default 0 | 0 未审核 / 1 通过 / 2 驳回 / 3 审核中（D13 预留）                      |
+| is_public                 | tinyint default 0 | **三态**（P4a）：0=继承父目录 / 1=显式公开 / 2=显式阻断，见 §4.8/§14.2 |
+| deleted_at                | datetime null     | 非空 = 在回收站（R2 只标记自身）                                       |
+| create_time / update_time | datetime          |                                                                        |
 
 索引：(user_id, parent_id, deleted_at)、(user_id, deleted_at)。
 
@@ -758,7 +761,7 @@ main.ts 增补：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 函数�
 | StorageService                                              | api/src/infra/storage                                | 文件存储抽象（moveToStorage/remove/removeTmp/createReadStream/stat/tmpDir，本地磁盘，预留 MinIO/OSS 切换；tmp 区 UPLOAD_DIR/tmp，正式区 yyyyMM/uuid.ext，路径穿越防御；静态 tmpDirPath() 供 multer 引擎） | 已建（T27/T30）                   |
 | 通用 tmp StorageEngine                                      | api/src/infra/storage/tmp-storage.ts                 | Multer 临时区流式落盘引擎（公共资产）：写 UPLOAD_DIR/tmp/uuid.tmp、stat 回填 file.size、_removeFile 清半截、fail 兜底流错误/aborted；cloud/transfer 与 system/avatar 统一复用                             | 已建（T27 提至 infra，T30 复用）  |
 | CloudFacade                                                 | api/src/modules/cloud/facade/cloud-facade.service.ts | 跨域门面（随 CloudModule 导出）：hasFiles(userId)（R10 删用户预检）+ saveAvatar(userId, meta)（头像登记/used 同步/旧头像软删回退）；system 域仅经此调用                                                   | 已建（T30）                       |
-| FileExplorer / FilePreview / UploadButton                   | web/src/views/cloud                                  | 云盘前端公共组件（面包屑/双击/URL 同步/上传进度/预览弹层），复用 ProTable/useTable                                                                                                                        | 待建（T31 起）                    |
+| FileExplorer / FilePreview / UploadButton                   | web/src/views/cloud                                  | 云盘前端公共组件（面包屑/双击/URL 同步/上传进度/预览弹层），复用 ProTable/useTable                                                                                                                        | 已建（T31/T32）                   |
 | ProviderService                                             | api/src/modules/ai/engine                            | OpenAI 兼容适配器（流式调用 + usage 解析）                                                                                                                                                                | 已建（T12）                       |
 | CreditService                                               | api/src/modules/ai/credit                            | 积分预检/结算/余额                                                                                                                                                                                        | 已建（T14）                       |
 | @SkipTransform                                              | api/src/gateway/decorators                           | SSE 接口跳过统一响应                                                                                                                                                                                      | 已建（T14）                       |
@@ -795,7 +798,11 @@ main.ts 增补：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 函数�
 
 ## 10. SSE 接口特例约定（P2a 新增）
 
-1. SSE 是统一响应格式的**唯一例外**，仅限 `POST /api/ai/chat`：
+1. 统一响应格式的例外清单（除此之外一律 `{code,message,data}`）：
+   - **SSE**：`POST /api/ai/chat` 与 `POST /api/ai/tool/confirm`（本节）
+   - **cloud 域流式**：分享下载 / 预览 / 头像读取（§4.7）
+   - **site 域开放层**：`/api/open/*` 静态与数据接口（§14.4，@Public + @SkipTransform）
+     SSE 细则如下，仅限上述两个对话接口：
    - 前置校验失败 → 统一 JSON 错误响应（走 GlobalExceptionFilter）
    - 进入流式 → `@Res()` 原生写流，Controller 标记 `@SkipTransform()`（新增装饰器），TransformInterceptor 与 OperationLogInterceptor 识别后跳过
 2. 前端 SSE 客户端 `views/ai/utils/sse.ts`：
@@ -852,6 +859,16 @@ export interface AiTool {
 3. 当前用户上下文：昵称、角色名列表、当前日期（不注入权限标识明细，权限由工具过滤兜底）
 4. 工具使用原则：read 类直接执行；write 类必须先经用户确认；不确定的操作路径引导用户查看菜单，禁止编造
 ```
+
+---
+
+## 13. API 列表风格约定（P3 增补 §13.14 并入）
+
+1. **分页列表**：返回 `PageResultDto`（`{ list, total, pageNo, pageSize }`）
+2. **非分页列表**（树平铺、字典、不分页关联数据）：返回**裸数组** `[...]`，前端直接接数组，禁止套 `{ list: [...] }` 壳
+3. **附带数据才包对象**：列表之外还要携带聚合/附加字段时（如 `{ list, summary }`），才允许包对象
+4. **时间列**：接口返回 ISO 8601 字符串，前端表格/详情展示**必须**经 `formatTime`（dayjs）格式化，禁止 prop 直出原始值
+5. 前端取数类型必须与后端实际返回形态一致（裸数组就接 `T[]`，禁止按 `result.list` 取裸数组接口）
 
 ---
 
@@ -918,12 +935,12 @@ GET /api/open/{slug}/[path]
  1. 独立限流（static 桶 120 次/分/IP，site 配置组；rate-limit.util）
  2. slug 解析：site:resolve:{slug}（TTL 300s）；不存在/停用 → 40400
  3. 路径规范化：拒绝空段/反斜杠/./..（R3 防穿越）；首段 api 双保险 40400
- 4. 目录语义（R4）：空→index.html；尾斜杠→+index.html；无扩展名目录命中 → 301 补斜杠
+ 4. 目录语义（R4）：根/尾斜杠请求 → 目录 index.html；无斜杠目录请求（含根）→ 301 补斜杠（Location 带 /api/open/{slug} 前缀，修正相对引用基址）；目录存在但无 index.html → 40400（nginx 无 autoindex 语义，防 301 自循环）
  5. 路径解析：site:path:{siteId}:{path}（TTL 60s，fileId 或 "404" 负缓存）
     经 CloudFacade.resolvePublicPath：下行逐段（深度≤10 防环）→ 上溯三态判定（R2 修订）；
     目录不算文件命中（不写负缓存）；getPublicStream 对失效 fileId 抛 40400（禁 500）
  6. ETag（W/"size-mtime"）/304；Cache-Control：html no-cache、白名单 public max-age=3600
- 7. 输出：getPublicStream 管道；MIME 表 + nosniff + ACAO:*；Range 206/416；res.setTimeout(30s)
+ 7. 输出：getPublicStream 管道；MIME 表 + nosniff + ACAO:* + CORP:cross-origin（main.ts 中间件对 /api/open 改写）；Range 206/416；res.setTimeout(30s)
  8. 全程禁挂 @OperationLog
 ```
 
@@ -944,7 +961,7 @@ GET /api/open/{slug}/[path]
 | 文档       | pdf                                              | application/pdf           | —                               |
 | 其他一切   | *                                                | application/octet-stream  | Content-Disposition: attachment |
 
-CSP sandbox 固定值 `sandbox allow-scripts allow-forms allow-popups allow-downloads`（opaque origin 读不到主域凭证；对 P3 R7 文本铁律的收窄豁免——仅限本开放链路、白名单类型、必配 sandbox+nosniff；后台预览链路 R7 不变）。CORS：/api/open 反射 `*` 并放行 Content-Type/Range（main.ts 函数式），其余路径白名单不变。
+CSP sandbox 固定值 `sandbox allow-scripts allow-forms allow-popups allow-downloads allow-modals`（opaque origin 读不到主域凭证；allow-modals 为访客页 alert/confirm 反馈所必需，缺失时弹窗被静默忽略；对 P3 R7 文本铁律的收窄豁免——仅限本开放链路、白名单类型、必配 sandbox+nosniff；后台预览链路 R7 不变）。CORS：/api/open 反射 `*` 并放行 Content-Type/Range（main.ts 函数式），其余路径白名单不变。CORP：/api/open 全部响应由 main.ts 中间件改写为 `Cross-Origin-Resource-Policy: cross-origin`（helmet 默认 same-origin）——sandbox 页面处于 opaque origin，其 css/js/img 等 no-cors 子资源一律按跨源校验，不改写会被浏览器拦截、站点停在"加载中"。
 
 ### 14.6 开放数据 API（契约详见 API.md §6.3）
 
@@ -979,6 +996,8 @@ CSP sandbox 固定值 `sandbox allow-scripts allow-forms allow-popups allow-down
 | 40110 | 评论不存在                                 | 刷新评论列表                             |
 | 40111 | 评论提交过于频繁                           | 提示稍后再试                             |
 | 40112 | 用户已开通个人网站，禁止删除（R13 预检）   | 提示先删除站点                           |
+
+> 注：标签不存在（tag PUT/DELETE、文章 tagIds 含不存在项）复用通用 40400，不设细分码（T37 偏差登记，T40 备案）。
 
 ### 14.12 环境变量与配置（见 §8 P4a 增补）
 

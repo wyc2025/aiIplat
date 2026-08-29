@@ -9,7 +9,51 @@
       </el-icon>
       <span class="v-tc-title">{{ title }}</span>
     </div>
-    <div class="v-tc-summary">
+    <div
+      v-if="listSummary"
+      class="v-tc-summary"
+    >
+      <el-table
+        :data="listSummary"
+        size="small"
+        class="v-tc-table"
+      >
+        <el-table-column
+          prop="path"
+          label="文件"
+          min-width="180"
+          show-overflow-tooltip
+        />
+        <el-table-column
+          label="动作"
+          width="76"
+        >
+          <template #default="{ row }">
+            <el-tag
+              :type="row.action === 'overwritten' ? 'warning' : 'success'"
+              size="small"
+            >
+              {{ row.action === 'overwritten' ? '覆盖' : '新建' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column
+          label="大小"
+          width="86"
+        >
+          <template #default="{ row }">
+            {{ formatSize(row.size ?? 0) }}
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="v-tc-estimate">
+        动作为预估，以执行结果为准
+      </div>
+    </div>
+    <div
+      v-else
+      class="v-tc-summary"
+    >
       {{ summary }}
     </div>
 
@@ -75,11 +119,14 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { Warning } from '@element-plus/icons-vue'
+import type { ToolSummaryItem } from '@/api/ai/chat'
+import { formatSize } from '@/utils/format'
 
 const props = defineProps<{
   toolCallId: string
   title: string
-  summary: string
+  /** P2b 字符串摘要 / P4b T42 结构化文件清单 */
+  summary: string | ToolSummaryItem[]
   status: string
   /** 是否已过期（确认单 10 分钟失效） */
   expired?: boolean
@@ -92,6 +139,9 @@ const emit = defineEmits<{
 const submitting = ref(false)
 
 const isExpired = computed(() => props.expired === true)
+
+/** 结构化摘要（数组）→ 渲染文件清单表格；字符串摘要维持 P2b 文本渲染 */
+const listSummary = computed(() => (Array.isArray(props.summary) ? props.summary : null))
 
 function handleConfirm(approved: boolean) {
   submitting.value = true
@@ -128,6 +178,14 @@ function handleConfirm(approved: boolean) {
   margin: 6px 0 10px;
   line-height: 1.5;
   word-break: break-word;
+}
+.v-tc-table {
+  width: 100%;
+}
+.v-tc-estimate {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #909399;
 }
 .v-tc-actions {
   display: flex;

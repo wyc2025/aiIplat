@@ -229,6 +229,7 @@ import {
   type ConversationItem,
   type SseSession,
   type ToolCallItem,
+  type ToolSummaryItem,
 } from '@/api/ai/chat'
 import MarkdownView from '@/components/MarkdownView/index.vue'
 import ToolConfirmCard from '../components/ToolConfirmCard.vue'
@@ -435,7 +436,7 @@ async function sendMessage() {
           toolCallId: event.toolCallId as string,
           toolName: event.toolName as string,
           title: event.title as string,
-          summary: event.summary as string,
+          summary: event.summary as string | ToolSummaryItem[],
           params: {},
           status: event.status as string,
           risk: 'read',
@@ -448,7 +449,7 @@ async function sendMessage() {
           toolCallId: event.toolCallId as string,
           toolName: event.toolName as string,
           title: event.title as string,
-          summary: event.summary as string,
+          summary: event.summary as string | ToolSummaryItem[],
           params: (event.params as Record<string, unknown>) ?? {},
           status: 'pending',
           risk: 'write',
@@ -519,7 +520,7 @@ function handleToolConfirm(tc: LocalToolCall, approved: boolean) {
           toolCallId: event.toolCallId as string,
           toolName: event.toolName as string,
           title: event.title as string,
-          summary: event.summary as string,
+          summary: event.summary as string | ToolSummaryItem[],
           params: {},
           status: event.status as string,
           risk: 'read',
@@ -531,7 +532,7 @@ function handleToolConfirm(tc: LocalToolCall, approved: boolean) {
           toolCallId: event.toolCallId as string,
           toolName: event.toolName as string,
           title: event.title as string,
-          summary: event.summary as string,
+          summary: event.summary as string | ToolSummaryItem[],
           params: (event.params as Record<string, unknown>) ?? {},
           status: 'pending',
           risk: 'write',

@@ -19,22 +19,28 @@
       v-if="expanded"
       class="v-tr-detail"
     >
-      <pre>{{ summary }}</pre>
+      <pre>{{ summaryText }}</pre>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { ArrowDown, ArrowUp, CircleClose, Search } from '@element-plus/icons-vue'
+import type { ToolSummaryItem } from '@/api/ai/chat'
 
-defineProps<{
+const props = defineProps<{
   title: string
-  summary: string
+  /** read 工具为字符串结果摘要；类型放宽以与 ToolCallItem.summary 联合类型对齐（T42） */
+  summary: string | ToolSummaryItem[]
   status: string
 }>()
 
 const expanded = ref(false)
+
+const summaryText = computed(() =>
+  typeof props.summary === 'string' ? props.summary : JSON.stringify(props.summary),
+)
 </script>
 
 <style scoped>

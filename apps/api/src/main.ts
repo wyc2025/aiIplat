@@ -1,7 +1,7 @@
 import { BadRequestException, ValidationPipe } from '@nestjs/common'
 import { NestFactory } from '@nestjs/core'
 import { NestExpressApplication } from '@nestjs/platform-express'
-import type { Request } from 'express'
+import type { NextFunction, Request, Response } from 'express'
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger'
 import helmet from 'helmet'
 import { AppModule } from './app.module'
@@ -13,6 +13,15 @@ async function bootstrap() {
   app.setGlobalPrefix('api')
   // CSP 会拦截 Swagger UI 资源，后端不渲染页面故关闭
   app.use(helmet({ contentSecurityPolicy: false }))
+  // 开放层 CORP 改写（§14.5）：站点页面被 CSP sandbox 置于 opaque origin，其 style/js/img 等
+  // no-cors 子资源一律按跨源校验，helmet 默认的 Cross-Origin-Resource-Policy: same-origin 会把它们
+  // 全部拦截（站点停留在"加载中"），故 /api/open 响应改写为 cross-origin（与 CORS 反射 * 同口径）
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (req.url?.startsWith('/api/open')) {
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
+    }
+    next()
+  })
   // 信任代理头（R8/§14.12：开放层 IP 取值 X-Forwarded-For 首段；纯直连下与 socket 地址等价）
   app.set('trust proxy', true)
   app.useGlobalPipes(
