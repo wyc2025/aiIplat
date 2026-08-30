@@ -357,7 +357,7 @@ apps/api/src/
 - **覆盖上传（R5）**：`overwrite=1` 且同名未删文件 → 物理替换 + used 差额记账（`GREATEST(used+delta,0)` 兜底）+ URL（file id）不变
 - **文章模块**：栏目树 ≤3 级（防环+40107 保护）；字数 R14（去 markdown 标记与空白计字符，仅展示）；摘要留空自动取正文纯文本前 100 字；发布状态机（首次发布写 published_at，下架再上架不刷新）；物理删除连带标签关联与评论（R7）
 - **评论（R9）**：昵称制；站点级审核开关（关=直过审）；开放层仅返回已过审；限流 10 次/分/IP + 同文章同 IP 60s 一条（40111）；查看数 R8（`site:view:{articleId}:{ip}` SET NX EX 300 去重，IP 取 XFF 首段）
-- **错误码**：site 域 40101~40112（表见 §14.11）；开放层对外统一 40400 防探测
+- **错误码**：site 域 40101~40116（表见 §14.11）；开放层对外统一 40400 防探测
 
 ---
 
@@ -782,7 +782,7 @@ main.ts 增补：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 函数�
 | CloudFacade 扩展（P4a）                                     | api/src/modules/cloud/facade                         | resolvePublicPath（三态继承判定）/ getPublicStream（Range + 缓存失效 40400）/ createFolder（重名自动(1)）/ registerPublicFile（used upsert）/ discardSiteDraft（建站回滚）                                | 已建（T34/T36，三态随修订记录）   |
 | SiteResolveService                                          | api/src/modules/site/open                            | slug/路径解析 + 正/负缓存（resolve 300s、path 60s）                                                                                                                                                       | 已建（T35）                       |
 | StorageService.writeFromBuffer                              | api/src/infra/storage                                | 内存内容直写正式区（模板复制等应用内生成文件场景）                                                                                                                                                        | 已建（T36）                       |
-| 站点默认模板                                                | apps/api/assets/site-template                        | 一键建站四件套（原生 JS + CDN markdown-it，textContent 防 XSS）                                                                                                                                           | 已建（T36）                       |
+| 站点默认模板                                                | （已迁移至 site-templates/default，T44）             | 见「站点模板库」行                                                                                                                                                                                        | 已迁移                            |
 | rate-limit.util                                             | api/src/modules/site/open                            | 开放层限流工具（Redis 计数，static/api/comment 三桶共用）+ extractIp                                                                                                                                      | 已建（T38）                       |
 
 ### Redis Key 增补约定（写入 RedisKey 常量）
@@ -1088,6 +1088,15 @@ description 纪律：操作的是当前用户自己的站点（根 = 云盘「�
 
 `SiteFacade.writeFiles` 全部完成后对 ok 路径逐个 DEL `site:path`（含负缓存）——AI/模板写完访客立即可见。**编辑器保存（R19）无需失效**：fileId/URL 不变，缓存的 fileId 仍有效，开放层 ETag 随 size/mtime 变化自然失效（PRD F4 定论）。cloud 侧公开性变更（set-public）仍走 60s TTL 被动生效（§14.4 R12 不变）。
 
+**AI/模板写入 vs 编辑器保存（两种覆盖语义对照，防误合并）**：
+
+| 维度     | AI/模板写入（SiteFacade.writeFiles）                                       | 编辑器保存（PUT content）                                   |
+| -------- | -------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| file 行  | 同路径软删旧版 + 新建行（fileId/URL **变**）                               | 更新行（fileId/URL **不变**）                               |
+| 旧版处理 | 进回收站，可还原（R18/D22）                                                | 旧物理文件直接删除，不可回滚（D22；需回滚靠编辑器再次保存） |
+| 缓存处理 | 写完精确失效 site:path（含负缓存）                                         | 无需失效（fileId 不变，ETag 随 size/mtime 自然变化）        |
+| 设计理由 | 站点路径即 URL，覆盖=删旧建新符合目录语义；模板温和覆盖（R20）复用同一语义 | 编辑器高频保存，行更新避免引用与缓存抖动（PRD F4 定论）     |
+
 ### 15.5 编辑器保存接口（cloud 域）
 
 `PUT /api/cloud/file/:id/content`，`@RequirePermission('cloud:file:upload')` + `@OperationLog('云盘','在线编辑保存')`：
@@ -1097,6 +1106,13 @@ description 纪律：操作的是当前用户自己的站点（根 = 云盘「�
 3. writeFromBuffer 写新物理 → `FileService.replaceFileContent`（公共方法，§9 资产表）→ 删旧物理
 4. 更新行语义：fileId/URL 不变，**仅 storage_name/size/update_time 三列**（mime/ext/is_public 不动；开放层 MIME 输出按 ext 解析，与 DB mime 无关）
 5. DTO `{ content }` @IsString + @MaxLength(1_048_576) 字符级粗拦，字节级 service 精算；**main.ts json body limit 须 ≥2MB**（默认 100KB 会在进 DTO 前 PayloadTooLarge）
+
+### 15.5a 前端编辑器集成（CodeMirror 6）
+
+- 依赖白名单（D20 批准，除此之外零新增）：`codemirror` 元包 + `@codemirror/state` / `@codemirror/view` + `lang-html/css/javascript/json/markdown/xml`；**禁主题包、禁 lint/autocomplete 增强包**
+- language 包按 ext 动态 import（html/css/js/json/md/xml 高亮，其余纯文本），云盘首屏 bundle 不携带 language 代码；FileEditorDialog 组件本体静态引入、编辑器实例在弹窗打开时才创建（较增补 §15.9 的 defineAsyncComponent 预期更保守，实现偏差随 T43 登记）
+- 「编辑」入口显示条件：非目录 + 文本白名单 ext + size ≤1MB + v-permission `cloud:file:upload`；加载复用 preview 接口
+- file.list 三态标签（R23）：isPublic 1→「公开」/ 2→「已阻断」/ 0→无标签；「设为公开/取消公开」按钮按 `isPublic === 1` 判断
 
 ### 15.6 确认卡结构化清单（AiTool.summarize 钩子）
 
@@ -1117,7 +1133,10 @@ summarize?: (params: any, ctx: { user: AuthUser }) => any
 - 建站（manage.create）模板源读 `site-templates/default/`；discardSiteDraft 回滚不变；已建站用户不受迁移影响
 - 模板纪律（R22）：README.txt 为字段级契约，三套主体逐字一致；开放 API 变更必须同步三套 README
 
-### 15.8 README 契约与 PLATFORM-GUIDE 分工（D26/R22，见 §14.9）
+### 15.8 README 契约与 PLATFORM-GUIDE 分工（D26/R22）
+
+- 模板内置 README.txt 是开放 API 的 **AI 契约唯一权威**（七端点字段级，以 ./api/ 相对路径视角）；三套模板主体逐字一致（T44 抽查口径）
+- **R22 维护纪律**：开放 API 任何变更必须同任务同步三套 README；PLATFORM-GUIDE 只放摘要，注入后总长 ≤2000 字（改动后必须跑字数核查）
 
 ### 15.9 错误码（40113~~40116 见 §14.11；30012~~30013 见 §4.7 表）
 
