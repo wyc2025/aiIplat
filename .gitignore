@@ -15,6 +15,12 @@ uploads
 .DS_Store
 .idea
 .vscode
+# IDE 工作区数据（本地会话/集成状态，不入库）
+.codebuddy
+
+# 部署产物与临时打包
+*.tgz
+dist-package
 
 # 覆盖率
 coverage
