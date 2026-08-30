@@ -1,0 +1,12 @@
+fix(api): 修复 writeFromBuffer 未创建月份目录导致干净环境写入 ENOENT；新增容器化部署与 GitHub Actions CI/CD
+
+问题：StorageService.writeFromBuffer 缺少 mkdir(dirname, recursive)，正式区按月子目录（uploads/yyyyMM）在全新环境不存在时写文件直接 ENOENT——本地因历史上传已建过月份目录被掩盖，容器空卷首次建站/AI 写站点文件必现 500（moveToStorage 同口径已有该行）。
+
+修复：writeFromBuffer 补上与 moveToStorage 一致的目录递归创建。
+
+部署与 CI/CD（新增，无运行时新依赖）：
+- docker-compose.yml：mysql8 / redis7 / api / nginx 四服务编排（数据卷持久化、健康检查、手册挂载）
+- apps/api/Dockerfile：node:22-slim + 国内源（apt/npm/Prisma/bcrypt）+ bcrypt 编译兜底
+- deploy/nginx.conf：SPA 回退 + /api 反代 + SSE 关闭缓冲
+- deploy.sh：备份 → 解压 → 构建 → 迁移 → 重启 → 健康检查 → 失败回滚
+- .github/workflows/deploy.yml：push main 触发，构建打包后 scp 上传并远程执行 deploy.sh

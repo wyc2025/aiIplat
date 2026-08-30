@@ -1,0 +1,66 @@
+name: Deploy iplat to Tencent Lighthouse
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.21.0
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 构建 API
+        run: pnpm --filter @iplat/api build
+
+      - name: 构建 Web
+        run: pnpm --filter @iplat/web build
+
+      - name: 打包部署产物
+        run: |
+          rm -rf dist-package
+          mkdir -p dist-package/apps/api dist-package/apps/web dist-package/deploy dist-package/docs
+          cp -r apps/api/dist apps/api/prisma apps/api/assets apps/api/package.json dist-package/apps/api/
+          cp -r apps/web/dist dist-package/apps/web/
+          cp -r deploy/. dist-package/deploy/
+          cp docs/PLATFORM-GUIDE.md dist-package/docs/
+          cp package.json pnpm-lock.yaml pnpm-workspace.yaml docker-compose.yml deploy.sh dist-package/
+          tar -czf iplat-app.tgz -C dist-package .
+          ls -lh iplat-app.tgz
+
+      - name: 上传产物到服务器
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          source: iplat-app.tgz
+          target: /opt/iplat/
+
+      - name: 执行远程部署
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          script: /opt/iplat/deploy.sh /opt/iplat/iplat-app.tgz

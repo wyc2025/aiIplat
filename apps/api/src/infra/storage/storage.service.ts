@@ -68,6 +68,9 @@ export class StorageService implements OnModuleInit {
     const monthDir = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`
     const storageName = `${monthDir}/${randomUUID()}${safeExt ? `.${safeExt}` : ''}`
     const target = this.resolveStorage(storageName)
+    // 与 moveToStorage 同口径：正式区按月子目录可能尚未存在（全新环境首写），必须先递归创建，
+    // 否则 writeFile 直接 ENOENT（本地因历史上传已建过月份目录而被掩盖，干净环境必现）
+    await mkdir(dirname(target), { recursive: true })
     await writeFile(target, content)
     return storageName
   }
