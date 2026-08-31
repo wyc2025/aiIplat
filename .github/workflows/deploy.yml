@@ -28,6 +28,9 @@ jobs:
       - name: 安装依赖
         run: pnpm install --frozen-lockfile
 
+      - name: 生成 Prisma Client
+        run: pnpm --filter @iplat/api exec prisma generate
+
       - name: 构建 API
         run: pnpm --filter @iplat/api build
 
