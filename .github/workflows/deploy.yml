@@ -52,18 +52,19 @@ jobs:
       - name: 上传产物到服务器
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          port: ${{ secrets.SSH_PORT }}
+          # 优先读 Secrets，未配置时回退到 Variables（私钥建议放 Secrets，Variables 明文可见）
+          host: ${{ secrets.SSH_HOST || vars.SSH_HOST }}
+          username: ${{ secrets.SSH_USER || vars.SSH_USER }}
+          key: ${{ secrets.SSH_KEY || vars.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || vars.SSH_PORT || '22' }}
           source: iplat-app.tgz
           target: /opt/iplat/
 
       - name: 执行远程部署
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          port: ${{ secrets.SSH_PORT }}
+          host: ${{ secrets.SSH_HOST || vars.SSH_HOST }}
+          username: ${{ secrets.SSH_USER || vars.SSH_USER }}
+          key: ${{ secrets.SSH_KEY || vars.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || vars.SSH_PORT || '22' }}
           script: /opt/iplat/deploy.sh /opt/iplat/iplat-app.tgz
