@@ -67,4 +67,6 @@ jobs:
           username: ${{ secrets.SSH_USER || vars.SSH_USER }}
           key: ${{ secrets.SSH_KEY || vars.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || vars.SSH_PORT || '22' }}
-          script: /opt/iplat/deploy.sh /opt/iplat/iplat-app.tgz
+          script: |
+            chmod +x /opt/iplat/deploy.sh
+            /opt/iplat/deploy.sh /opt/iplat/iplat-app.tgz
