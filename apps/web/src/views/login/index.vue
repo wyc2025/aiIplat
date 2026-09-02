@@ -48,6 +48,25 @@
           {{ loading ? '登录中…' : '登 录' }}
         </el-button>
       </el-form>
+      <div class="v-login-demo">
+        <el-divider>演示账号</el-divider>
+        <div
+          class="v-login-demo-item"
+          @click="fillDemo('admin', 'Admin@123')"
+        >
+          <div class="v-login-demo-text">
+            <span class="v-login-demo-role">超级管理员</span>
+            <span class="v-login-demo-cred">admin / Admin@123</span>
+          </div>
+          <el-button
+            link
+            type="primary"
+            @click.stop="fillDemo('admin', 'Admin@123')"
+          >
+            一键填充
+          </el-button>
+        </div>
+      </div>
     </el-card>
   </div>
 </template>
@@ -70,6 +89,11 @@ const form = reactive({ username: '', password: '' })
 const rules: FormRules = {
   username: [{ required: true, message: '请输入账号', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
+}
+
+function fillDemo(username: string, password: string) {
+  form.username = username
+  form.password = password
 }
 
 async function handleLogin() {
@@ -117,5 +141,42 @@ async function handleLogin() {
 .v-login-btn {
   width: 100%;
   margin-top: 4px;
+}
+.v-login-demo {
+  margin-top: 20px;
+}
+.v-login-demo :deep(.el-divider__text) {
+  font-size: 12px;
+  color: #a8abb2;
+}
+.v-login-demo-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px dashed #b3d8ff;
+  border-radius: 6px;
+  background: #ecf5ff;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+.v-login-demo-item:hover {
+  border-color: #409eff;
+}
+.v-login-demo-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.v-login-demo-role {
+  font-size: 12px;
+  color: #909399;
+}
+.v-login-demo-cred {
+  font-size: 13px;
+  font-family: Consolas, Monaco, monospace;
+  color: #303133;
 }
 </style>
