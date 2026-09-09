@@ -1,8 +1,0 @@
-feat(cloud): P4c T46 公开链接机制 + /api/pub/ 开放端点七件套
-
-1. 数据库：cloud_file 加 public_token（唯一索引）+ allow_listing 迁移
-2. 管理侧：POST/DELETE /cloud/file/:id/public（token 生成/轮换、幂等、审核门禁、文件夹 allowListing）；file.list 补 publicToken/allowListing；软删同步置空 token（还原后旧链接仍 40400）；既有 set-public 保留（站点机制依赖）
-3. /api/pub/ 七件套（modules/cloud/public/ 新子模块）：f 三件套 + d 四件套；判定链 = token 校验 + R25 祖先阻断上溯 + path 逐段下行；R26 MIME 白名单；Range/ETag/304/no-cache；独立限流桶 static 120 / data 60 次分IP；错误码 40117
-4. 模块形态：CloudFacade 独立成 CloudFacadeModule（照 T44 先例），CloudModule re-export 对外契约不变
-5. main.ts：开放层 CORP/CORS 判定扩展到 /api/pub
-6. 文档：API.md 新增 §8（T46 增量）；ARCHITECTURE.md 头部 P4c 指针行 + 资产表 2 行；PROGRESS.md T46 完成记录（冒烟 43/43）；P4C 增补文档头部标注并入进度
