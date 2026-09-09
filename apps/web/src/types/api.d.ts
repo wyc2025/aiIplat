@@ -163,6 +163,10 @@ export interface CloudFile {
   shared?: boolean
   /** 公开性原始三态 int（仅 list 接口返回；R23/走查 W2：0=继承父目录 / 1=显式公开 / 2=显式阻断；有效公开性以开放层访问时上溯判定为准，列表不逐行算链） */
   isPublic?: number
+  /** 公开链接 token（仅 list 接口返回；仅 isPublic=1 时有值，P4c F1，供复制公开链接） */
+  publicToken?: string | null
+  /** 公开文件夹是否允许访客浏览列表（0|1，仅文件夹有意义，P4c D32） */
+  allowListing?: number
 }
 
 /** 面包屑节点 */
@@ -182,6 +186,39 @@ export interface CloudFileList {
   list: CloudFile[]
   quota: string
   used: string
+}
+
+// ========== cloud 域公开链接 / 公开访问（P4c T46/T47） ==========
+
+/** 设为公开响应（POST /cloud/file/:id/public；allowListing 仅文件夹有值，文件为 null） */
+export interface PublicLinkResult {
+  publicToken: string
+  viewUrl: string
+  allowListing: number | null
+}
+
+/** 公开文件元信息（GET /api/pub/{f,d}/info；size 为 number） */
+export interface PubFileInfo {
+  name: string
+  size: number
+  mime: string
+  ext: string
+  updatedAt: string
+}
+
+/** 公开文件夹单层列表项（GET /api/pub/d/{token}/list） */
+export interface PubListItem {
+  name: string
+  isDir: boolean
+  size: number
+  ext: string
+  updatedAt: string
+}
+
+/** 公开文件夹单层列表响应 */
+export interface PubFolderList {
+  path: string
+  items: PubListItem[]
 }
 
 /** 公开链接（我的分享；status 由后端计算：1 有效 / 0 已停止 / 2 已过期） */

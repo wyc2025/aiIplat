@@ -1,0 +1,249 @@
+<template>
+  <div class="pv-file">
+    <div
+      v-loading="loading"
+      class="pv-body"
+    >
+      <!-- 失败态：统一 404 提示（不区分原因，防探测口径） -->
+      <el-result
+        v-if="!loading && failed"
+        icon="warning"
+        title="链接无效或已失效"
+        sub-title="请向分享者确认链接"
+      />
+
+      <template v-else-if="!loading && info">
+        <h3 class="pv-name">
+          {{ info.name }}
+        </h3>
+        <p class="pv-meta">
+          {{ formatSize(info.size) }} · {{ formatTime(info.updatedAt) }}
+        </p>
+
+        <!-- 内容区：按类型分支（D33 瘦版：video/audio 原生 controls，img 直显，PDF 内嵌，文本预格式化，其他图标） -->
+        <div class="pv-content">
+          <video
+            v-if="branch === 'video'"
+            :src="rawUrl"
+            controls
+            class="pv-media"
+          />
+          <audio
+            v-else-if="branch === 'audio'"
+            :src="rawUrl"
+            controls
+            class="pv-audio"
+          />
+          <img
+            v-else-if="branch === 'image'"
+            :src="rawUrl"
+            :alt="info.name"
+            class="pv-image"
+          >
+          <iframe
+            v-else-if="branch === 'pdf'"
+            :src="rawUrl"
+            class="pv-pdf"
+          />
+          <pre
+            v-else-if="branch === 'text'"
+            ref="textRef"
+            class="pv-text"
+          /><span v-if="textTruncated">（内容过长，仅展示前 {{ TEXT_TRUNCATE }} 字符，完整内容请下载查看）</span>
+          <div
+            v-else
+            class="pv-other"
+          >
+            <el-icon :size="56">
+              <Document />
+            </el-icon>
+            <p>该类型不支持在线查看，请下载后打开</p>
+          </div>
+        </div>
+
+        <el-button
+          type="primary"
+          size="large"
+          :icon="Download"
+          @click="onDownload"
+        >
+          下载
+        </el-button>
+      </template>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
+import { Download, Document } from '@element-plus/icons-vue'
+import { pubDownloadUrl, pubFileInfo, pubRawUrl, pubSubFileInfo } from '@/api/cloud/public'
+import type { PubFileInfo } from '@/types/api'
+
+/** 类型分支白名单（F2；文本/音视频集合与后端 R26 口径对齐，以 ext 为准） */
+const VIDEO_EXTS = new Set(['mp4', 'webm', 'ogg'])
+const AUDIO_EXTS = new Set(['mp3', 'wav', 'm4a'])
+const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp'])
+const TEXT_EXTS = new Set(['txt', 'md', 'json', 'js', 'ts', 'vue', 'css', 'xml', 'yml', 'yaml', 'csv', 'log'])
+/** 文本分支截断展示上限（完整内容走下载） */
+const TEXT_TRUNCATE = 100_000
+
+const route = useRoute()
+const loading = ref(true)
+const failed = ref(false)
+const info = ref<PubFileInfo | null>(null)
+const textTruncated = ref(false)
+const textRef = ref<HTMLElement | null>(null)
+
+/** 寻址模式：/view/d/{token}/file?path= → 子文件寻址；/view/f/{token} → 直链 */
+const isSub = computed(() => route.name === 'public-subfile-view')
+const token = computed(() => route.params.token as string)
+const subPath = computed(() => (isSub.value ? ((route.query.path as string) ?? '') : undefined))
+const rawUrl = computed(() => pubRawUrl(token.value, subPath.value))
+
+/** 渲染分支（ext 小写；空 ext 走 other） */
+const branch = computed(() => {
+  const ext = (info.value?.ext ?? '').toLowerCase()
+  if (VIDEO_EXTS.has(ext)) return 'video'
+  if (AUDIO_EXTS.has(ext)) return 'audio'
+  if (IMAGE_EXTS.has(ext)) return 'image'
+  if (ext === 'pdf') return 'pdf'
+  if (TEXT_EXTS.has(ext)) return 'text'
+  return 'other'
+})
+
+function formatSize(bytes: number): string {
+  if (!bytes || bytes < 0) return '0 B'
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(2)} MB`
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${bytes} B`
+}
+
+function formatTime(iso: string): string {
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString()
+}
+
+function onDownload() {
+  const a = document.createElement('a')
+  a.href = pubDownloadUrl(token.value, subPath.value)
+  a.download = info.value?.name ?? ''
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
+
+/** 文本分支：fetch raw 后 textContent 注入（防 XSS；textContent 不解析 HTML） */
+async function loadText(): Promise<void> {
+  try {
+    const res = await fetch(rawUrl.value)
+    if (!res.ok) throw new Error()
+    const text = await res.text()
+    textTruncated.value = text.length > TEXT_TRUNCATE
+    if (textRef.value) textRef.value.textContent = textTruncated.value ? text.slice(0, TEXT_TRUNCATE) : text
+  } catch {
+    if (textRef.value) textRef.value.textContent = '（内容加载失败，请下载查看）'
+  }
+}
+
+/** 落地页极简无 SEO 诉求（PRD F2：noindex） */
+function ensureNoindex(): void {
+  if (document.querySelector('meta[name="robots"]')) return
+  const meta = document.createElement('meta')
+  meta.name = 'robots'
+  meta.content = 'noindex'
+  document.head.appendChild(meta)
+}
+
+onMounted(async () => {
+  ensureNoindex()
+  try {
+    info.value = isSub.value
+      ? await pubSubFileInfo(token.value, subPath.value ?? '')
+      : await pubFileInfo(token.value)
+    if (branch.value === 'text') await loadText()
+  } catch {
+    // 统一失败态，不区分原因（40400 防探测口径：token 无效/已取消/已删除/被阻断同形）
+    failed.value = true
+  } finally {
+    loading.value = false
+  }
+})
+</script>
+
+<style scoped>
+.pv-file {
+  min-height: 100vh;
+  background: #f5f7fa;
+  padding: 24px;
+  display: flex;
+  justify-content: center;
+}
+.pv-body {
+  width: 100%;
+  max-width: 960px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 8px;
+}
+.pv-name {
+  margin: 0 0 6px;
+  word-break: break-all;
+  text-align: center;
+}
+.pv-meta {
+  color: #909399;
+  font-size: 13px;
+  margin: 0 0 16px;
+}
+.pv-content {
+  width: 100%;
+  margin-bottom: 20px;
+  display: flex;
+  justify-content: center;
+}
+.pv-media {
+  width: 100%;
+  max-height: 70vh;
+  background: #000;
+  border-radius: 6px;
+}
+.pv-audio {
+  width: 100%;
+  margin: 24px 0;
+}
+.pv-image {
+  max-width: 100%;
+  max-height: 70vh;
+  border-radius: 6px;
+}
+.pv-pdf {
+  width: 100%;
+  height: 75vh;
+  border: none;
+  border-radius: 6px;
+  background: #fff;
+}
+.pv-text {
+  width: 100%;
+  max-height: 70vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: #fff;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  padding: 16px;
+  font-size: 13px;
+  line-height: 1.7;
+  font-family: Consolas, Monaco, 'Courier New', monospace;
+}
+.pv-other {
+  text-align: center;
+  color: #909399;
+  padding: 48px 0;
+}
+</style>

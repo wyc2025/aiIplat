@@ -52,6 +52,26 @@ export const staticRoutes: RouteRecordRaw[] = [
     meta: { title: '文件分享', hidden: true },
   },
   {
+    // 云盘公开落地页（P4c D33）：独立根路由（免登录、无布局、极简无品牌），凭 token 访问
+    path: '/view/f/:token',
+    name: 'public-file-view',
+    component: () => import('@/views/cloud/public-view/FileView.vue'),
+    meta: { title: '文件查看', hidden: true },
+  },
+  {
+    path: '/view/d/:token',
+    name: 'public-folder-view',
+    component: () => import('@/views/cloud/public-view/FolderView.vue'),
+    meta: { title: '文件夹浏览', hidden: true },
+  },
+  {
+    // 文件夹内子文件落地页：数据源走 d 类端点 info?path= / raw?path= / download?path=
+    path: '/view/d/:token/file',
+    name: 'public-subfile-view',
+    component: () => import('@/views/cloud/public-view/FileView.vue'),
+    meta: { title: '文件查看', hidden: true },
+  },
+  {
     // 兜底：匹配所有未注册路径。直接渲染 404 组件而非 redirect——
     // redirect 会在全局守卫之前把导航劫持到 /404，导致整页刷新直达深层路径
     // （动态路由尚未注册）时守卫拿不到原始 path 而永远 404；

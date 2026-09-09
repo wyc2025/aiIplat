@@ -183,14 +183,34 @@
           >
             分享管理
           </el-button>
+          <!-- P4c F1：设为公开（生成公开链接）/ 复制公开链接 / 取消公开（token 轮换） -->
           <el-button
+            v-if="row.isPublic !== 1 || !row.publicToken"
             v-permission="'cloud:file:public'"
             link
-            :type="row.isPublic === 1 ? 'warning' : 'primary'"
-            @click="onTogglePublic(row)"
+            type="primary"
+            @click="onSetPublic(row)"
           >
-            {{ row.isPublic === 1 ? '取消公开' : '设为公开' }}
+            设为公开
           </el-button>
+          <template v-else>
+            <el-button
+              v-permission="'cloud:file:public'"
+              link
+              type="primary"
+              @click="onCopyPublicLink(row)"
+            >
+              复制公开链接
+            </el-button>
+            <el-button
+              v-permission="'cloud:file:public'"
+              link
+              type="warning"
+              @click="onCancelPublic(row)"
+            >
+              取消公开
+            </el-button>
+          </template>
           <el-button
             v-permission="'cloud:file:delete'"
             link
@@ -436,6 +456,63 @@
       :file="editorFile"
       @saved="reload"
     />
+
+    <!-- 文件夹设为公开（P4c D32：allowListing 开关，默认开） -->
+    <el-dialog
+      v-model="pubDirVisible"
+      title="设为公开"
+      width="480px"
+      append-to-body
+    >
+      <p class="v-cf-tip">
+        公开「{{ pubDirRow?.name }}」后，访客可凭公开链接在线访问该文件夹及其中内容（子项公开性随公开链上溯判定）。
+      </p>
+      <el-checkbox v-model="pubDirAllowListing">
+        允许访客浏览文件列表（关闭后仅知道完整路径可访问）
+      </el-checkbox>
+      <template #footer>
+        <el-button @click="pubDirVisible = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="pubSubmitting"
+          @click="submitSetPublic()"
+        >
+          确认公开
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 公开链接结果（设为公开成功后展示 + 复制） -->
+    <el-dialog
+      v-model="pubLinkVisible"
+      title="公开链接"
+      width="560px"
+      append-to-body
+    >
+      <el-input
+        :model-value="pubLinkUrl"
+        readonly
+      >
+        <template #append>
+          <el-button @click="copyPublicLink">
+            复制
+          </el-button>
+        </template>
+      </el-input>
+      <p class="v-cf-tip">
+        访客免登录打开可在线查看 / 播放；取消公开后旧链接立即失效，重新公开会生成新链接。
+      </p>
+      <template #footer>
+        <el-button
+          type="primary"
+          @click="pubLinkVisible = false"
+        >
+          完成
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -455,7 +532,8 @@ import {
   renameFile,
   removeFile,
   uploadFile,
-  setFilePublic,
+  createPublicLink,
+  cancelPublicLink,
   previewFileBlob,
   downloadFileBlob,
 } from '@/api/cloud/file'
@@ -700,22 +778,86 @@ async function onRemove(row: CloudFile) {
   reload()
 }
 
-// 设为公开 / 取消公开（P4a：仅标记自身；站点公开目录机制用；R23 三态：0=继承 / 2=阻断 均可设公开，仅 1 可取消）
-async function onTogglePublic(row: CloudFile) {
-  const makingPublic = row.isPublic !== 1
-  if (makingPublic) {
-    await ElMessageBox.confirm(
-      `确认将「${row.name}」设为公开？站点开放层将可访问该${row.isDir ? '目录及其中内容（子目录/文件默认继承）' : '文件'}`,
-      '提示',
-      { type: 'info' },
-    )
+// ==================== 公开链接（P4c F1/D32/R27） ====================
+
+const pubDirVisible = ref(false)
+const pubDirRow = ref<CloudFile | null>(null)
+const pubDirAllowListing = ref(true)
+const pubSubmitting = ref(false)
+const pubLinkVisible = ref(false)
+const pubLinkUrl = ref('')
+
+/** 复用 useClipboard（legacy=true：非安全上下文降级 execCommand） */
+const { copy: copyPubText } = useClipboard({ legacy: true })
+
+/** 设为公开：文件直接生成；文件夹先弹 allowListing 开关弹窗（默认开） */
+function onSetPublic(row: CloudFile) {
+  if (row.isDir) {
+    pubDirRow.value = row
+    pubDirAllowListing.value = row.allowListing !== 0
+    pubDirVisible.value = true
+    return
   }
+  void submitSetPublic(row)
+}
+
+/** 生成/获取公开链接（幂等：已公开且有 token 返回既有 token），成功展示链接弹窗 */
+async function submitSetPublic(row?: CloudFile) {
+  const target = row ?? pubDirRow.value
+  if (!target) return
+  pubSubmitting.value = true
   try {
-    await setFilePublic(Number(row.id), makingPublic)
-    ElMessage.success(makingPublic ? '已设为公开' : '已取消公开')
+    const res = await createPublicLink(Number(target.id), target.isDir ? pubDirAllowListing.value : undefined)
+    pubLinkUrl.value = `${window.location.origin}${res.viewUrl}`
+    pubDirVisible.value = false
+    pubLinkVisible.value = true
     reload()
   } catch {
     // 拦截器提示
+  } finally {
+    pubSubmitting.value = false
+  }
+}
+
+/** 复制公开链接（行内按钮直取 publicToken 组装） */
+async function onCopyPublicLink(row: CloudFile) {
+  if (!row.publicToken) return
+  const url = `${window.location.origin}${row.isDir ? '/view/d/' : '/view/f/'}${row.publicToken}`
+  try {
+    await copyPubText(url)
+    ElMessage.success('已复制')
+  } catch {
+    ElMessage.error('复制失败，请手动复制链接')
+  }
+}
+
+/** 取消公开（R27：token 轮换，旧链接立即失效；重新公开生成新链接） */
+async function onCancelPublic(row: CloudFile) {
+  try {
+    await ElMessageBox.confirm(
+      `确认取消公开「${row.name}」？旧公开链接将立即失效，重新公开会生成新链接`,
+      '提示',
+      { type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  try {
+    await cancelPublicLink(Number(row.id))
+    ElMessage.success('已取消公开')
+    reload()
+  } catch {
+    // 拦截器提示
+  }
+}
+
+/** 公开链接弹窗内的复制 */
+async function copyPublicLink() {
+  try {
+    await copyPubText(pubLinkUrl.value)
+    ElMessage.success('已复制')
+  } catch {
+    ElMessage.error('复制失败，请手动复制链接')
   }
 }
 

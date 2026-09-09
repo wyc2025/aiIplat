@@ -2,7 +2,7 @@
 
 > 本文件由 AI 在每完成一个任务后更新。开工前先读本文件，从"进行中 / 下一个待办"继续。
 
-## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32），P4a 个人网站模块全部完成（T33~~T40），P4b（AI 编写站点 + 在线编辑器 + 模板库）全部完成（T41~~T45）；P4c 云盘增强进行中（T46 已完成，T47~~T50 待做）
+## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32），P4a 个人网站模块全部完成（T33~~T40），P4b（AI 编写站点 + 在线编辑器 + 模板库）全部完成（T41~~T45）；P4c 云盘增强进行中（T46~~T47 已完成，T48~~T50 待做）
 
 ## 里程碑总览
 
@@ -44,7 +44,7 @@
 | 编号 | 任务                                                                                                                                                                                                                                                                                                  | 状态   | 完成日期   |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ---------- |
 | T46  | cloud_file 迁移（public_token + allow_listing）+ 管理侧接口扩展（set-public 生成/返回 token、文件夹 allowListing 参数、取消公开轮换、file.list 补字段）+ /api/pub/ 开放端点七件套（f 三件套 + d 四件套）+ 独立限流桶 + 错误码 40117 + 审核门禁挂接（开关空转）                                        | 已完成 | 2026-09-09 |
-| T47  | 落地页前端：/view/f/{token} 类型分支页 + /view/d/{token} 列表页（下钻）+ /view/d/{token}/file 子文件页 + router 白名单 + 我的文件页「复制公开链接/取消公开」+ 文件夹设公开弹窗（allowListing 开关）                                                                                                   | 未开始 |            |
+| T47  | 落地页前端：/view/f/{token} 类型分支页 + /view/d/{token} 列表页（下钻）+ /view/d/{token}/file 子文件页 + router 白名单 + 我的文件页「复制公开链接/取消公开」+ 文件夹设公开弹窗（allowListing 开关）                                                                                                   | 已完成 | 2026-09-09 |
 | T48  | 批量上传队列（并发 3 / 单失败不阻塞 / 逐文件进度 + 总进度 / 汇总面板）+ 列表区 drop zone + 文件夹拖拽提示 + beforeunload                                                                                                                                                                              | 未开始 |            |
 | T49  | 在线解压：特批依赖 yauzl + iconv-lite 接入 + 安全四件套（Zip Slip / 双上限 / GBK / 不递归）+ tmp 中转事务 + CLOUD_UNZIP_* 配置组 + 错误码 30014~~30016 + 前端解压入口                                                                                                                                 | 未开始 |            |
 | T50  | 联调验收（对照第 6 节 12 条）+ 文档回写（ARCHITECTURE 并入 §16 并删指针行 / API.md 并入 / 资产表 / PLATFORM-GUIDE ≤2000 字核查 / README.txt 三套同步补 raw 直链说明 / PROGRESS）+ 根 README.md 刷新（路线图勾至 P4c、目录补 cloud/site、技术栈补 CodeMirror 与 yauzl/iconv-lite、索引补 P3~~P4c PRD） | 未开始 |            |
@@ -779,6 +779,32 @@
 - 测试数据零残留：t46pub/t46-* 全部软删 + 彻底删除（连带子树、分享连带、used 回扣），回收站与根目录核查 0 残留（回收站既有用户自有旧项未触碰）✓
 
 **遗留（转入 T47/T50）**：① T47 前端落地页与我的文件页入口（本期纯后端）；② static 限流桶与 CORS/CORP 对 /api/pub 的浏览器级复验（逻辑与 open 层同款，curl 断言已覆盖响应头）；③ 文档增量补记已完成（API.md 新增 §8 P4c 增补〔仅 T46 已落地部分〕+ 头部覆盖行、ARCHITECTURE.md 头部 P4c 指针行 + §9 资产表 2 行〔公开访问判定链 / CloudFacadeModule〕、两份 P4C 增补文档头部标注并入进度）；全量并入与收敛仍按 §16.7 安排 T50 执行。
+
+### T47 完成记录（2026-09-09）：公开落地页前端 + 我的文件页公开链接入口
+
+**落地内容**：
+
+1. **类型与 API**：types/api.d.ts 补 CloudFile.publicToken/allowListing + PublicLinkResult/PubFileInfo/PubListItem/PubFolderList；api/cloud/file.ts 新增 createPublicLink（allowListing 仅文件夹传）/cancelPublicLink；新增 **api/cloud/public.ts**（访客侧 pub 信息端点 + raw/download 直链构造）——**故意绕过 utils/request 统一封装**（fetch 直取统一响应体）：公开页无需 401 刷新链路，且统一封装对业务错误弹全局 ElMessage 并丢失 code，落地页需按 code 区分 40117/40400
+2. **路由**：三条独立根静态路由 /view/f/:token（public-file-view）、/view/d/:token（public-folder-view）、/view/d/:token/file（public-subfile-view），无布局免登录；guard.isPublicRoute 白名单加 `/view/` 前缀（照 /share/:token 先例）；catch-all 兜底保证深链直刷可恢复
+3. **FileView.vue**（views/cloud/public-view/，f 与 d 子文件两种寻址共用，按 route.name 分流数据源）：类型分支 video（mp4/webm/ogg，原生 controls + raw 直链自动 Range）/ audio（mp3/wav/m4a）/ image / pdf（iframe 内嵌）/ text（fetch raw 后 **textContent 注入防 XSS**，超 10 万字符截断提示完整走下载）/ other（图标+下载）；统一带下载按钮（download 直链 + 原名）；失败态统一「链接无效或已失效」（不区分原因，防探测）；`<meta name="robots" content="noindex">`（onMounted 注入防重）
+4. **FolderView.vue**：单层列表（名称/大小/修改时间，文件夹在前由后端保证）+ path 逐段下钻（path 同步 query，可分享可前进后退）+ 面包屑回跳；点文件夹下钻、点文件进子文件落地页；**40117 → 「该文件夹未开放列表浏览」提示态**（R33），其余失败统一失效态；noindex 同上
+5. **我的文件页**（views/cloud/file/index.vue）：「设为公开」按钮改走新接口——文件直调 createPublicLink，文件夹弹 allowListing 开关弹窗（默认开，回显 row.allowListing）；成功后弹「公开链接」结果弹窗（完整 URL + 复制，复用 useClipboard legacy 兜底）；isPublic=1 且有 token 的行显示「复制公开链接」（行内直取 publicToken 组装）+「取消公开」（确认框提示旧链接立即失效，R27）；既有 P4a 三态标签与「已分享」标签不受影响
+6. 文档增量：API.md §8.2 口径已是本任务实现（无偏差）；资产表 FileView/FolderView/api public.ts 属页面级组件，随 §16.7 安排 T50 登记主文档（增补文档 §16.3/§16.4 已预登记）
+
+**踩坑/偏差（登记）**：
+
+1. **公开页绕过统一 request 封装**：统一封装业务错误 reject(Error(message)) 不带 code 且弹全局 ElMessage——访客页弹后台管理风格的错误条不可接受，且 FolderView 必须区分 40117（提示态）与 40400（失效态）。与访客分享页 publicShareInfo 走统一封装的现状不一致（后者仅一个接口且失败态单一，容忍受限），T50 文档化时统一口径
+2. **isPublic=1 但 publicToken 为空的历史行**（P4a 时期设为公开的站点目录）：按钮回落为「设为公开」（createPublicLink 幂等补发新 token），不展示「复制公开链接」——语义正确（无 token 无链接）
+3. FileView 文本分支 `<pre>` 自闭合 + 兄弟节点提示的写法经 vue-tsc 编译通过（Vue 模板允许原生元素自闭合）
+
+**验证（运行时 10/10 全过后脚本已删；dev server 5173 代理链路）**：
+
+- 三条 /view 路由经 vite dev server 返回 SPA（200 + html），无效 token 深链同样 200（组件内展示失效态，守卫不劫持）✓
+- 经 5173 代理（与落地页 video/img 同路径）：f info code=0、raw 200 内容逐字节一致、Range 206、d list code=0 ✓
+- 造数清理：t47pub/t47-* 零残留（软删 + 彻底删除）✓
+- `vue-tsc --noEmit` 0 错误 ✓；`eslint`（改动文件）0 错误 0 警告 ✓；`vite build` 成功（vueuse PURE 注解警告为既有，非本次引入）✓；read_lints 0 诊断 ✓
+
+**遗留（非阻塞）**：落地页类型分支与文件夹下钻的**浏览器人工复验**（渲染/交互逻辑已由 vue-tsc + 运行时脚本保证；PRD-P4C 验收 1~~3/5 条含体验项，属 T50 联调口径）。
 
 ### P1 最终状态总结（三句话）
 

@@ -60,6 +60,16 @@ export const uploadFile = (
 export const setFilePublic = (id: number, isPublic: boolean) =>
   post<{ id: string; isPublic: boolean }>('/cloud/file/set-public', { id, isPublic: isPublic ? 1 : 0 })
 
+/** 设为公开并获取公开链接（P4c F1：幂等返回既有 token；allowListing 仅文件夹有意义） */
+export const createPublicLink = (id: number, allowListing?: boolean) =>
+  post<import('@/types/api').PublicLinkResult>(
+    `/cloud/file/${id}/public`,
+    allowListing === undefined ? {} : { allowListing },
+  )
+
+/** 取消公开（P4c R27：token 轮换置空 + is_public 归 0，旧链接立即失效） */
+export const cancelPublicLink = (id: number) => del(`/cloud/file/${id}/public`)
+
 /** 在线编辑保存（P4b T43：更新行语义，fileId/URL 不变，开放层立即生效） */
 export const updateFileContent = (id: number, content: string) =>
   put<{ id: string; name: string; size: number }>(`/cloud/file/${id}/content`, { content })
