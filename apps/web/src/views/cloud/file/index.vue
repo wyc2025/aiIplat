@@ -443,6 +443,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useClipboard } from '@vueuse/core'
 import { Upload, FolderAdd, Refresh, FolderOpened, Document } from '@element-plus/icons-vue'
 import ProTable from '@/components/ProTable/index.vue'
 import FileEditorDialog from '../components/FileEditorDialog.vue'
@@ -768,9 +769,16 @@ async function submitShare() {
   }
 }
 
-function copyShare() {
-  navigator.clipboard?.writeText(shareUrl.value)
-  ElMessage.success('已复制')
+// legacy=true：非安全上下文（HTTP 部署，navigator.clipboard 为 undefined）自动降级
+// document.execCommand('copy')；await 等待结果，失败如实提示，不再无条件报"已复制"
+const { copy: copyToClipboard } = useClipboard({ legacy: true })
+async function copyShare() {
+  try {
+    await copyToClipboard(shareUrl.value)
+    ElMessage.success('已复制')
+  } catch {
+    ElMessage.error('复制失败，请手动复制链接')
+  }
 }
 
 async function onStopShare() {

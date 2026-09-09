@@ -216,6 +216,7 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { useClipboard } from '@vueuse/core'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Search } from '@element-plus/icons-vue'
 import ProTable from '@/components/ProTable/index.vue'
@@ -272,9 +273,16 @@ function statusTagType(status: 1 | 0 | 2) {
 function shareUrl(row: CloudShare) {
   return `${location.origin}/share/${row.token}`
 }
-function onCopy(row: CloudShare) {
-  navigator.clipboard?.writeText(shareUrl(row))
-  ElMessage.success('已复制')
+// legacy=true：非安全上下文（HTTP 部署，navigator.clipboard 为 undefined）自动降级
+// document.execCommand('copy')；await 等待结果，失败如实提示，不再无条件报"已复制"
+const { copy: copyToClipboard } = useClipboard({ legacy: true })
+async function onCopy(row: CloudShare) {
+  try {
+    await copyToClipboard(shareUrl(row))
+    ElMessage.success('已复制')
+  } catch {
+    ElMessage.error('复制失败，请手动复制链接')
+  }
 }
 async function onStop(row: CloudShare) {
   await ElMessageBox.confirm('停止后链接即刻失效，确认？', '提示', { type: 'warning' })

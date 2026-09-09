@@ -41,10 +41,13 @@ export const uploadFile = (
   const token = getAccessToken()
   // 用原始 axios 实例：request 的 post 封装不接受第 3 个 config 参数（无法透传 onUploadProgress），
   // 且实例自带 baseURL（/api），此处用相对路径，避免拼出 /api/api/... 双前缀。
+  // timeout=0：覆盖实例默认 15s 超时——大文件（如 20MB 视频）上传耗时随体积/带宽线性增长，
+  // 15s 内传不完会被 axios 主动中断并报 "timeout of 15000ms exceeded"（后端上限 100MB，Nginx 已放行）。
   return instance.post<CloudFile>(
     `/cloud/file/upload?parentId=${parentId}${overwrite ? '&overwrite=1' : ''}`,
     form,
     {
+      timeout: 0,
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       onUploadProgress: (e: { loaded: number; total?: number }) => {
         if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100))
