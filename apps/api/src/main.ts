@@ -20,9 +20,10 @@ async function bootstrap() {
   app.use(helmet({ contentSecurityPolicy: false }))
   // 开放层 CORP 改写（§14.5）：站点页面被 CSP sandbox 置于 opaque origin，其 style/js/img 等
   // no-cors 子资源一律按跨源校验，helmet 默认的 Cross-Origin-Resource-Policy: same-origin 会把它们
-  // 全部拦截（站点停留在"加载中"），故 /api/open 响应改写为 cross-origin（与 CORS 反射 * 同口径）
+  // 全部拦截（站点停留在"加载中"），故 /api/open 响应改写为 cross-origin（与 CORS 反射 * 同口径）；
+  // P4c /api/pub 并列纳入（公开文件 raw 直链同样会被站点沙箱页引用，D31 共享开放层口径）
   app.use((req: Request, res: Response, next: NextFunction) => {
-    if (req.url?.startsWith('/api/open')) {
+    if (req.url?.startsWith('/api/open') || req.url?.startsWith('/api/pub')) {
       res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
     }
     next()
@@ -44,14 +45,16 @@ async function bootstrap() {
     }),
   )
 
-  // CORS 函数式（§14.5）：路径以 /api/open 开头 → origin 反射为 *（opaque origin 下一切 fetch 均跨源，
-  // 且允许 Content-Type 头——评论提交 application/json 会触发 preflight）；其余路径维持 CORS_ORIGINS 白名单。
+  // CORS 函数式（§14.5）：路径以 /api/open 或 /api/pub 开头 → origin 反射为 *（opaque origin 下一切
+  // fetch 均跨源，且允许 Content-Type 头——评论提交 application/json 会触发 preflight）；其余路径维持
+  // CORS_ORIGINS 白名单。
   const corsOrigins = (process.env.CORS_ORIGINS ?? '')
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean)
   app.enableCors((req: Request, callback: (err: Error | null, options: Record<string, unknown>) => void) => {
-    const isOpenPath = req.url?.startsWith('/api/open') ?? false
+    const isOpenPath =
+      (req.url?.startsWith('/api/open') ?? false) || (req.url?.startsWith('/api/pub') ?? false)
     callback(null, {
       origin: isOpenPath ? '*' : corsOrigins.length > 0 ? corsOrigins : false,
       // 开放层放行自定义 Content-Type（评论提交 JSON preflight）；后台面维持默认

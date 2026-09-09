@@ -1,11 +1,19 @@
 import { Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import { randomBytes } from 'node:crypto'
 import type { CloudFile } from '@prisma/client'
 import { ErrorCode } from '../../../common/constants/error-code'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { StorageService } from '../../../infra/storage/storage.service'
-import type { FileListQueryDto, MkdirDto, RenameDto, SetPublicDto, UpdateContentDto } from './dto/file.dto'
+import type {
+  FileListQueryDto,
+  MkdirDto,
+  RenameDto,
+  SetPublicDto,
+  SetPublicLinkDto,
+  UpdateContentDto,
+} from './dto/file.dto'
 
 /** 目录深度上限（R6） */
 const MAX_DEPTH = 10
@@ -87,6 +95,9 @@ export class FileService {
       shared: f.isDir === 0 && sharedSet.has(f.id),
       // R23（走查 W2 修复）：返回原始三态 int（0=继承 / 1=显式公开 / 2=显式阻断），前端双标签；有效公开性以开放层访问时上溯判定为准
       isPublic: f.isPublic,
+      // P4c F1：公开链接 token（仅显式公开行有值，供「复制公开链接」）；allowListing 仅文件夹有意义（D32）
+      publicToken: f.isPublic === 1 ? f.publicToken : null,
+      allowListing: f.allowListing,
     }))
 
     const { quota, used } = await this.getQuota(userId)
@@ -158,12 +169,12 @@ export class FileService {
     return { id: updated.id.toString(), name: updated.name }
   }
 
-  /** 删除：软删入回收站（R2：只标记自身，后代不变） */
+  /** 删除：软删入回收站（R2：只标记自身，后代不变）；公开行同步置空 token（P4c D30 轮换，还原后旧链接仍 40400） */
   async remove(userId: bigint, id: bigint) {
-    await this.assertOwned(id, userId, false)
+    const target = await this.assertOwned(id, userId, false)
     await this.prisma.cloudFile.update({
       where: { id },
-      data: { deletedAt: new Date() },
+      data: { deletedAt: new Date(), ...(target.publicToken ? { publicToken: null } : {}) },
     })
     return { success: true }
   }
@@ -179,6 +190,74 @@ export class FileService {
     const isPublic = dto.isPublic === 1 ? 1 : 2
     await this.prisma.cloudFile.update({ where: { id }, data: { isPublic } })
     return { id: id.toString(), isPublic: isPublic === 1 }
+  }
+
+  /**
+   * 创建公开链接（P4c F1/D29/D30）：is_public 置 1 + 生成 public_token。
+   * 幂等：已公开且已有 token → 返回既有 token（不重新生成）；isPublic=1 但无 token（历史公开行/轮换后）
+   * → 补发新 token。文件夹可传 allowListing（D32）。审核门禁挂接（P3 R9 口径：开关默认关、先空转）。
+   * viewUrl：文件 /view/f/{token}，文件夹 /view/d/{token}。
+   */
+  async createPublicLink(userId: bigint, id: bigint, dto: SetPublicLinkDto) {
+    const file = await this.assertOwned(id, userId, false)
+
+    // 审核门禁（R9 口径）：开关开启且未通过审核 → 拒绝（照 share create 同款判断）
+    if (this.config.get<boolean>('upload.cloudAuditEnabled', false) && file.auditStatus !== 1) {
+      throw new BusinessException(ErrorCode.CloudAuditNotPassed, '文件未通过内容审核，禁止公开')
+    }
+
+    // 幂等：已有 token 直接返回（allowListing 参数仍生效，可仅改列表开关）
+    const isDir = file.isDir === 1
+    const allowListing = dto.allowListing === undefined ? null : (dto.allowListing ? 1 : 0)
+    if (file.isPublic === 1 && file.publicToken) {
+      if (isDir && allowListing !== null) {
+        await this.prisma.cloudFile.update({ where: { id }, data: { allowListing } })
+      }
+      return this.toPublicLinkResult(id, file.publicToken, isDir, allowListing ?? file.allowListing)
+    }
+
+    // 生成 token（R24：URL-safe ≥21 位；唯一索引碰撞重生成重试，最多 5 次）
+    for (let attempt = 0; ; attempt++) {
+      const token = randomBytes(18).toString('base64url') // 24 字符
+      try {
+        await this.prisma.cloudFile.update({
+          where: { id },
+          data: {
+            isPublic: 1,
+            publicToken: token,
+            ...(isDir && allowListing !== null ? { allowListing } : {}),
+          },
+        })
+        return this.toPublicLinkResult(id, token, isDir, isDir ? (allowListing ?? file.allowListing) : null)
+      } catch (error) {
+        // 唯一索引冲突（P2002）重试；其余错误上抛
+        if (attempt >= 4 || (typeof error !== 'object' || error === null || (error as { code?: string }).code !== 'P2002')) {
+          throw error
+        }
+      }
+    }
+  }
+
+  /**
+   * 取消公开（P4c R27）：public_token 置空（轮换，旧链接永久失效）+ is_public 归 0（继承）。
+   * 重新公开将生成新 token。
+   */
+  async cancelPublicLink(userId: bigint, id: bigint) {
+    await this.assertOwned(id, userId, false)
+    await this.prisma.cloudFile.update({
+      where: { id },
+      data: { isPublic: 0, publicToken: null },
+    })
+    return { success: true }
+  }
+
+  /** 公开链接响应组装（API-P4C §8.1 契约） */
+  private toPublicLinkResult(id: bigint, token: string, isDir: boolean, allowListing: number | null) {
+    return {
+      publicToken: token,
+      viewUrl: isDir ? `/view/d/${token}` : `/view/f/${token}`,
+      allowListing,
+    }
   }
 
   /**

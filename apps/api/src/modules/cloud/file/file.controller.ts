@@ -5,7 +5,15 @@ import { CurrentUser } from '../../../gateway/decorators/current-user.decorator'
 import { OperationLog } from '../../../gateway/decorators/operation-log.decorator'
 import { RequirePermission } from '../../../gateway/decorators/require-permission.decorator'
 import { SkipTransform } from '../../../gateway/decorators/skip-transform.decorator'
-import { FileListQueryDto, FilePathQueryDto, MkdirDto, RenameDto, SetPublicDto, UpdateContentDto } from './dto/file.dto'
+import {
+  FileListQueryDto,
+  FilePathQueryDto,
+  MkdirDto,
+  RenameDto,
+  SetPublicDto,
+  SetPublicLinkDto,
+  UpdateContentDto,
+} from './dto/file.dto'
 import { FileService } from './file.service'
 
 @ApiTags('云盘-我的文件')
@@ -57,6 +65,26 @@ export class FileController {
   @ApiOperation({ summary: '设为公开 / 取消公开（仅标记自身，公开性访问时上溯判定）' })
   setPublic(@CurrentUser('userId') userId: string, @Body() dto: SetPublicDto) {
     return this.fileService.setPublic(BigInt(userId), dto)
+  }
+
+  @Post(':id/public')
+  @RequirePermission('cloud:file:public')
+  @OperationLog('云盘', '设为公开')
+  @ApiOperation({ summary: '设为公开并获取公开链接（P4c：生成 public_token，幂等；文件夹可传 allowListing）' })
+  createPublicLink(
+    @CurrentUser('userId') userId: string,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SetPublicLinkDto,
+  ) {
+    return this.fileService.createPublicLink(BigInt(userId), BigInt(id), dto)
+  }
+
+  @Delete(':id/public')
+  @RequirePermission('cloud:file:public')
+  @OperationLog('云盘', '取消公开')
+  @ApiOperation({ summary: '取消公开（P4c R27：token 轮换置空 + is_public 归 0，旧链接立即失效）' })
+  cancelPublicLink(@CurrentUser('userId') userId: string, @Param('id', ParseIntPipe) id: number) {
+    return this.fileService.cancelPublicLink(BigInt(userId), BigInt(id))
   }
 
   @Put(':id/content')

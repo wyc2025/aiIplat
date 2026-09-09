@@ -1,20 +1,20 @@
 import { Module } from '@nestjs/common'
-import { StorageModule } from '../../infra/storage/storage.module'
 import { FileModule } from './file/file.module'
 import { RecycleModule } from './recycle/recycle.module'
 import { ShareModule } from './share/share.module'
 import { TransferModule } from './transfer/transfer.module'
 import { AdminModule } from './admin/admin.module'
-import { CloudFacade } from './facade/cloud-facade.service'
+import { CloudFacadeModule } from './facade/cloud-facade.module'
+import { CloudPublicModule } from './public/pub.module'
 
 /**
- * 云盘域聚合模块（P3）
- * 子模块规划：file（T26）/ transfer（T27）/ recycle（T28）/ share（T29）/ quota（T30）
- * 域门面 CloudFacade（hasFiles / saveAvatar / P4a 公开机制）随 T30/T34 落地；StorageService 已于 T27 在 infra/storage 就绪。
+ * 云盘域聚合模块（P3~P4c）
+ * 子模块：file / transfer / recycle / share / quota（admin）/ public（P4c 公开访问）；
+ * 域门面 CloudFacade（cloud-facade.module 独立注册，本模块 re-export 保持对外契约，T46 照 T44 先例）：
+ * hasFiles / saveAvatar / P4a 公开机制 / P4b 机械原语。
  */
 @Module({
-  imports: [StorageModule, FileModule, TransferModule, RecycleModule, ShareModule, AdminModule],
-  providers: [CloudFacade],
-  exports: [FileModule, TransferModule, RecycleModule, ShareModule, CloudFacade],
+  imports: [FileModule, TransferModule, RecycleModule, ShareModule, AdminModule, CloudFacadeModule, CloudPublicModule],
+  exports: [FileModule, TransferModule, RecycleModule, ShareModule, CloudFacadeModule],
 })
 export class CloudModule {}

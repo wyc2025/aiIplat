@@ -154,6 +154,8 @@ export const ErrorCode = {
   SiteContentTooLarge: 40115,
   /** 模板不存在（P4b T44 apply-template） */
   SiteTemplateNotFound: 40116,
+  /** 该文件夹未开放列表浏览（P4c，云盘公开文件夹 allow_listing=0 访问列表；开放层段） */
+  CloudListingDisabled: 40117,
 } as const
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode]

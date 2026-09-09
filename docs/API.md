@@ -2,7 +2,7 @@
 
 > 本文档是前后端接口的唯一事实来源。与代码冲突时以本文档为准并修正代码。
 > 通用约定（统一响应、错误码、分页、bigint→string、时间格式）见 ARCHITECTURE.md 4.3 节，此处不再重复。
-> 当前覆盖：P2a（ai 域 + system 域在线用户增量）、P2b（AI 工具调用）、P3（cloud 域 + 头像上传）、P4a（site 域 + 开放层 + cloud 公开机制增量）、P4b（AI 站点工具 + 在线编辑 + 模板库）。system 域既有接口以代码与 Swagger 为准。
+> 当前覆盖：P2a（ai 域 + system 域在线用户增量）、P2b（AI 工具调用）、P3（cloud 域 + 头像上传）、P4a（site 域 + 开放层 + cloud 公开机制增量）、P4b（AI 站点工具 + 在线编辑 + 模板库）、P4c 进行中（云盘公开链接 + /api/pub/ 公开访问端点，T46 已落地，见 §8；解压/批量上传接口落地后随任务补入）。system 域既有接口以代码与 Swagger 为准。
 
 ## ai 域错误码（20xxx）
 
@@ -434,3 +434,43 @@ Content-Type: application/json　Accept: text/event-stream
 ### 7.5 开放层响应头修订（D28，对 §6.3 的修订）
 
 开放静态资源 Cache-Control 由「html no-cache、白名单 public max-age=3600」**统一改为 `no-cache`**（ETag/304 协商保留不变）。理由：AI/编辑器高频迭代要求改完立即可见；未变资源仅 304 头部零字节体，个人站点量级成本可接受。CSP sandbox / nosniff / CORS / CORP 均不变。
+
+## 8. P4c 增补：云盘公开链接 + 公开访问端点（T46 已落地）
+
+> 本节随任务增量补入；解压接口（T49）与前端落地页（T47，非 HTTP 契约）落地后补入，T50 全量复核并与 docs/P4C/API-P4C-增补.md 收敛。
+
+### 8.1 错误码新增（T46）
+
+| code  | 含义                   | 前端处理       |
+| ----- | ---------------------- | -------------- |
+| 40117 | 该文件夹未开放列表浏览 | 提示不开放浏览 |
+
+> 40400（公开资源类统一防探测码）与 42900（限流）复用既有通用码，无新增。
+
+### 8.2 cloud 域管理侧增量（T46，均 `cloud:file:public` 权限 + @OperationLog）
+
+| 方法   | 路径                       | 说明                                                                                                                                                                                                                                                                                                                                                  |
+| ------ | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | /api/cloud/file/:id/public | 设为公开并获取公开链接。body 仅文件夹可传 `{ allowListing }`（缺省 true；仅文件夹有意义）；**幂等**（已公开且已有 token 返回既有 token，allowListing 参数仍生效）；审核门禁照 R9 口径（开关开启且未过审 → 30010）。响应 `{ publicToken, viewUrl, allowListing }`：文件 viewUrl=`/view/f/{token}`、allowListing=null；文件夹 viewUrl=`/view/d/{token}` |
+| DELETE | /api/cloud/file/:id/public | 取消公开（R27：public_token 置空 + is_public 归 0=继承；旧链接立即 40400，重新公开生成**新** token）。响应 `data: null`                                                                                                                                                                                                                               |
+| GET    | /api/cloud/file/list       | **口径扩展（T46）**：item 新增 `publicToken`（string\|null，仅 isPublic=1 时有值）、`allowListing`（0\|1，仅文件夹有意义）                                                                                                                                                                                                                            |
+
+> 既有 `POST /api/cloud/file/set-public`（P4a 语义：isPublic 二元入参、0→显式阻断）**保留不动**，站点公开目录机制依赖。
+> 软删轮换（D30）：带 token 的行进回收站时 token 同步置空（isPublic 不动，保护站点根锚点）——旧链接 40400，还原后仍 40400，重新公开得新 token。
+
+### 8.3 公开访问端点（免登录，前缀 /api/pub，@Public；T46）
+
+统一纪律：独立限流桶（raw/download **静态 120 次/分/IP**，info/list **数据 60 次/分/IP**，超限 42900——限流是 40400 防探测口径的唯一例外，与站点开放层一致）；资源类失败统一 **40400**（HTTP 200 + 统一体 code，不区分原因防探测）；`Cache-Control: no-cache` + ETag（304）；raw/download 为流式响应（@SkipTransform，不走统一响应体），支持 Range（bytes=start-end / start- / -N → 206 + Content-Range；语法非法回 200 全量；越界 416）。
+
+| 方法 | 路径                              | 说明                                                                                                                                                                                                               |
+| ---- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| GET  | /api/pub/f/{token}/info           | 公开文件元信息 `{ name, size, mime, ext, updatedAt }`                                                                                                                                                              |
+| GET  | /api/pub/f/{token}/raw            | 文件流（inline）。R26 MIME：文本类强制 `text/plain; charset=utf-8`；html/htm/svg 强制 attachment（octet-stream）；图片/音视频（R7 扩展 webm/ogg/wav/m4a）/PDF inline 真实 MIME；白名单外 octet-stream + attachment |
+| GET  | /api/pub/f/{token}/download       | 文件流（attachment + `filename*=UTF-8''` 原名 + ASCII 兜底）                                                                                                                                                       |
+| GET  | /api/pub/d/{token}/list?path=     | 公开文件夹**单层**列表 `{ path, items: [{ name, isDir, size, ext, updatedAt }] }`（文件夹在前、名称字典序）；`allow_listing=0` → **40117**                                                                         |
+| GET  | /api/pub/d/{token}/info?path=     | 文件夹内子文件元信息（path 指向目录或缺省 → 40400）                                                                                                                                                                |
+| GET  | /api/pub/d/{token}/raw?path=      | 子文件流（inline 口径同 f raw）                                                                                                                                                                                    |
+| GET  | /api/pub/d/{token}/download?path= | 子文件流（attachment）                                                                                                                                                                                             |
+
+> **判定链**（每端点统一）：token 查 cloud_file（`deletedAt null` 且 `is_public=1`）→ 祖先上溯（任一祖先 `is_public=2`，或祖先行缺失/已删 → 40400，R25）→ path 逐段下行（任一段不存在或 `is_public=2`（阻断不继承）→ 40400；有界 ≤10 层，拒 `..`/反斜杠/非法编码）。allow_listing 校验仅作用于 list 端点（关闭列表后知道完整路径的子文件仍可达，D32）。
+> 前缀 `/api/pub/` 与 `/api/open/` 并列（D31 零歧义）；main.ts 开放层 CORP 改写与 CORS 反射已同步覆盖 `/api/pub`。

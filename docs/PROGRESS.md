@@ -2,7 +2,7 @@
 
 > 本文件由 AI 在每完成一个任务后更新。开工前先读本文件，从"进行中 / 下一个待办"继续。
 
-## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32），P4a 个人网站模块全部完成（T33~~T40），P4b（AI 编写站点 + 在线编辑器 + 模板库）全部完成（T41~~T45）；下一阶段 P4c 未开始
+## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32），P4a 个人网站模块全部完成（T33~~T40），P4b（AI 编写站点 + 在线编辑器 + 模板库）全部完成（T41~~T45）；P4c 云盘增强进行中（T46 已完成，T47~~T50 待做）
 
 ## 里程碑总览
 
@@ -14,6 +14,7 @@
 | P3   | 云盘模块（cloud 域）                        | 已完成 |
 | P4a  | 个人网站：开放站点 + 文章模块（site 域）    | 已完成 |
 | P4b  | 个人网站：AI 编写站点 + 在线编辑器 + 模板库 | 已完成 |
+| P4c  | 云盘：公开机制 + 批量拖拽上传 + 在线解压    | 进行中 |
 
 ## P4a 任务拆解（个人网站·site 域）
 
@@ -37,6 +38,16 @@
 | T43  | CodeMirror 6 编辑器（FileEditorDialog + 云盘页「编辑」入口）+ PUT /api/cloud/file/:id/content（30012/30013，更新行语义）+ 走查 W2 修复（file.list 三态 int + 前端双标签）                                                                                                                                                                                                                         | 已完成 | 2026-08-29 |
 | T44  | 模板库：assets/site-templates/{default,portfolio,card} 迁移与新增 + template.json + GET /api/site/templates + POST /api/site/mine/apply-template（40116，温和覆盖）+ 站点设置页模板库卡片                                                                                                                                                                                                         | 已完成 | 2026-08-29 |
 | T45  | 联调验收（对照 PRD-P4B 第 6 节 12 条）+ 文档回写（ARCHITECTURE 并入 §15 并删指针行 / API.md §7 并入 / 资产表 / PLATFORM-GUIDE / PROGRESS）                                                                                                                                                                                                                                                        | 已完成 | 2026-08-30 |
+
+## P4c 任务拆解（云盘增强：公开机制 + 批量拖拽上传 + 在线解压）
+
+| 编号 | 任务                                                                                                                                                                                                                                                                                                  | 状态   | 完成日期   |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ---------- |
+| T46  | cloud_file 迁移（public_token + allow_listing）+ 管理侧接口扩展（set-public 生成/返回 token、文件夹 allowListing 参数、取消公开轮换、file.list 补字段）+ /api/pub/ 开放端点七件套（f 三件套 + d 四件套）+ 独立限流桶 + 错误码 40117 + 审核门禁挂接（开关空转）                                        | 已完成 | 2026-09-09 |
+| T47  | 落地页前端：/view/f/{token} 类型分支页 + /view/d/{token} 列表页（下钻）+ /view/d/{token}/file 子文件页 + router 白名单 + 我的文件页「复制公开链接/取消公开」+ 文件夹设公开弹窗（allowListing 开关）                                                                                                   | 未开始 |            |
+| T48  | 批量上传队列（并发 3 / 单失败不阻塞 / 逐文件进度 + 总进度 / 汇总面板）+ 列表区 drop zone + 文件夹拖拽提示 + beforeunload                                                                                                                                                                              | 未开始 |            |
+| T49  | 在线解压：特批依赖 yauzl + iconv-lite 接入 + 安全四件套（Zip Slip / 双上限 / GBK / 不递归）+ tmp 中转事务 + CLOUD_UNZIP_* 配置组 + 错误码 30014~~30016 + 前端解压入口                                                                                                                                 | 未开始 |            |
+| T50  | 联调验收（对照第 6 节 12 条）+ 文档回写（ARCHITECTURE 并入 §16 并删指针行 / API.md 并入 / 资产表 / PLATFORM-GUIDE ≤2000 字核查 / README.txt 三套同步补 raw 直链说明 / PROGRESS）+ 根 README.md 刷新（路线图勾至 P4c、目录补 cloud/site、技术栈补 CodeMirror 与 yauzl/iconv-lite、索引补 P3~~P4c PRD） | 未开始 |            |
 
 ## P2a 任务拆解（AI 模块）
 
@@ -201,6 +212,10 @@
 
 ## 完成记录
 
+- 2026-09-09 修复两例云盘体验问题：
+  1. **上传大文件（如 20MB 视频）报超时**。根因：前端 `utils/request.ts` 的 axios 实例全局 `timeout: 15000`，上传接口（`api/cloud/file.ts` uploadFile）复用该实例且未覆盖，20MB 视频上传超过 15 秒即被 axios 主动中断并提示 "timeout of 15000ms exceeded"（Nginx `client_max_body_size 100m`/`proxy_*_timeout 600s` 与后端 `CLOUD_MAX_FILE_SIZE` 缺省 100MB 均不是瓶颈；同文件 preview/download 早已显式 `timeout: 0`，唯上传遗漏）。修复：uploadFile 的 config 增加 `timeout: 0`（上传不设前端超时，进度条照常）。
+  2. **分享管理页 / 云盘分享弹框点"复制"提示已复制但剪贴板为空**。根因：两处均用 `navigator.clipboard?.writeText(...)` 可选链调用、不 await、不 catch、无条件提示成功——生产部署为 HTTP（非安全上下文），`navigator.clipboard` 为 undefined，可选链静默短路，复制根本未发生但仍提示"已复制"。修复：改用已有依赖 `@vueuse/core` 的 `useClipboard({ legacy: true })`（安全上下文走 Clipboard API 并 await；HTTP 环境自动降级 `document.execCommand('copy')`），成功才提示已复制，失败提示"复制失败，请手动复制链接"。涉及 `views/cloud/share/index.vue`、`views/cloud/file/index.vue` 两处。
+  3. **上传中文文件名变乱码**。根因：multer 2.2.0 底层解析器 busboy 1.6.0 解析 multipart `filename` 参数默认按 **latin1** 字符集逐字节解码（`defParamCharset` 缺省 'latin1'），而浏览器发送的文件名是 UTF-8 字节，"测试.mp4" 被误读为 "æµ‹è¯•.mp4" 存入 `cloud_file.name`（multer 2.x 已支持透传 `defParamCharset`，Nest `MulterOptions` 接口亦有该字段，只是从未配置）。修复：`modules/cloud/transfer/tmp-storage.ts` 的 `cloudUploadOptions` 工厂增加 `defParamCharset: 'utf8'`，文件名按 UTF-8 原样还原；头像上传口仅取扩展名不落原名，不受影响无需改动。
 - 2026-08-29 修复：个人站点访客页永远停在"加载中…"。根因：模板 index.html 带 CSP sandbox（无 allow-same-origin）→ opaque origin，其 style.css/app.js 子资源按 no-cors 跨源校验，被 helmet 默认响应头 `Cross-Origin-Resource-Policy: same-origin` 拦截（浏览器控制台报 "Specify a more permissive Cross-Origin Resource Policy"），app.js 未执行故站点信息/文章均未加载。修复：main.ts 在 helmet 之后新增中间件，对 /api/open 路径响应改写 CORP 为 cross-origin（与 CORS 反射 * 同口径，其余路径维持默认）；同步回写 ARCHITECTURE §4.8 D3 / §14.4 输出步骤 / §14.5 安全响应头说明
 - 2026-08-29 修复（续）：访客提交评论"疑似 CORS 报错"。排查结论：curl 实测 preflight/GET/POST/业务报错响应均带 ACAO:*，CORS 配置无问题；agent-browser 真实浏览器复现提交成功（表单清空、console 零报错）。真正问题：CSP sandbox 缺 `allow-modals`，评论提交成功后的 `alert('已提交，审核后展示')` 被浏览器静默忽略，访客得不到任何反馈，console 仅打 sandbox 警告被误读为 CORS 错误；重复提交还会撞 60s 限流（40111 的 alert 同样被吞）。修复：mime.ts 的 CSP_SANDBOX 增加 `allow-modals`（服务端动态响应头，已生成站点重启后立即生效，无需动云盘文件）；同步回写 ARCHITECTURE §4.8 D3 / §14.5
 - 2026-08-29 排查（续 2）：① 从 `localhost:5173`（web dev server）打开站点时评论提交报 "Failed to fetch"——站点链接为相对路径 `/api/open/{slug}/`，落在 dev server 上经代理；sandbox 页面请求 Origin 为 null，**Vite 默认 cors（仅放行 localhost 系源）把 preflight OPTIONS 拦成不带 ACAO 的 204**，请求未到 api（GET 简单请求可穿透代理由 api 加 ACAO 故页面数据正常）。修复：`apps/web/vite.config.ts` `server.cors: true`（反射 Origin 含 null，仅 dev server 生效，生产反代同域无此问题）；起临时 Vite 实测 preflight 204+ACAO:*、POST 201 单 ACAO 头、入库成功。② 评论"乱码"非产品 bug：库表 HEX 校验，用户浏览器提交的评论（id=19"我是一只猫"）为完美 UTF-8；乱码数据为 AI 调试用 agent-browser 输入中文（CDP 逐键输入缺陷）及 PowerShell 本地编码写坏测试文件所致，脏数据（id=18/20）已物理删除。经验：agent-browser 自动化填中文表单不可信，验证中文链路须查库 HEX 或改用英文
@@ -723,6 +738,47 @@
 **验证（T45 补验冒烟 9/9 全过后脚本已删；tsc/nest build/vue-tsc/eslint 全 0）**；测试数据零残留（t45smoke/t45noperm 用户/角色/站点/文件/配额/Redis/会话/工具留痕/套餐行全部清理）。
 
 **遗留（非阻塞）**：浏览器人工复验三项（确认卡清单渲染 / 编辑器弹窗交互 / 模板卡片应用）——逻辑与类型已全量保证，属体验级复核，可随日常使用随手覆盖。
+
+### T46 完成记录（2026-09-09）：cloud_file 公开链接迁移 + 管理侧接口扩展 + /api/pub/ 开放端点七件套
+
+**落地内容**：
+
+1. **数据库**：cloud_file 加 `public_token` VARCHAR(32) NULL（唯一索引）+ `allow_listing` TINYINT DEFAULT 1（D29/D30/D32）；迁移 `20260909000000_add_cloud_file_public_token`；D38 口径：公开端点 DB 直查不加 Redis 缓存
+2. **错误码**：40117 该文件夹未开放列表浏览（CloudListingDisabled，先查号段：30xxx 已占至 30013 / 40xxx 已占至 40116，无撞段）；Redis 键新增 `pub:rate:{bucket}:{ip}`
+3. **管理侧**（file.controller，均 `cloud:file:public` + @OperationLog）：
+   - `POST /cloud/file/:id/public`（body 仅文件夹可传 `{allowListing}`）：审核门禁（R9 口径，开关默认关空转，未过审 30010）→ 幂等（已公开且有 token 直接返回既有 token）→ 生成 token（`randomBytes(18).toString('base64url')` = 24 字符 ≥21，唯一索引碰撞 P2002 重试 ≤5 次）→ 响应 `{publicToken, viewUrl, allowListing}`（文件 viewUrl=/view/f/、allowListing=null；文件夹 viewUrl=/view/d/）
+   - `DELETE /cloud/file/:id/public`：R27 取消公开 = token 置空 + is_public 归 0（继承），旧链接立即 40400，重新公开得新 token
+   - file.list 行内新增 `publicToken`（仅 isPublic=1 有值）/`allowListing`
+   - 既有 P4a `POST set-public`（isPublic 二元→三态映射）**原样保留不动**（站点机制依赖）
+4. **软删 token 轮换**：file.remove 对带 token 的行同步置空 publicToken（isPublic 不动——保护站点根目录 isPublic=1 锚点不被误清），满足验收「进回收站 → 40400；还原后仍 40400」
+5. **/api/pub/ 七件套**（modules/cloud/public/ 新子模块，@Public 免登录、禁挂操作日志）：f/{token}/info、f/{token}/raw、f/{token}/download + d/{token}/list、d/{token}/info、d/{token}/raw、d/{token}/download（query path）；判定链：token 查行（deletedAt null 且 is_public=1）→ R25 祖先上溯（任一祖先 is_public=2 或祖先缺失/已删 → 40400）→ path 逐段下行（段 is_public=2 阻断不继承 → 40400；有界 ≤10 层拒 `..`/反斜杠/非法编码）→ list 额外校验 allow_listing=0 → 40117；raw/download 复用 CloudFacade.getPublicStream 流式输出（Range 三形式/206/416、ETag/304、Cache-Control no-cache、Content-Disposition filename* 原名 + ASCII 兜底、socket 空闲 30s）；R26 MIME：文本类强制 text/plain（inline）、html/htm/svg 强制 attachment、图片/音视频（R7 扩展 webm/ogg/wav/m4a）/PDF inline 真实 MIME、白名单外 octet-stream + attachment
+6. **限流（R32）**：独立桶 static（raw/download 120/分/IP）/ data（info/list 60/分/IP），Redis INCR + 60s TTL，超限 42900（限流不属 40400 防探测例外）
+7. **模块形态**：CloudFacade 独立成 `facade/cloud-facade.module.ts`（照 T44 SiteFacadeModule 先例，public 子模块同域直注），CloudModule re-export 对外契约不变；`public/pub.module.ts` 挂入 CloudModule 不对外导出
+8. **main.ts**：开放层 CORP 改写与 CORS 反射判定从 `/api/open` 扩展到 `/api/pub`（D31 共享开放层口径：站点沙箱页 opaque origin 引用 raw 直链必需）
+
+**踩坑/偏差（登记）**：
+
+1. **非交互环境不能跑 `prisma migrate dev`**（本机环境限制）——改为手写 migration.sql + `prisma migrate deploy` + `prisma generate`，与仓库既有迁移形态一致
+2. **三态上溯未复用 P4a resolvePublicPath**：语义确属不同（P4a「遇第一个非继承节点定生死、目标显式 1 可穿透父级阻断」vs P4c R25「任一祖先 is_public=2 → 40400」，验收条目明文），在 public/ 内独立成判定链；流式能力仍复用 CloudFacade，符合 §16.2「实现归位」（判定链资产本就登记在 modules/cloud/public/）
+3. **MIME 白名单独立维护**（pub-mime.ts）：site/open/mime.ts 禁止跨域 import（域边界），cloud 域按 R26 自持一份（P3 预览白名单 + P4a 表各自分置已是现状三份，T50 并入时在文档中写明各自口径与差异）
+4. **限流值硬编码** 120/60 于 pub.controller（§16.2 表格为定值；site 域系配置组可配）——差异点，T50 并入时如需配置化再议
+5. **冒烟暴露并修复**：descend 对空路径 `''` 会 split 出空段（`['']`）导致 list 根目录 40400——补判空后空路径 = folder 自身
+6. 冒烟教训：回收站 list 的 `data` 是**裸数组**（非 `{list,...}`），与 file.list 形态不同，脚本断言取值路径需区分
+7. 冒烟教训（续 P4b）：中断重跑必须自含预清理（首轮遗留的活跃 t46* 项 + 回收站），本轮脚本已内置
+
+**验证（冒烟 43/43 全过后脚本已删；HTTP 实测 admin 身份）**：
+
+- 管理侧：文件夹/文件设公开返回 token+viewUrl+allowListing ✓；幂等同 token ✓；关列表幂等改 allowListing=0 同 token ✓；file.list 补 publicToken/allowListing ✓；未登录 40100 ✓
+- f 三件套：info 契约（name/size/mime/ext/updatedAt）✓；raw 200 内容正确 + text/plain + inline + no-cache + ETag + Accept-Ranges ✓；If-None-Match 304 零字节 ✓；Range 三形式（0-9/206+Content-Range、-5 后缀、200- 越界 416）✓；download attachment + filename* 原名 + octet-stream ✓；html raw 强制 attachment（R26）✓
+- d 四件套：list 空目录/子项（文件夹在前排序）✓；path 下钻继承子目录 ✓；info/raw/download?path= 子文件 ✓；html 子文件 raw 亦 attachment ✓；allow_listing=0 → list 40117 但 info?path= 仍可达（R33）✓
+- 防探测：无效 token / path 不存在 / `..` 穿越 / 文件 token 访问 d 端点 / d 缺 path 全部 40400 ✓
+- 轮换与失效：取消公开旧 token 40400 ✓；重新公开新 token ✓；进回收站 token 失效 40400 ✓；子目录显式阻断（沿用 P4a set-public 0→2）→ 段落 40400 且段下文件 raw 40400 ✓
+- 限流：data 桶 70 连发命中 42900 ✓（static 桶同款逻辑未单独实测）
+- 回归：分享创建/停止不受影响 ✓
+- `tsc --noEmit` / `nest build`（先清 dist 绕 safe-delete）/ `eslint`（改动文件）全 0 ✓；read_lints 0 诊断 ✓
+- 测试数据零残留：t46pub/t46-* 全部软删 + 彻底删除（连带子树、分享连带、used 回扣），回收站与根目录核查 0 残留（回收站既有用户自有旧项未触碰）✓
+
+**遗留（转入 T47/T50）**：① T47 前端落地页与我的文件页入口（本期纯后端）；② static 限流桶与 CORS/CORP 对 /api/pub 的浏览器级复验（逻辑与 open 层同款，curl 断言已覆盖响应头）；③ 文档增量补记已完成（API.md 新增 §8 P4c 增补〔仅 T46 已落地部分〕+ 头部覆盖行、ARCHITECTURE.md 头部 P4c 指针行 + §9 资产表 2 行〔公开访问判定链 / CloudFacadeModule〕、两份 P4C 增补文档头部标注并入进度）；全量并入与收敛仍按 §16.7 安排 T50 执行。
 
 ### P1 最终状态总结（三句话）
 

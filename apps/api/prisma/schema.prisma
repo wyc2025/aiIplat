@@ -457,6 +457,10 @@ model CloudFile {
   auditStatus Int       @default(0) @map("audit_status") @db.TinyInt
   /// 公开标记三态：0=继承父目录（新建默认）/ 1=显式公开 / 2=显式阻断（R2 修订：上溯遇第一个非继承节点定生死）
   isPublic    Int       @default(0) @map("is_public") @db.TinyInt
+  /// 公开链接 token（P4c D30：挂 fileId，改名/移动不变；仅显式公开行有值，取消公开置空=轮换）
+  publicToken String?   @map("public_token") @db.VarChar(32) @unique
+  /// 公开文件夹允许访客浏览列表：1=允许 / 0=仅知道完整路径可访问（P4c D32，仅文件夹有意义）
+  allowListing Int      @default(1) @map("allow_listing") @db.TinyInt
   /// 非空 = 在回收站（R2 只标记自身）
   deletedAt   DateTime? @map("deleted_at")
   createTime  DateTime  @default(now()) @map("create_time")

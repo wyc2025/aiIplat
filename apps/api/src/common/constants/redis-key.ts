@@ -32,4 +32,6 @@ export const RedisKey = {
   siteCommentRate: (articleId: string, ip: string) => `site:comment:rate:${articleId}:${ip}`,
   /** 开放层独立限流计数：site:rate:{bucket}:{ip}，INCR + 首次 60s TTL（bucket = static|api|comment） */
   siteRate: (bucket: string, ip: string) => `site:rate:${bucket}:${ip}`,
+  /** 云盘公开端点独立限流计数：pub:rate:{bucket}:{ip}，INCR + 首次 60s TTL（bucket = static|data，P4c R32） */
+  pubRate: (bucket: string, ip: string) => `pub:rate:${bucket}:${ip}`,
 } as const

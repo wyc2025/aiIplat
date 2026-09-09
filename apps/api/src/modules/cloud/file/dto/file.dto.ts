@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Type } from 'class-transformer'
-import { IsInt, IsNotEmpty, IsOptional, IsString, Length, MaxLength, Min } from 'class-validator'
+import { IsBoolean, IsInt, IsNotEmpty, IsOptional, IsString, Length, MaxLength, Min } from 'class-validator'
 
 /** 目录内容查询 */
 export class FileListQueryDto {
@@ -49,6 +49,14 @@ export class SetPublicDto {
   @IsInt()
   @Min(0)
   isPublic!: number
+}
+
+/** 设为公开（P4c F1/D32：生成公开链接 token；allowListing 仅文件夹有意义，默认允许列表） */
+export class SetPublicLinkDto {
+  @ApiPropertyOptional({ description: '允许访客浏览文件列表（仅文件夹有意义，默认 true）' })
+  @IsOptional()
+  @IsBoolean()
+  allowListing?: boolean
 }
 
 /** 重命名 */
