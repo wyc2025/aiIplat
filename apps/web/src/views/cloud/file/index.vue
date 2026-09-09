@@ -64,185 +64,198 @@
       </el-breadcrumb>
     </div>
 
-    <!-- 上传进度 -->
-    <el-progress
-      v-if="uploading"
-      :percentage="uploadPercent"
-      :stroke-width="10"
-      style="margin: 8px 0"
-    />
-
-    <!-- 文件列表 -->
-    <ProTable
-      :data="list"
-      :loading="loading"
-      :load-error="loadError"
-      :total="total"
-      :page-no="pageNo"
-      :page-size="pageSize"
-      :pagination="false"
-      @retry="reload"
+    <!-- 文件列表（T48 drop zone：拖入文件批量入队上传；文件夹拖拽整批拒绝并提示 D35） -->
+    <div
+      class="v-cf-drop"
+      :class="{ 'is-dragover': dragActive }"
+      @dragenter="onDragEnter"
+      @dragover.prevent="onDragOver"
+      @dragleave="onDragLeave"
+      @drop.prevent="onDrop"
     >
-      <el-table-column
-        label="名称"
-        min-width="240"
+      <ProTable
+        :data="list"
+        :loading="loading"
+        :load-error="loadError"
+        :total="total"
+        :page-no="pageNo"
+        :page-size="pageSize"
+        :pagination="false"
+        @retry="reload"
       >
-        <template #default="{ row }">
-          <span
-            class="v-cf-name"
-            @dblclick="onDblClick(row)"
-          >
-            <el-icon v-if="row.isDir"><FolderOpened /></el-icon>
-            <el-icon v-else><Document /></el-icon>
-            {{ row.name }}
-          </span>
-          <el-tag
-            v-if="row.shared"
-            type="success"
-            size="small"
-            style="margin-left: 6px"
-          >
-            已分享
-          </el-tag>
-          <el-tag
-            v-if="row.isPublic === 1"
-            type="warning"
-            size="small"
-            style="margin-left: 6px"
-          >
-            公开
-          </el-tag>
-          <el-tag
-            v-else-if="row.isPublic === 2"
-            type="danger"
-            size="small"
-            style="margin-left: 6px"
-          >
-            已阻断
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column
-        label="大小"
-        width="120"
-        :formatter="(r: CloudFile) => r.isDir ? '-' : formatSize(Number(r.size))"
-      />
-      <el-table-column
-        label="修改时间"
-        width="180"
-        prop="updateTime"
-        :formatter="(r: CloudFile) => r.updateTime ? formatTime(r.updateTime) : '-'"
-      />
-      <el-table-column
-        label="操作"
-        width="440"
-        fixed="right"
-      >
-        <template #default="{ row }">
-          <el-button
-            v-if="!row.isDir"
-            v-permission="'cloud:file:list'"
-            link
-            type="primary"
-            @click="openPreview(row)"
-          >
-            预览
-          </el-button>
-          <el-button
-            v-if="!row.isDir"
-            v-permission="'cloud:file:list'"
-            link
-            type="primary"
-            @click="download(row)"
-          >
-            下载
-          </el-button>
-          <el-button
-            v-if="canEdit(row)"
-            v-permission="'cloud:file:upload'"
-            link
-            type="primary"
-            @click="openEditor(row)"
-          >
-            编辑
-          </el-button>
-          <el-button
-            v-permission="'cloud:file:rename'"
-            link
-            type="primary"
-            @click="openRename(row)"
-          >
-            重命名
-          </el-button>
-          <el-button
-            v-if="!row.isDir"
-            v-permission="'cloud:share:create'"
-            link
-            type="primary"
-            @click="openShare(row)"
-          >
-            分享管理
-          </el-button>
-          <!-- P4c F1：设为公开（生成公开链接）/ 复制公开链接 / 取消公开（token 轮换） -->
-          <el-button
-            v-if="row.isPublic !== 1 || !row.publicToken"
-            v-permission="'cloud:file:public'"
-            link
-            type="primary"
-            @click="onSetPublic(row)"
-          >
-            设为公开
-          </el-button>
-          <template v-else>
-            <el-button
-              v-permission="'cloud:file:public'"
-              link
-              type="primary"
-              @click="onCopyPublicLink(row)"
-            >
-              复制公开链接
-            </el-button>
-            <el-button
-              v-permission="'cloud:file:public'"
-              link
-              type="warning"
-              @click="onCancelPublic(row)"
-            >
-              取消公开
-            </el-button>
-          </template>
-          <el-button
-            v-permission="'cloud:file:delete'"
-            link
-            type="danger"
-            @click="onRemove(row)"
-          >
-            删除
-          </el-button>
-        </template>
-      </el-table-column>
-      <template #empty>
-        <el-empty
-          v-if="!loadError"
-          description="空空如也，上传点什么吧"
-        />
-        <el-result
-          v-else
-          icon="error"
-          title="加载失败"
-          sub-title="请稍后重试"
+        <el-table-column
+          label="名称"
+          min-width="240"
         >
-          <template #extra>
-            <el-button
-              type="primary"
-              @click="reload"
+          <template #default="{ row }">
+            <span
+              class="v-cf-name"
+              @dblclick="onDblClick(row)"
             >
-              重试
+              <el-icon v-if="row.isDir"><FolderOpened /></el-icon>
+              <el-icon v-else><Document /></el-icon>
+              {{ row.name }}
+            </span>
+            <el-tag
+              v-if="row.shared"
+              type="success"
+              size="small"
+              style="margin-left: 6px"
+            >
+              已分享
+            </el-tag>
+            <el-tag
+              v-if="row.isPublic === 1"
+              type="warning"
+              size="small"
+              style="margin-left: 6px"
+            >
+              公开
+            </el-tag>
+            <el-tag
+              v-else-if="row.isPublic === 2"
+              type="danger"
+              size="small"
+              style="margin-left: 6px"
+            >
+              已阻断
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column
+          label="大小"
+          width="120"
+          :formatter="(r: CloudFile) => r.isDir ? '-' : formatSize(Number(r.size))"
+        />
+        <el-table-column
+          label="修改时间"
+          width="180"
+          prop="updateTime"
+          :formatter="(r: CloudFile) => r.updateTime ? formatTime(r.updateTime) : '-'"
+        />
+        <el-table-column
+          label="操作"
+          width="440"
+          fixed="right"
+        >
+          <template #default="{ row }">
+            <el-button
+              v-if="!row.isDir"
+              v-permission="'cloud:file:list'"
+              link
+              type="primary"
+              @click="openPreview(row)"
+            >
+              预览
+            </el-button>
+            <el-button
+              v-if="!row.isDir"
+              v-permission="'cloud:file:list'"
+              link
+              type="primary"
+              @click="download(row)"
+            >
+              下载
+            </el-button>
+            <el-button
+              v-if="canEdit(row)"
+              v-permission="'cloud:file:upload'"
+              link
+              type="primary"
+              @click="openEditor(row)"
+            >
+              编辑
+            </el-button>
+            <el-button
+              v-permission="'cloud:file:rename'"
+              link
+              type="primary"
+              @click="openRename(row)"
+            >
+              重命名
+            </el-button>
+            <el-button
+              v-if="!row.isDir"
+              v-permission="'cloud:share:create'"
+              link
+              type="primary"
+              @click="openShare(row)"
+            >
+              分享管理
+            </el-button>
+            <!-- P4c F1：设为公开（生成公开链接）/ 复制公开链接 / 取消公开（token 轮换） -->
+            <el-button
+              v-if="row.isPublic !== 1 || !row.publicToken"
+              v-permission="'cloud:file:public'"
+              link
+              type="primary"
+              @click="onSetPublic(row)"
+            >
+              设为公开
+            </el-button>
+            <template v-else>
+              <el-button
+                v-permission="'cloud:file:public'"
+                link
+                type="primary"
+                @click="onCopyPublicLink(row)"
+              >
+                复制公开链接
+              </el-button>
+              <el-button
+                v-permission="'cloud:file:public'"
+                link
+                type="warning"
+                @click="onCancelPublic(row)"
+              >
+                取消公开
+              </el-button>
+            </template>
+            <el-button
+              v-permission="'cloud:file:delete'"
+              link
+              type="danger"
+              @click="onRemove(row)"
+            >
+              删除
             </el-button>
           </template>
-        </el-result>
-      </template>
-    </ProTable>
+        </el-table-column>
+        <template #empty>
+          <el-empty
+            v-if="!loadError"
+            description="空空如也，上传点什么吧"
+          />
+          <el-result
+            v-else
+            icon="error"
+            title="加载失败"
+            sub-title="请稍后重试"
+          >
+            <template #extra>
+              <el-button
+                type="primary"
+                @click="reload"
+              >
+                重试
+              </el-button>
+            </template>
+          </el-result>
+        </template>
+      </ProTable>
+    </div>
+
+    <!-- 上传队列面板（T48：逐文件进度 + 总进度 + 结果汇总） -->
+    <UploadQueue
+      :visible="queueVisible"
+      :items="queueItems"
+      :has-active="queueActive"
+      :success-count="queueSuccess"
+      :fail-count="queueFail"
+      :total-percent="queuePercent"
+      @clear="queueClearFinished"
+      @close="queueVisible = false"
+    />
 
     <!-- 新建文件夹 -->
     <el-dialog
@@ -524,6 +537,8 @@ import { useClipboard } from '@vueuse/core'
 import { Upload, FolderAdd, Refresh, FolderOpened, Document } from '@element-plus/icons-vue'
 import ProTable from '@/components/ProTable/index.vue'
 import FileEditorDialog from '../components/FileEditorDialog.vue'
+import UploadQueue from './UploadQueue.vue'
+import { useUploadQueue } from './useUploadQueue'
 import { formatSize, formatTime } from '@/utils/format'
 import {
   listFiles,
@@ -531,7 +546,6 @@ import {
   mkdir as apiMkdir,
   renameFile,
   removeFile,
-  uploadFile,
   createPublicLink,
   cancelPublicLink,
   previewFileBlob,
@@ -560,9 +574,60 @@ const crumbs = ref<BreadcrumbItem[]>([])
 const currentDir = ref(0)
 
 const fileInput = ref<HTMLInputElement>()
-const uploading = ref(false)
-const uploadPercent = ref(0)
 const submitting = ref(false)
+
+// ==================== 上传队列（P4c T48：并发 3、单失败不阻塞、汇总面板） ====================
+const {
+  items: queueItems,
+  visible: queueVisible,
+  hasActive: queueActive,
+  successCount: queueSuccess,
+  failCount: queueFail,
+  totalPercent: queuePercent,
+  enqueue: queueEnqueue,
+  clearFinished: queueClearFinished,
+} = useUploadQueue({
+  overwrite: () => overwriteUpload.value,
+  onAllSettled: () => reload(),
+})
+
+// drop zone（仅列表区域，非全页面；拖入高亮边框反馈）
+const dragActive = ref(false)
+let dragDepth = 0
+
+function hasFiles(e: DragEvent): boolean {
+  return Array.from(e.dataTransfer?.types ?? []).includes('Files')
+}
+function onDragEnter(e: DragEvent): void {
+  if (!hasFiles(e)) return
+  dragDepth++
+  dragActive.value = true
+}
+function onDragOver(): void {
+  // dragover 仅为持续触发 preventDefault（模板已 .prevent），无需额外逻辑
+}
+function onDragLeave(): void {
+  dragDepth = Math.max(0, dragDepth - 1)
+  if (dragDepth === 0) dragActive.value = false
+}
+/** drop：文件夹检测（D35，webkitGetAsEntry 须在同步栈内调用）→ 含文件夹整批拒绝；纯文件批量入队 */
+function onDrop(e: DragEvent): void {
+  dragDepth = 0
+  dragActive.value = false
+  const dt = e.dataTransfer
+  if (!dt) return
+  const entries = Array.from(dt.items ?? []).map((i) => {
+    const getter = (i as unknown as { webkitGetAsEntry?: () => { isDirectory?: boolean } | null })
+      .webkitGetAsEntry
+    return typeof getter === 'function' ? getter.call(i) : null
+  })
+  if (entries.some((en) => en?.isDirectory)) {
+    ElMessage.warning('暂不支持文件夹拖拽，请压缩后上传或使用在线解压')
+    return
+  }
+  const files = Array.from(dt.files ?? [])
+  if (files.length > 0) queueEnqueue(files, currentDir.value)
+}
 /** 覆盖同名上传（R5：物理替换，URL 不变）；缺省同名自动 (1) */
 const overwriteUpload = ref(false)
 
@@ -705,28 +770,16 @@ async function download(row: CloudFile) {
   }
 }
 
-// 上传
+// 上传（T48：多选/拖入统一入队；并发 3 由队列调度，结果见上传队列面板）
 function triggerUpload() {
   fileInput.value?.click()
 }
-async function onPick(e: Event) {
+function onPick(e: Event) {
   const input = e.target as HTMLInputElement
   const files = Array.from(input.files || [])
   input.value = ''
   if (!files.length) return
-  uploading.value = true
-  uploadPercent.value = 0
-  try {
-    for (const f of files) {
-      await uploadFile(currentDir.value, f, (p) => (uploadPercent.value = p), overwriteUpload.value)
-    }
-    ElMessage.success(overwriteUpload.value ? '上传完成（同名文件已覆盖）' : '上传完成')
-    reload()
-  } catch {
-    // 错误已由拦截器提示
-  } finally {
-    uploading.value = false
-  }
+  queueEnqueue(files, currentDir.value)
 }
 
 // 新建文件夹
@@ -1009,6 +1062,13 @@ watch(
 }
 .v-cf-crumbs {
   margin-bottom: 12px;
+}
+/* T48 drop zone：拖入高亮反馈（仅列表区域） */
+.v-cf-drop.is-dragover {
+  outline: 2px dashed var(--el-color-primary);
+  outline-offset: -2px;
+  border-radius: 4px;
+  background: var(--el-color-primary-light-9);
 }
 .v-cf-name {
   cursor: pointer;
