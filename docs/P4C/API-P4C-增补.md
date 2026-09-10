@@ -1,7 +1,6 @@
 # iplat —— API-P4C 增补（公开端点 + 管理侧扩展 + 解压）
 
-> 与 PRD-P4C-PUBLIC.md、ARCHITECTURE-P4C-增补.md 同读。T50 完成后并入 API.md 并删除本文件。
-> **并入进度**：T46 增量（§8.1 错误码 / §8.2 管理侧 / §8.3 公开端点）已并入 **API.md §8**（以 API.md 为准，本文件保留全量契约含 T49 解压预定义）；T50 复核收敛后本文件退役。
+> 与 PRD-P4C-PUBLIC.md、ARCHITECTURE-P4C-增补.md 同读。**已全量并入 API.md §8（T50，2026-09-10），以 API.md 为准，本文件保留为历史细节参考**（同 P4a/P4b 惯例）。
 > 通用约定不变：统一响应 `{code,message,data}`（code=0 成功）；bigint ID 字符串化；流式接口 @SkipTransform。
 
 ---

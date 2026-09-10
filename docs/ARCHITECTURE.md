@@ -1,8 +1,6 @@
 # iplat —— 技术架构约定（ARCHITECTURE.md）
 
 > 本文档是 iplat 的技术宪法。代码生成与审查以本文档为准；与对话中的口头约定冲突时，以本文档为准。
->
-> **P4c 进行中**：云盘公开机制 + 批量拖拽上传 + 在线解压的增量约定见 **docs/P4C/ARCHITECTURE-P4C-增补.md**（§16，T50 完成后并入主文档并删除本指针行）；接口契约见 API.md §8 与 docs/P4C/API-P4C-增补.md。
 
 ---
 
@@ -158,6 +156,8 @@ views/ai/
    - /login、/404（WHITE_LIST 基础项）
    - /share/:token（云盘访客分享页，凭链接 token 访问，不要求登录态；
      路由守卫通过判断 to.name === 'share-visitor' 放行，见 router/guard.ts 的 isPublicRoute）
+   - /view/*（P4c 公开落地页：/view/f/:token、/view/d/:token、/view/d/:token/file，
+     guard.ts 以 to.path.startsWith('/view/') 放行）
    新增任何「访客可匿名访问」的独立路由时，必须同步在 guard.ts 的 isPublicRoute 注册，
    否则会被守卫误重定向到 /login（T31 联调实测踩坑：未注册导致访客页跳登录）。
    注意：免登录公开页仍须后端对应接口标记 @Public()，前端/后端任一缺失都不可匿名访问。
@@ -346,6 +346,9 @@ apps/api/src/
 | 30011 | 用户仍有云盘文件，禁止删除                             | 提示（R10 删用户预检）   |
 | 30012 | 该文件类型不支持在线编辑（非文本白名单扩展名，P4b）    | 提示"请下载后编辑"       |
 | 30013 | 内容超出在线编辑上限（1MB，P4b）                       | 提示"请下载后编辑"       |
+| 30014 | 压缩包格式不支持或已损坏（P4c）                        | 提示"仅支持 zip 解压"    |
+| 30015 | 解压超限（条目数 / 累计总大小 / 单条目，P4c）          | 提示超限具体原因         |
+| 30016 | 压缩包含非法路径条目（Zip Slip 整包拒绝，P4c）         | 提示压缩包非法           |
 
 ### 4.8 个人网站（site 域）架构约定（P4a）
 
@@ -565,21 +568,23 @@ apps/api/src/
 
 ### cloud_file —— 文件树（P3 新增，文件+文件夹统一建模）
 
-| 字段                      | 类型              | 说明                                                                   |
-| ------------------------- | ----------------- | ---------------------------------------------------------------------- |
-| id                        | bigint PK         |                                                                        |
-| user_id                   | bigint            | 属主（逻辑关联 sys_user，禁 JOIN）                                     |
-| parent_id                 | bigint            | 0 = 根目录                                                             |
-| name                      | varchar(64)       | 文件/文件夹名（不含路径）                                              |
-| is_dir                    | tinyint           | 1 文件夹 / 0 文件                                                      |
-| size                      | bigint default 0  | 字节；文件夹恒 0                                                       |
-| mime                      | varchar(100) null |                                                                        |
-| ext                       | varchar(20) null  | 小写不带点，预览白名单判断用                                           |
-| storage_name              | varchar(120) null | StorageService 相对路径（yyyyMM/uuid.ext）；文件夹为 null              |
-| audit_status              | tinyint default 0 | 0 未审核 / 1 通过 / 2 驳回 / 3 审核中（D13 预留）                      |
-| is_public                 | tinyint default 0 | **三态**（P4a）：0=继承父目录 / 1=显式公开 / 2=显式阻断，见 §4.8/§14.2 |
-| deleted_at                | datetime null     | 非空 = 在回收站（R2 只标记自身）                                       |
-| create_time / update_time | datetime          |                                                                        |
+| 字段                      | 类型              | 说明                                                                         |
+| ------------------------- | ----------------- | ---------------------------------------------------------------------------- |
+| id                        | bigint PK         |                                                                              |
+| user_id                   | bigint            | 属主（逻辑关联 sys_user，禁 JOIN）                                           |
+| parent_id                 | bigint            | 0 = 根目录                                                                   |
+| name                      | varchar(64)       | 文件/文件夹名（不含路径）                                                    |
+| is_dir                    | tinyint           | 1 文件夹 / 0 文件                                                            |
+| size                      | bigint default 0  | 字节；文件夹恒 0                                                             |
+| mime                      | varchar(100) null |                                                                              |
+| ext                       | varchar(20) null  | 小写不带点，预览白名单判断用                                                 |
+| storage_name              | varchar(120) null | StorageService 相对路径（yyyyMM/uuid.ext）；文件夹为 null                    |
+| audit_status              | tinyint default 0 | 0 未审核 / 1 通过 / 2 驳回 / 3 审核中（D13 预留）                            |
+| is_public                 | tinyint default 0 | **三态**（P4a）：0=继承父目录 / 1=显式公开 / 2=显式阻断，见 §4.8/§14.2       |
+| public_token              | varchar(32) null  | 公开链接 token（P4c，unique；仅显式公开行有值，取消公开置空=轮换），见 §16.1 |
+| allow_listing             | tinyint default 1 | 公开文件夹允许访客浏览列表（P4c D32，仅文件夹有意义），见 §16.1              |
+| deleted_at                | datetime null     | 非空 = 在回收站（R2 只标记自身）                                             |
+| create_time / update_time | datetime          |                                                                              |
 
 索引：(user_id, parent_id, deleted_at)、(user_id, deleted_at)。
 
@@ -721,6 +726,11 @@ P3 增补（upload 配置组，见 `apps/api/src/config/upload.config.ts`）：
 - `CLOUD_AUDIT_ENABLED`：内容审核开关（默认 `false`，预留）
 - `CLOUD_PUBLIC_SHARE_RATE_LIMIT`：公开分享限流（待补）
 
+P4c 增补（upload 配置组续）：
+
+- `CLOUD_UNZIP_MAX_ENTRIES`：在线解压单包条目数上限（默认 5000）
+- `CLOUD_UNZIP_MAX_TOTAL_SIZE`：在线解压单包累计总大小上限字节（默认 500MB）；单条目大小复用 `CLOUD_MAX_FILE_SIZE`
+
 P4a 增补（site 配置组，见 `apps/api/src/config/site.config.ts`，均有默认值）：
 
 - `SITE_OPEN_STATIC_RATE_LIMIT`：开放静态限流（次/分/IP，默认 120）
@@ -788,20 +798,26 @@ main.ts 增补：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 函数�
 | rate-limit.util                                             | api/src/modules/site/open                            | 开放层限流工具（Redis 计数，static/api/comment 三桶共用）+ extractIp                                                                                                                                                                      | 已建（T38）                       |
 | 公开访问判定链（P4c）                                       | api/src/modules/cloud/public                         | token 校验 + R25 祖先阻断上溯 + path 逐段下行（modules/cloud/public/pub.service.ts；含 pub-mime.ts R26 MIME 白名单、独立限流桶 static/data；**未复用 P4a resolvePublicPath——R25「任一祖先阻断」与 P4a「首个非继承节点定生死」语义不同**） | 已建（T46）                       |
 | CloudFacadeModule                                           | api/src/modules/cloud/facade/cloud-facade.module.ts  | CloudFacade 独立注册模块（照 T44 SiteFacadeModule 先例，cloud 域内子模块同域直注；CloudModule 仍 re-export，对外契约不变）                                                                                                                | 已建（T46）                       |
+| UploadQueue / useUploadQueue                                | web/src/views/cloud/file                             | 批量上传队列（P4c：并发 3 worker 池、单失败不阻塞、字节加权总进度、beforeunload 拦截；后端零改动 D34）                                                                                                                                    | 已建（T48）                       |
+| FileView / FolderView                                       | web/src/views/cloud/public-view                      | 公开落地页（类型分支）/ 公开文件夹列表页（下钻），/view/* 免登录路由                                                                                                                                                                      | 已建（T47）                       |
+| UnzipService                                                | api/src/modules/cloud/transfer                       | 在线解压（P4c R29 安全四件套：Zip Slip / 双上限+配额 / GBK / 不递归；tmp 中转事务 D36）                                                                                                                                                   | 已建（T49）                       |
+| StorageService tmp 能力扩展                                 | api/src/infra/storage                                | copyToTmp（正式区→tmp 复制）+ createTmpWriteStream（tmp 写入流），与 moveToStorage/removeTmp 组成完整 tmp 链路                                                                                                                            | 已建（T49）                       |
+| 依赖白名单（P4c）                                           | apps/api/package.json                                | yauzl（流式解压）+ iconv-lite（GBK 条目名解码），D37 特批；yauzl 类型走本地窄声明 src/types/yauzl.d.ts                                                                                                                                    | 已建（T49）                       |
 
 ### Redis Key 增补约定（写入 RedisKey 常量）
 
-| Key                                  | 类型/TTL                                                 | 用途                                                                                         |
-| ------------------------------------ | -------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `online:{userId}`                    | hash，30min 滑动                                         | 在线用户（username/nickname/ip/loginAt/lastActiveAt），JwtAuthGuard 校验通过时刷新，登出删除 |
-| `ai:chatting:{userId}`               | string，TTL 300s（兜底防进程崩溃残留），流结束时主动删除 | 单用户并发流限制（存在即拒绝新流，20007）                                                    |
-| `ai:confirm:{toolCallId}`            | string（JSON），TTL 600s                                 | write 工具确认单：{ userId, conversationId, toolName, params }，确认/取消/过期即失效         |
-| `site:resolve:{slug}`                | string（JSON），TTL 300s                                 | slug → 站点信息；site 域写操作（改 slug/启停）主动 DEL                                       |
-| `site:path:{siteId}:{path}`          | string，TTL 60s                                          | 路径 → fileId；"404" 为负缓存；cloud 侧变更靠 TTL 被动失效（R12）                            |
-| `site:data:{siteId}:{...}`           | string（JSON），TTL 60s                                  | 开放数据热缓存；site 域内容变更 scanDel 前缀失效                                             |
-| `site:view:{articleId}:{ip}`         | string，SET NX EX 300                                    | 查看数去重窗口（R8）                                                                         |
-| `site:comment:rate:{articleId}:{ip}` | string，TTL 60s                                          | 同文章同 IP 评论间隔（R9，命中即 40111）                                                     |
-| `site:rate:{bucket}:{ip}`            | counter，60s 窗口                                        | 开放层独立限流计数（bucket = static/api/comment）                                            |
+| Key                                  | 类型/TTL                                                 | 用途                                                                                                         |
+| ------------------------------------ | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `online:{userId}`                    | hash，30min 滑动                                         | 在线用户（username/nickname/ip/loginAt/lastActiveAt），JwtAuthGuard 校验通过时刷新，登出删除                 |
+| `ai:chatting:{userId}`               | string，TTL 300s（兜底防进程崩溃残留），流结束时主动删除 | 单用户并发流限制（存在即拒绝新流，20007）                                                                    |
+| `ai:confirm:{toolCallId}`            | string（JSON），TTL 600s                                 | write 工具确认单：{ userId, conversationId, toolName, params }，确认/取消/过期即失效                         |
+| `site:resolve:{slug}`                | string（JSON），TTL 300s                                 | slug → 站点信息；site 域写操作（改 slug/启停）主动 DEL                                                       |
+| `site:path:{siteId}:{path}`          | string，TTL 60s                                          | 路径 → fileId；"404" 为负缓存；cloud 侧变更靠 TTL 被动失效（R12）                                            |
+| `site:data:{siteId}:{...}`           | string（JSON），TTL 60s                                  | 开放数据热缓存；site 域内容变更 scanDel 前缀失效                                                             |
+| `site:view:{articleId}:{ip}`         | string，SET NX EX 300                                    | 查看数去重窗口（R8）                                                                                         |
+| `site:comment:rate:{articleId}:{ip}` | string，TTL 60s                                          | 同文章同 IP 评论间隔（R9，命中即 40111）                                                                     |
+| `site:rate:{bucket}:{ip}`            | counter，60s 窗口                                        | 开放层独立限流计数（bucket = static/api/comment）                                                            |
+| `pub:rate:{bucket}:{ip}`             | counter，60s 窗口                                        | 云盘公开端点独立限流计数（P4c R32：bucket = static→raw/download 120次/分、data→info/list 60次/分），见 §16.2 |
 
 ---
 
@@ -811,6 +827,7 @@ main.ts 增补：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 函数�
    - **SSE**：`POST /api/ai/chat` 与 `POST /api/ai/tool/confirm`（本节）
    - **cloud 域流式**：分享下载 / 预览 / 头像读取（§4.7）
    - **site 域开放层**：`/api/open/*` 静态与数据接口（§14.4，@Public + @SkipTransform）
+   - **cloud 域公开端点**：`/api/pub/*` 的 raw/download 流式输出（§16.2，@Public + @SkipTransform）
      SSE 细则如下，仅限上述两个对话接口：
    - 前置校验失败 → 统一 JSON 错误响应（走 GlobalExceptionFilter）
    - 进入流式 → `@Res()` 原生写流，Controller 标记 `@SkipTransform()`（新增装饰器），TransformInterceptor 与 OperationLogInterceptor 识别后跳过
@@ -1174,3 +1191,54 @@ W1/W3~W10 文档补丁已并入（T41 开工前）；W2 代码修复（file.list
 | 模板/功能分享市场 | 用户愿景落地期       | 模板即目录，导出=打包 assets 子目录，导入=解压 + template.json 校验 |
 | 站点多版本历史    | 回滚诉求超回收站语义 | SiteFacade.writeFiles 已集中写入点，加版本快照表即可                |
 | 用户自建表/接口   | 平台化愿景           | 开放层已证明"@Public + 独立限流 + 40400 防探测"模式可复制           |
+
+---
+
+## 16. 云盘增强（P4c）：公开机制 + 批量上传 + 在线解压（自 ARCHITECTURE-P4C-增补.md 并入；增补文档保留为历史细节参考）
+
+> 决策 D29~~D39 / 规则 R24~~R33 / 任务 T46~~T50，见 PRD-P4C-PUBLIC.md。既有约定（三态 is_public / 开放层纪律 / 域边界）不动，本节只写增量。
+
+### 16.1 数据库与公开链接语义
+
+- `cloud_file` 加两列：`public_token` varchar(32) **unique**（仅显式公开行有值，取消公开置空）+ `allow_listing` tinyint default 1（仅文件夹有意义，D32）
+- token（R24/D30）：URL-safe 随机 ≥21 位（实际 24 字符 base64url），挂 fileId（改名不变）、唯一索引碰撞重试 ≤5 次；**取消公开 = token 置空 + is_public 归 0（继承），重新公开生成新 token（R27）**；软删（进回收站）同步置空 token（还原后旧链接仍 40400，isPublic 不动以保护站点根锚点）
+- 既有 `POST set-public`（P4a 三态语义）保留不动，站点机制依赖；新 `POST /cloud/file/:id/public` 承载公开链接（幂等返回既有 token），审核门禁照 R9 口径挂接（开关空转）
+
+### 16.2 公开访问判定链（/api/pub/）
+
+- 独立前缀 `/api/pub/`（D31），与 `/api/open/` 并列共享开放层纪律：@Public、禁挂操作日志、资源类失败统一 40400（HTTP 200 + 统一体，防探测）；main.ts 开放层 CORP 改写与 CORS 反射同步覆盖 `/api/pub`
+- 七件套：f/{token} 三件套（info/raw/download）+ d/{token} 四件套（list/info/raw/download?path=）；raw/download 流式（@SkipTransform），Range/206/416、ETag/304、Cache-Control no-cache、filename* 原名
+- 判定链（资产表"公开访问判定链"）：token 查行（deletedAt null 且 is_public=1）→ **R25 祖先上溯：任一祖先 is_public=2 或祖先行缺失/已删 → 40400**（语义与 P4a resolvePublicPath 的"首个非继承节点定生死"不同，独立成链）→ path 逐段下行（段 is_public=2 阻断不继承 → 40400，有界 ≤10）→ list 端点额外 allow_listing=0 → 40117（D32：关闭列表后知道完整路径的子文件仍可达）
+- 限流（R32）独立桶：raw/download 120 次/分/IP、info/list 60 次/分/IP（超限 42900，为 40400 防探测唯一例外）；D38：DB 直查不加 Redis 缓存
+- MIME（R26，cloud 域自持 pub-mime.ts，不跨域 import site/open/mime.ts）：文本类强制 `text/plain; charset=utf-8`（inline）；html/htm/svg 强制 attachment；图片/音视频（R7 扩展 webm/ogg/wav/m4a）/PDF inline 真实 MIME；白名单外 octet-stream + attachment
+
+### 16.3 批量上传队列（前端，D34 后端零改动）
+
+- `useUploadQueue`：并发 3 worker 池（R28）、单文件失败记录原因不阻塞、parentId 入队锁定、总进度按字节加权、队列进行中注册 beforeunload
+- drop zone 仅文件列表区（拖入高亮）；拖入内容含文件夹 → 整批拒绝并提示"压缩后上传或使用在线解压"（D35，与 F4 话术闭环）；同名逐条 R4 自动"(1)"，面板展示最终落盘名
+
+### 16.4 在线解压（UnzipService）
+
+- 仅 .zip（≤ CLOUD_MAX_FILE_SIZE，30014）；`POST /cloud/file/:id/unzip` 同步执行（前端 timeout 0）；目标 = 同目录/包名文件夹（R31/R4），深度与单目录上限沿用 R6（30006）
+- 流程（D36/R30 tmp 中转事务）：zip 源 copyToTmp → yauzl 顺序流式逐条（禁入内存）校验+落 tmp → 全部成功批量 moveToStorage + 单事务落库（used 记账）→ 任何失败清理全部半成品零残留
+- 安全四件套（R29）见上；错误码 30014/30015/30016（§4.7 表）
+
+### 16.5 错误码与 Redis Key
+
+- 30014/30015/30016 见 §4.7 表；40117（该文件夹未开放列表浏览，开放层段）挂在错误码常量 cloud 段尾，语义见 §16.2
+- Redis：`pub:rate:{bucket}:{ip}`（见 §9 后 Redis Key 表）
+
+### 16.6 资产与文档
+
+- 资产：公开访问判定链 / CloudFacadeModule / UploadQueue+useUploadQueue / FileView+FolderView / UnzipService / StorageService tmp 扩展 / 依赖白名单（见 §9 P4c 行）
+- 三套模板 README.txt 增补 raw 直链说明（R22 逐字一致）；根 README.md 路线图勾至 P4c
+
+### 16.7 演进预留
+
+| 项                  | 触发条件        | 预留设计                                    |
+| ------------------- | --------------- | ------------------------------------------- |
+| 公开端点 Redis 缓存 | 访问量起来      | D38 预留，token→行缓存 + 取消公开主动失效   |
+| 异步解压任务队列    | 大 zip 慢盘超时 | 同步接口契约不变，内部转任务 + 前端轮询进度 |
+| 文件夹拖拽递归上传  | 用户诉求强烈    | webkitGetAsEntry 递归 + 队列 mkdir -p       |
+| 文件夹打包下载      | 待立项清单已有  | 流式 zip 打包（复用 yauzl 生态的 yazl）     |
+| 公开链接访问统计    | 运营诉求        | visit_count 语义独立列，与分享隔离          |

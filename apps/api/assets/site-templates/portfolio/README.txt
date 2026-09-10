@@ -13,6 +13,8 @@ iplat 个人网站模板 —— 作品集（portfolio）
     index.html；请求不带尾斜杠 → 301 自动补斜杠（修正相对引用基址）；
     目录存在但没有 index.html → 404（无目录列表）。
   · media/ 目录专放图片等二进制资源（经后台云盘页上传），公开 URL 形如 ./media/文件名。
+  · 公开文件直链（绝对路径例外）：云盘中“设为公开”的文件可经 /api/pub/f/{token}/raw 引用
+    （token 见后台该文件的公开链接；html/svg 强制下载，适合引用图片/音视频/PDF 资源）；
 
 二、开放数据 API 契约（v1，字段级；一律以 ./api/ 相对路径调用）
   统一响应：{ code, message, data }；code=0 成功，业务数据在 data。

@@ -6,13 +6,15 @@
 
 ## 功能与进度
 
-| 阶段 | 内容                                                                                                  | 状态                |
-| ---- | ----------------------------------------------------------------------------------------------------- | ------------------- |
-| P1   | 后台管理底座：登录认证（双 token）、RBAC 权限、用户/角色/菜单/部门/字典管理、操作与登录日志、个人中心 | ✅ 已完成           |
-| P2a  | AI 对话：多厂商切换（DeepSeek / Kimi / 通义千问 / 智谱GLM）、SSE 流式输出、套餐与积分计费、用量明细   | ✅ 已完成           |
-| P2b  | AI 工具调用：Function Calling、自然语言操作系统（查在线用户/踢人/改资料等）、平台知识问答             | 📋 设计完成，待开发 |
-| P3   | 云盘模块（cloud 域）                                                                                  | ⏳ 规划中           |
-| P4   | 个人网站模块（site 域，含 AI 生成站点）                                                               | ⏳ 规划中           |
+| 阶段 | 内容                                                                                                  | 状态      |
+| ---- | ----------------------------------------------------------------------------------------------------- | --------- |
+| P1   | 后台管理底座：登录认证（双 token）、RBAC 权限、用户/角色/菜单/部门/字典管理、操作与登录日志、个人中心 | ✅ 已完成 |
+| P2a  | AI 对话：多厂商切换（DeepSeek / Kimi / 通义千问 / 智谱GLM）、SSE 流式输出、套餐与积分计费、用量明细   | ✅ 已完成 |
+| P2b  | AI 工具调用：Function Calling、自然语言操作系统（查在线用户/踢人/改资料等）、平台知识问答             | ✅ 已完成 |
+| P3   | 云盘：文件树 / 上传下载预览 / 回收站 / 分享链接 / 配额管理                                            | ✅ 已完成 |
+| P4a  | 个人网站：开放站点（静态托管 + 文章/评论/栏目）+ 开放数据 API                                         | ✅ 已完成 |
+| P4b  | 个人网站：AI 编写站点（工具三件套）+ 在线编辑器 + 模板库                                              | ✅ 已完成 |
+| P4c  | 云盘增强：公开链接（/view 免登录落地页）+ 批量拖拽上传 + 在线解压                                     | ✅ 已完成 |
 
 ## 技术栈
 
@@ -28,6 +30,7 @@
 | Vue Router 4         | 动态路由（菜单驱动，`import.meta.glob` 映射）  |
 | Axios                | 双 token 静默刷新、单飞行重试                  |
 | markdown-it          | AI 消息渲染                                    |
+| CodeMirror 6         | 云盘文本文件在线编辑（按语言分包加载）         |
 
 **后端 `apps/api`**
 
@@ -39,6 +42,8 @@
 | Redis 7      | 权限缓存、token 黑名单、限流、AI 并发锁/确认单 |
 | JWT 双 token | access 2h + refresh 7d，旋转刷新               |
 | openai SDK   | 经 baseURL 适配 4 家 OpenAI 兼容厂商           |
+| yauzl        | 云盘在线解压（流式，Zip Slip 防护）            |
+| iconv-lite   | zip 条目名 GBK 解码                            |
 | Swagger      | 接口文档 `/api/docs`                           |
 
 ## 架构要点
@@ -61,7 +66,9 @@ iplat/
 │           ├── gateway/    # 守卫/拦截器/过滤器/装饰器
 │           └── modules/
 │               ├── system/ # 用户/角色/菜单/部门/字典/日志
-│               └── ai/     # 对话/套餐/积分/工具调用
+│               ├── ai/     # 对话/套餐/积分/工具调用
+│               ├── cloud/  # 文件树/传输/回收站/分享/公开访问/解压
+│               └── site/   # 开放站点/栏目/文章/评论/模板库
 ├── packages/
 │   └── shared/         # 前后端共享类型与常量
 ├── docs/               # 全部设计与进度文档（见下文）
@@ -98,24 +105,28 @@ pnpm dev:web           # 前端 http://localhost:5173
 
 本项目采用**文档驱动开发**：先定契约与边界，再动手编码。
 
-| 文档                                                                                                  | 内容                                              |
-| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| [AGENTS.md](./AGENTS.md)                                                                              | AI 协作开发宪法（9 条铁律，AI 工具自动加载）      |
-| [docs/PRD.md](./docs/PRD.md)                                                                          | P1 产品需求（页面、业务规则、验收标准）           |
-| [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)                                                        | 技术宪法（目录、规范、表结构、权限链）            |
-| [docs/API.md](./docs/API.md)                                                                          | 接口契约唯一权威来源（含错误码表）                |
-| [docs/PRD-P2A-AI.md](./docs/PRD-P2A-AI.md) / [ARCHITECTURE-P2A-增补](./docs/ARCHITECTURE-P2A-增补.md) | P2a AI 对话与积分                                 |
-| [docs/PRD-P2B-AI.md](./docs/PRD-P2B-AI.md) / [ARCHITECTURE-P2B-增补](./docs/ARCHITECTURE-P2B-增补.md) | P2b AI 工具调用与平台知识                         |
-| [docs/PLATFORM-GUIDE.md](./docs/PLATFORM-GUIDE.md)                                                    | 平台使用手册（注入 AI system prompt）             |
-| [docs/PROGRESS.md](./docs/PROGRESS.md)                                                                | 进度台账（任务拆解与完成记录，AI 每次交付后更新） |
+| 文档                                                                                                                      | 内容                                              |
+| ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| [AGENTS.md](./AGENTS.md)                                                                                                  | AI 协作开发宪法（9 条铁律，AI 工具自动加载）      |
+| [docs/PRD.md](./docs/PRD.md)                                                                                              | P1 产品需求（页面、业务规则、验收标准）           |
+| [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)                                                                            | 技术宪法（目录、规范、表结构、权限链）            |
+| [docs/API.md](./docs/API.md)                                                                                              | 接口契约唯一权威来源（含错误码表）                |
+| [docs/PRD-P2A-AI.md](./docs/PRD-P2A-AI.md) / [ARCHITECTURE-P2A-增补](./docs/ARCHITECTURE-P2A-增补.md)                     | P2a AI 对话与积分                                 |
+| [docs/PRD-P2B-AI.md](./docs/PRD-P2B-AI.md) / [ARCHITECTURE-P2B-增补](./docs/ARCHITECTURE-P2B-增补.md)                     | P2b AI 工具调用与平台知识                         |
+| [docs/PRD-P3-CLOUD.md](./docs/PRD-P3-CLOUD.md) / [ARCHITECTURE-P3-增补](./docs/ARCHITECTURE-P3-增补.md)                   | P3 云盘模块                                       |
+| [docs/PRD-P4A-SITE.md](./docs/PRD-P4A-SITE.md) / [ARCHITECTURE-P4A-增补](./docs/ARCHITECTURE-P4A-增补.md)                 | P4a 个人网站（开放站点 + 文章）                   |
+| [docs/PRD-P4B-SITE.md](./docs/PRD-P4B-SITE.md) / [ARCHITECTURE-P4B-增补](./docs/ARCHITECTURE-P4B-增补.md)                 | P4b AI 编写站点 + 在线编辑器 + 模板库             |
+| [docs/P4C/PRD-P4C-PUBLIC.md](./docs/P4C/PRD-P4C-PUBLIC.md) / [ARCHITECTURE-P4C-增补](./docs/P4C/ARCHITECTURE-P4C-增补.md) | P4c 公开机制 + 批量上传 + 在线解压                |
+| [docs/PLATFORM-GUIDE.md](./docs/PLATFORM-GUIDE.md)                                                                        | 平台使用手册（注入 AI system prompt）             |
+| [docs/PROGRESS.md](./docs/PROGRESS.md)                                                                                    | 进度台账（任务拆解与完成记录，AI 每次交付后更新） |
 
 ## 路线图
 
 - [x] 后台管理底座（认证 / RBAC / 系统管理）
 - [x] AI 对话 + 多厂商切换 + 套餐积分
-- [ ] AI 工具调用（自然语言操作系统）+ 平台知识问答
-- [ ] 云盘
-- [ ] 个人网站（支持 AI 生成站点）
+- [x] AI 工具调用（自然语言操作系统）+ 平台知识问答
+- [x] 云盘（公开链接 / 批量拖拽上传 / 在线解压）
+- [x] 个人网站（支持 AI 生成站点）
 - [ ] AI 定时任务、真实支付接入、RAG 知识库
 
 ## License

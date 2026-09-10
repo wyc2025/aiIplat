@@ -1,7 +1,6 @@
 # iplat —— ARCHITECTURE-P4C 增补（云盘公开机制 + 批量拖拽上传 + 在线解压）
 
-> 与 PRD-P4C-PUBLIC.md 同读。章节号 §16 起，T50 完成后并入 ARCHITECTURE.md 主文档并删除本指针。
-> **并入进度**：主文档头部已加本指针行（T46）；T46 新增公共资产（公开访问判定链 / CloudFacadeModule）已登记主文档 §9 资产表；其余增量（UploadQueue / FileView / UnzipService 等）随对应任务登记，T50 全量并入 §16 后本文件退役。
+> 与 PRD-P4C-PUBLIC.md 同读。**已并入 ARCHITECTURE.md 主文档 §16（T50，2026-09-10）并删除主文档指针行，以主文档为准，本文件保留为历史细节参考**（同 P4a/P4b 惯例）。
 > 主文档全部既有约定（统一响应 / 网关层 / 域边界 / 开放层纪律）继续有效，本文只写增量。
 
 ---
