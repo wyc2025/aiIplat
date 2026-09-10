@@ -120,6 +120,12 @@ export const ErrorCode = {
   CloudFileTypeNotAllowed: 30012,
   /** 内容超出在线编辑上限（1MB，P4b T43） */
   CloudContentTooLarge: 30013,
+  /** 压缩包格式不支持或已损坏（P4c T49 unzip） */
+  CloudUnzipNotSupported: 30014,
+  /** 解压超限（条目数 / 累计总大小 / 单条目大小，P4c T49 unzip） */
+  CloudUnzipLimitExceeded: 30015,
+  /** 压缩包含非法路径条目（Zip Slip 拦截，整包拒绝，P4c T49 unzip） */
+  CloudUnzipIllegalEntry: 30016,
 
   // ========== site 域（40xxx 段，40101 起；40001/40100/40300/40400/42900 为通用码已占用，见 API.md §6.1） ==========
   /** 站点不存在或未开通 */

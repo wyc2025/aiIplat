@@ -41,8 +41,8 @@ const RESOLVE_MAX_DEPTH = 10
 const SUBTREE_DEFAULT_MAX_DEPTH = 10
 const SUBTREE_DEFAULT_LIMIT = 500
 
-/** 机械写入的 mime 推导（原语级最小映射，白名单外 octet-stream；开放层实际输出以 ext + mime.ts 白名单为准） */
-const RAW_MIME_MAP: Record<string, string> = {
+/** 机械写入的 mime 推导（原语级最小映射，白名单外 octet-stream；开放层实际输出以 ext + mime.ts 白名单为准；T49 解压落库复用，故导出） */
+export const RAW_MIME_MAP: Record<string, string> = {
   html: 'text/html',
   htm: 'text/html',
   css: 'text/css',

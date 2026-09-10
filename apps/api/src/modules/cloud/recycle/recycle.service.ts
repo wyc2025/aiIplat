@@ -220,21 +220,25 @@ export class RecycleService {
     let bytes = BigInt(0)
     let fileCount = 0
 
-    // BFS 收集整棵子树
+    // BFS 收集整棵子树（含根自身——2026-09-10 修复：原实现只统计子代，顶层文件的
+    // 彻底删除从不回扣 used、不删物理文件，T49 验证暴露）
     const queue: bigint[] = roots.map((r) => r.id)
     while (queue.length > 0) {
       const currentId = queue.shift()!
-      ids.push(currentId)
+      const row = await this.prisma.cloudFile.findFirst({ where: { userId, id: currentId } })
+      if (row) {
+        ids.push(row.id)
+        if (row.isDir === 0) {
+          fileCount++
+          bytes += row.size
+          if (row.storageName) storageNames.push(row.storageName)
+        }
+      }
       const children = await this.prisma.cloudFile.findMany({
         where: { userId, parentId: currentId },
       })
       for (const child of children) {
         queue.push(child.id)
-        if (child.isDir === 0) {
-          fileCount++
-          bytes += child.size
-          if (child.storageName) storageNames.push(child.storageName)
-        }
       }
     }
 

@@ -380,8 +380,8 @@ export class FileService {
     return file
   }
 
-  /** 计算目录深度（根目录深度 = 0），上溯到 parent_id=0 */
-  private async computeDepth(id: bigint, userId: bigint): Promise<number> {
+  /** 计算目录深度（根目录深度 = 0），上溯到 parent_id=0（T49 解压目标深度校验复用，公开） */
+  async computeDepth(id: bigint, userId: bigint): Promise<number> {
     let depth = 0
     let current = id
     // 防环上限 MAX_DEPTH + 1

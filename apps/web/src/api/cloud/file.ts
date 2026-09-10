@@ -75,6 +75,18 @@ export const updateFileContent = (id: number, content: string) =>
   put<{ id: string; name: string; size: number }>(`/cloud/file/${id}/content`, { content })
 
 /**
+ * 在线解压（P4c T49：仅 zip → 同目录包名文件夹，同步执行）。
+ * 用原始实例：解压耗时随包体积增长，timeout=0 覆盖实例默认 15s 超时（与上传同口径）。
+ */
+export const unzipFile = (id: number): Promise<{ folderId: string; folderName: string; fileCount: number; totalSize: number }> =>
+  instance.post(`/cloud/file/${id}/unzip`, undefined, { timeout: 0 }) as unknown as Promise<{
+    folderId: string
+    folderName: string
+    fileCount: number
+    totalSize: number
+  }>
+
+/**
  * 以 Blob 拉取文件流（预览/下载共用）。必须走 axios 而非 <img>/<iframe>/<a> 原生直链：
  * 原生请求无法携带 Authorization 头，会被 JwtAuthGuard 以 401 拒绝（表现为预览空白、
  * 浏览器下载提示"请先尝试登录相应网站"）；走 axios 可自动带 token，且 token 失效时

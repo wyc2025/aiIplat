@@ -1,5 +1,6 @@
-import { createReadStream } from 'node:fs'
-import { mkdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import { createReadStream, createWriteStream } from 'node:fs'
+import { copyFile, mkdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import type { WriteStream } from 'node:fs'
 import type { Readable } from 'node:stream'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -96,6 +97,29 @@ export class StorageService implements OnModuleInit {
       // 清理失败只记日志，不阻断主流程（残留 tmp 由后续运维清理）
       this.logger.warn(`清理临时文件失败: ${tmpPath}`)
     }
+  }
+
+  /**
+   * 将正式区文件复制为临时区新文件（P4c T49 在线解压：zip 源中转，避免直接读正式区被并发覆盖/移动）。
+   * @returns 临时文件绝对路径（调用方负责 finally 中 removeTmp 清理）
+   */
+  async copyToTmp(storageName: string): Promise<string> {
+    const src = this.resolveStorage(storageName)
+    const tmpPath = join(this.tmpDir, `${randomUUID()}.zip`)
+    await copyFile(src, tmpPath)
+    return tmpPath
+  }
+
+  /**
+   * 在临时区创建写入流（P4c T49 在线解压：解压条目流式落 tmp，禁入内存）。
+   * @param ext 目标扩展名（小写不带点；仅字母数字，非法视为无扩展名）
+   * @returns { path, stream }；调用方负责 stream 结束/错误处理与 finally 中 removeTmp 清理
+   */
+  async createTmpWriteStream(ext: string): Promise<{ path: string; stream: WriteStream }> {
+    const safeExt = /^[a-z0-9]{1,20}$/.test(ext) ? ext : ''
+    const path = join(this.tmpDir, `${randomUUID()}${safeExt ? `.${safeExt}` : ''}`)
+    const stream = createWriteStream(path)
+    return { path, stream }
   }
 
   /** 读取正式区文件流（支持 Range 区间，视频拖动依赖） */

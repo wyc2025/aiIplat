@@ -9,13 +9,17 @@ import { SkipTransform } from '../../../gateway/decorators/skip-transform.decora
 import { UploadQueryDto } from './dto/transfer.dto'
 import { CLOUD_UPLOAD_OPTIONS } from './tmp-storage'
 import { TransferService } from './transfer.service'
+import { UnzipService } from './unzip.service'
 
-/** 上传 / 预览 / 下载（与 FileController 同前缀，路由不冲突） */
+/** 上传 / 预览 / 下载 / 解压（与 FileController 同前缀，路由不冲突） */
 @ApiTags('云盘-文件传输')
 @ApiBearerAuth()
 @Controller('cloud/file')
 export class TransferController {
-  constructor(private readonly transferService: TransferService) {}
+  constructor(
+    private readonly transferService: TransferService,
+    private readonly unzipService: UnzipService,
+  ) {}
 
   @Post('upload')
   @UseInterceptors(FileInterceptor('file', CLOUD_UPLOAD_OPTIONS))
@@ -29,6 +33,14 @@ export class TransferController {
     @UploadedFile() file?: Express.Multer.File,
   ) {
     return this.transferService.upload(BigInt(userId), BigInt(query.parentId ?? 0), file, query.overwrite ?? 0)
+  }
+
+  @Post(':id/unzip')
+  @RequirePermission('cloud:file:upload')
+  @OperationLog('云盘', '在线解压')
+  @ApiOperation({ summary: '在线解压（仅 zip → 同目录包名文件夹；同步执行，安全四件套 R29）' })
+  unzip(@CurrentUser('userId') userId: string, @Param('id', ParseIntPipe) id: number) {
+    return this.unzipService.unzip(BigInt(userId), BigInt(id))
   }
 
   @Get('preview/:id')

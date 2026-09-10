@@ -2,7 +2,7 @@
 
 > 本文件由 AI 在每完成一个任务后更新。开工前先读本文件，从"进行中 / 下一个待办"继续。
 
-## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32），P4a 个人网站模块全部完成（T33~~T40），P4b（AI 编写站点 + 在线编辑器 + 模板库）全部完成（T41~~T45）；P4c 云盘增强进行中（T46~~T48 已完成，T49~~T50 待做）
+## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32），P4a 个人网站模块全部完成（T33~~T40），P4b（AI 编写站点 + 在线编辑器 + 模板库）全部完成（T41~~T45）；P4c 云盘增强进行中（T46~~T49 已完成，T50 待做）
 
 ## 里程碑总览
 
@@ -46,7 +46,7 @@
 | T46  | cloud_file 迁移（public_token + allow_listing）+ 管理侧接口扩展（set-public 生成/返回 token、文件夹 allowListing 参数、取消公开轮换、file.list 补字段）+ /api/pub/ 开放端点七件套（f 三件套 + d 四件套）+ 独立限流桶 + 错误码 40117 + 审核门禁挂接（开关空转）                                        | 已完成 | 2026-09-09 |
 | T47  | 落地页前端：/view/f/{token} 类型分支页 + /view/d/{token} 列表页（下钻）+ /view/d/{token}/file 子文件页 + router 白名单 + 我的文件页「复制公开链接/取消公开」+ 文件夹设公开弹窗（allowListing 开关）                                                                                                   | 已完成 | 2026-09-09 |
 | T48  | 批量上传队列（并发 3 / 单失败不阻塞 / 逐文件进度 + 总进度 / 汇总面板）+ 列表区 drop zone + 文件夹拖拽提示 + beforeunload                                                                                                                                                                              | 已完成 | 2026-09-09 |
-| T49  | 在线解压：特批依赖 yauzl + iconv-lite 接入 + 安全四件套（Zip Slip / 双上限 / GBK / 不递归）+ tmp 中转事务 + CLOUD_UNZIP_* 配置组 + 错误码 30014~~30016 + 前端解压入口                                                                                                                                 | 未开始 |            |
+| T49  | 在线解压：特批依赖 yauzl + iconv-lite 接入 + 安全四件套（Zip Slip / 双上限 / GBK / 不递归）+ tmp 中转事务 + CLOUD_UNZIP_* 配置组 + 错误码 30014~~30016 + 前端解压入口                                                                                                                                 | 已完成 | 2026-09-10 |
 | T50  | 联调验收（对照第 6 节 12 条）+ 文档回写（ARCHITECTURE 并入 §16 并删指针行 / API.md 并入 / 资产表 / PLATFORM-GUIDE ≤2000 字核查 / README.txt 三套同步补 raw 直链说明 / PROGRESS）+ 根 README.md 刷新（路线图勾至 P4c、目录补 cloud/site、技术栈补 CodeMirror 与 yauzl/iconv-lite、索引补 P3~~P4c PRD） | 未开始 |            |
 
 ## P2a 任务拆解（AI 模块）
@@ -827,6 +827,41 @@
 - `vue-tsc --noEmit` 0 错误 ✓；`eslint`（改动文件，--fix 后）0 错误 0 警告 ✓；`vite build` 成功 ✓；read_lints 0 诊断 ✓
 - 后端零改动（T46 已建接口冒烟 43/43 覆盖单文件上传链路），本任务为纯前端
 - 遗留：拖拽交互 / 队列面板 / beforeunload 的浏览器人工复验（并发与失败不阻塞逻辑已由代码审查 + vue-tsc 保证，属 T50 联调口径：拖 10 文件看并发 3、同名自动 (1)、汇总数字、拖文件夹提示且无请求）
+
+### T49 完成记录（2026-09-10）：在线解压（yauzl 流式 + 安全四件套 + tmp 中转事务）
+
+**落地内容**：
+
+1. **依赖（D37 特批，仅两个）**：apps/api 直接依赖 `yauzl@3.4.0` + `iconv-lite@0.7.3`；yauzl 无自带类型且禁止加 @types 包（守"仅两个"约束），落地**本地窄声明** `src/types/yauzl.d.ts`（仅 UnzipService 用到的 API 面：open/Entry/ZipFile/事件，decodeStrings=false 语义）
+2. **配置组**（upload.config.ts）：`CLOUD_UNZIP_MAX_ENTRIES`（默认 5000）/ `CLOUD_UNZIP_MAX_TOTAL_SIZE`（默认 500MB）；单条目大小复用 `CLOUD_MAX_FILE_SIZE` 不新增配置
+3. **错误码**：30014 压缩包格式不支持或已损坏 / 30015 解压超限（条目数/累计总大小/单条目）/ 30016 Zip Slip 非法路径条目（先查号段 30xxx 已占至 30013，无撞段）
+4. **StorageService tmp 能力扩展**（infra 公共能力，回写资产表待 T50）：`copyToTmp(storageName)`（zip 源中转，隔离并发覆盖/移动风险）+ `createTmpWriteStream(ext)`（解压条目流式落 tmp，禁入内存）；与既有 moveToStorage/removeTmp 组成完整 tmp 链路
+5. **UnzipService**（modules/cloud/transfer/unzip.service.ts，`POST /api/cloud/file/:id/unzip`，cloud:file:upload + @OperationLog('云盘','在线解压')）：
+   - 校验链：assertOwned（30001）→ ext=zip 且 size ≤ CLOUD_MAX_FILE_SIZE（30014）→ 父目录归属（30001）→ 包名文件夹深度 ≤10、父目录子项 <500（30006，复用 FileService.computeDepth 改公开 + resolveNameConflict）
+   - 安全四件套（R29）：① Zip Slip 整包拒绝 30016（绝对路径 / `..` 穿越 / 盘符段含 `:` / 反斜杠开头；`\` 归一为 `/` 语义）② 双上限：entryCount 预检 + 逐条累计 totalSize 超限即中断（30015）、实时配额校验（30003）、单条目 ≤ CLOUD_MAX_FILE_SIZE（30015）③ GBK 解码：decodeStrings=false 取原始字节，generalPurposeBitFlag bit11 无 UTF-8 标记时 iconv-lite GBK 解码 ④ 嵌套 zip 不递归（解出的 zip 就是普通文件）
+   - 事务语义（D36/R30）：顺序逐条流式解到 tmp → 全部成功后批量 moveToStorage 转正 → 单事务落库（文件夹行 + 目录行按深度控序 + 文件行 + used upsert 记账 R3，mime 按 ext 走 CloudFacade.RAW_MIME_MAP 已导出复用）→ 转正失败删已转正物理文件回滚；tmp 区 finally 全量清理（已 rename 的静默）
+   - 响应 `{ folderId, folderName, fileCount, totalSize }`
+6. **前端**：操作列「解压」按钮（`ext==='zip'` 且非目录，v-permission cloud:file:upload——解压本质是写入）→ 确认框（提示同目录/包名文件夹）→ unzipFile（instance 直连 timeout: 0）→ 成功提示文件数/总大小/目标文件夹名 → 刷新
+
+**踩坑/偏差（登记）**：
+
+1. **发现并修复既有缺陷（P3 T28 遗留，非本次引入）**：recycle.purgeSubtree 的 BFS **只统计子代**的 size/storageName/id，**根行自身从不计入**——顶层文件的彻底删除从不回扣 used、不删物理文件（T49 验证 used 回落失败暴露）。修复：BFS 逐节点先查行、自身计入 ids/bytes/storageNames 再下行子代
+2. **修复前泄漏的数据修复**：缺陷存续期间的测试数据留下 21 个孤儿 zip 物理文件（约 479KB，无行引用）+ admin used 虚高 172,406 字节——已用一次性脚本清理孤儿（仅删「无行引用且 .zip 后缀」的文件，精确打击）并按「未删除行 size 精确和」校正 used（user 1: 37,672,133 → 35,948,070；user 8: 69 → 0 的陈年漂移一并校正）；脚本用完即删
+3. yauzl 3.4.0（2.x 维护线）无自带类型；decodeStrings=false 时 fileName 为原始 Buffer（服务端按 flag 自行解码），目录条目以 `/` 结尾判定，openReadStream/CRC 校验照常工作
+4. 事务落库用「事务回调 + create 逐行 await」而非批量数组：目录行需先拿父 id（深度控序）；行数受 5000 条目上限约束可接受
+5. 配额 30003 分支与总大小 30015 分支为同一判断链的两侧（used + totalSize vs quota），实测走通 30015（env 缩限 1KB + 2KB 条目包）；30003 未单独实测（admin 配额 1GB 无法低成本触发），逻辑同源
+6. 验证脚本手工构造 STORE 型 zip（可控 UTF-8 flag 与 GBK 字节、无需压缩库）：中央目录头 alloc 必须含 name 空间（越界写静默截断曾致包损坏）
+
+**验证（HTTP 实测 20/20 全过后脚本已删；手工构造 zip 覆盖全部四件套）**：
+
+- 正常解压：GBK 文件名「docs/中文.txt」正确解码、多级目录 docs/sub/readme.md、空目录 emptydir/、嵌套 zip 只解一层、响应契约（folderName=t49-ok / fileCount=4 / totalSize）；used 精确 +169 ✓
+- Zip Slip：`../evil.txt` 与 `/abs.txt` 均 30016 整包拒绝，零目录残留 ✓
+- 损坏包 30014、5001 条目 30015、累计总大小超限（env 缩限）30015 ✓；所有失败路径 tmp 零残留、used 不变 ✓
+- purge 修复回归：顶层文件彻底删除 removedFiles=1 / reclaimedBytes=size ✓；used 回落精确 ✓
+- `tsc --noEmit` / `nest build` / `eslint`（api + web 改动文件）全 0 ✓；`vue-tsc` 0、`vite build` 成功 ✓；read_lints 0 ✓
+- 测试数据零残留（t49-* 行、物理、tmp 全清）；孤儿文件与 used 漂移已修复（见踩坑 2）✓
+
+**遗留（转入 T50）**：解压入口与结果的浏览器人工复验（T50 联调口径）；前端 T48 drop zone 与解压按钮共存的操作列布局人工确认。
 
 ### P1 最终状态总结（三句话）
 

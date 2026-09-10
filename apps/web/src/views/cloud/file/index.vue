@@ -166,6 +166,17 @@
             >
               编辑
             </el-button>
+            <!-- P4c T49：zip 文件在线解压（解压本质是写入，复用 cloud:file:upload） -->
+            <el-button
+              v-if="!row.isDir && row.ext === 'zip'"
+              v-permission="'cloud:file:upload'"
+              link
+              type="primary"
+              :loading="unzippingId === row.id"
+              @click="onUnzip(row)"
+            >
+              解压
+            </el-button>
             <el-button
               v-permission="'cloud:file:rename'"
               link
@@ -548,6 +559,7 @@ import {
   removeFile,
   createPublicLink,
   cancelPublicLink,
+  unzipFile,
   previewFileBlob,
   downloadFileBlob,
 } from '@/api/cloud/file'
@@ -780,6 +792,32 @@ function onPick(e: Event) {
   input.value = ''
   if (!files.length) return
   queueEnqueue(files, currentDir.value)
+}
+
+// 在线解压（P4c T49：zip → 同目录包名文件夹；同步执行，timeout 0）
+const unzippingId = ref('')
+async function onUnzip(row: CloudFile) {
+  try {
+    await ElMessageBox.confirm(
+      `确认解压「${row.name}」？将在当前目录创建同名文件夹，解压内容进入该文件夹（同名自动 "(1)"）`,
+      '在线解压',
+      { type: 'info' },
+    )
+  } catch {
+    return
+  }
+  unzippingId.value = row.id
+  try {
+    const res = await unzipFile(Number(row.id))
+    ElMessage.success(
+      `解压完成：${res.fileCount} 个文件（${formatSize(res.totalSize)}），已解压到「${res.folderName}」`,
+    )
+    reload()
+  } catch {
+    // 错误已由拦截器提示
+  } finally {
+    unzippingId.value = ''
+  }
 }
 
 // 新建文件夹
