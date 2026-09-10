@@ -45,11 +45,19 @@
             :src="rawUrl"
             class="pv-pdf"
           />
-          <pre
+          <div
             v-else-if="branch === 'text'"
-            ref="textRef"
-            class="pv-text"
-          /><span v-if="textTruncated">（内容过长，仅展示前 {{ TEXT_TRUNCATE }} 字符，完整内容请下载查看）</span>
+            class="pv-textwrap"
+          >
+            <pre
+              ref="textRef"
+              class="pv-text"
+            />
+            <span
+              v-if="textTruncated"
+              class="pv-truncate"
+            >（内容过长，仅展示前 {{ TEXT_TRUNCATE }} 字符，完整内容请下载查看）</span>
+          </div>
           <div
             v-else
             class="pv-other"
@@ -227,6 +235,12 @@ onMounted(async () => {
   border-radius: 6px;
   background: #fff;
 }
+.pv-textwrap {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 .pv-text {
   width: 100%;
   max-height: 70vh;
@@ -237,9 +251,14 @@ onMounted(async () => {
   border: 1px solid #e4e7ed;
   border-radius: 6px;
   padding: 16px;
+  margin: 0;
   font-size: 13px;
   line-height: 1.7;
   font-family: Consolas, Monaco, 'Courier New', monospace;
+}
+.pv-truncate {
+  color: #909399;
+  font-size: 12px;
 }
 .pv-other {
   text-align: center;
