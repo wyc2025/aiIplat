@@ -49,10 +49,9 @@
             v-else-if="branch === 'text'"
             class="pv-textwrap"
           >
-            <pre
-              ref="textRef"
-              class="pv-text"
-            />
+            <!-- 插值渲染（Vue 文本转义，与 textContent 同级防 XSS）；禁用 DOM 注入：内容加载时
+                 loading 尚未结束、v-if 未渲染，模板 ref 拿不到元素会静默丢失内容（2026-09-10 修复） -->
+            <pre class="pv-text">{{ textBody }}</pre>
             <span
               v-if="textTruncated"
               class="pv-truncate"
@@ -101,8 +100,8 @@ const route = useRoute()
 const loading = ref(true)
 const failed = ref(false)
 const info = ref<PubFileInfo | null>(null)
+const textBody = ref('')
 const textTruncated = ref(false)
-const textRef = ref<HTMLElement | null>(null)
 
 /** 寻址模式：/view/d/{token}/file?path= → 子文件寻址；/view/f/{token} → 直链 */
 const isSub = computed(() => route.name === 'public-subfile-view')
@@ -143,16 +142,16 @@ function onDownload() {
   a.remove()
 }
 
-/** 文本分支：fetch raw 后 textContent 注入（防 XSS；textContent 不解析 HTML） */
+/** 文本分支：fetch raw 填充响应式内容（插值渲染自动文本转义，防 XSS 等效 textContent） */
 async function loadText(): Promise<void> {
   try {
     const res = await fetch(rawUrl.value)
     if (!res.ok) throw new Error()
     const text = await res.text()
     textTruncated.value = text.length > TEXT_TRUNCATE
-    if (textRef.value) textRef.value.textContent = textTruncated.value ? text.slice(0, TEXT_TRUNCATE) : text
+    textBody.value = textTruncated.value ? text.slice(0, TEXT_TRUNCATE) : text
   } catch {
-    if (textRef.value) textRef.value.textContent = '（内容加载失败，请下载查看）'
+    textBody.value = '（内容加载失败，请下载查看）'
   }
 }
 
