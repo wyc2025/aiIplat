@@ -1211,6 +1211,7 @@ W1/W3~W10 文档补丁已并入（T41 开工前）；W2 代码修复（file.list
 - 判定链（资产表"公开访问判定链"）：token 查行（deletedAt null 且 is_public=1）→ **R25 祖先上溯：任一祖先 is_public=2 或祖先行缺失/已删 → 40400**（语义与 P4a resolvePublicPath 的"首个非继承节点定生死"不同，独立成链）→ path 逐段下行（段 is_public=2 阻断不继承 → 40400，有界 ≤10）→ list 端点额外 allow_listing=0 → 40117（D32：关闭列表后知道完整路径的子文件仍可达）
 - 限流（R32）独立桶：raw/download 120 次/分/IP、info/list 60 次/分/IP（超限 42900，为 40400 防探测唯一例外）；D38：DB 直查不加 Redis 缓存
 - MIME（R26，cloud 域自持 pub-mime.ts，不跨域 import site/open/mime.ts）：文本类强制 `text/plain; charset=utf-8`（inline）；html/htm/svg 强制 attachment；图片/音视频（R7 扩展 webm/ogg/wav/m4a）/PDF inline 真实 MIME；白名单外 octet-stream + attachment
+- 落地页文本展示口径（2026-09-10 修订，PRD F2 增强项）：md/markdown 在落地页**客户端 markdown 渲染**（复用公共组件 MarkdownView，html:false 禁 raw HTML，>10 万字符截断；md 内相对链接无站点基准不解析）；其余文本类维持纯文本 pre 展示；raw 端点输出（text/plain）不变，渲染属客户端增强。下载按钮与 noindex 不变
 
 ### 16.3 批量上传队列（前端，D34 后端零改动）
 

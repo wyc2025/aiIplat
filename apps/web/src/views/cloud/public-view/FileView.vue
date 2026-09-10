@@ -45,6 +45,17 @@
             :src="rawUrl"
             class="pv-pdf"
           />
+          <!-- md/markdown：markdown-it 渲染（复用公共组件 MarkdownView，html:false 防 XSS） -->
+          <div
+            v-else-if="branch === 'markdown'"
+            class="pv-md"
+          >
+            <MarkdownView :content="textBody" />
+            <span
+              v-if="textTruncated"
+              class="pv-truncate"
+            >（内容过长，仅展示前 {{ TEXT_TRUNCATE }} 字符，完整内容请下载查看）</span>
+          </div>
           <div
             v-else-if="branch === 'text'"
             class="pv-textwrap"
@@ -86,13 +97,15 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { Download, Document } from '@element-plus/icons-vue'
 import { pubDownloadUrl, pubFileInfo, pubRawUrl, pubSubFileInfo } from '@/api/cloud/public'
+import MarkdownView from '@/components/MarkdownView/index.vue'
 import type { PubFileInfo } from '@/types/api'
 
 /** 类型分支白名单（F2；文本/音视频集合与后端 R26 口径对齐，以 ext 为准） */
 const VIDEO_EXTS = new Set(['mp4', 'webm', 'ogg'])
 const AUDIO_EXTS = new Set(['mp3', 'wav', 'm4a'])
 const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp'])
-const TEXT_EXTS = new Set(['txt', 'md', 'json', 'js', 'ts', 'vue', 'css', 'xml', 'yml', 'yaml', 'csv', 'log'])
+const MD_EXTS = new Set(['md', 'markdown'])
+const TEXT_EXTS = new Set(['txt', 'json', 'js', 'ts', 'vue', 'css', 'xml', 'yml', 'yaml', 'csv', 'log'])
 /** 文本分支截断展示上限（完整内容走下载） */
 const TEXT_TRUNCATE = 100_000
 
@@ -116,6 +129,7 @@ const branch = computed(() => {
   if (AUDIO_EXTS.has(ext)) return 'audio'
   if (IMAGE_EXTS.has(ext)) return 'image'
   if (ext === 'pdf') return 'pdf'
+  if (MD_EXTS.has(ext)) return 'markdown'
   if (TEXT_EXTS.has(ext)) return 'text'
   return 'other'
 })
@@ -170,7 +184,7 @@ onMounted(async () => {
     info.value = isSub.value
       ? await pubSubFileInfo(token.value, subPath.value ?? '')
       : await pubFileInfo(token.value)
-    if (branch.value === 'text') await loadText()
+    if (branch.value === 'text' || branch.value === 'markdown') await loadText()
   } catch {
     // 统一失败态，不区分原因（40400 防探测口径：token 无效/已取消/已删除/被阻断同形）
     failed.value = true
@@ -239,6 +253,15 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+.pv-md {
+  width: 100%;
+  max-height: 70vh;
+  overflow: auto;
+  background: #fff;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  padding: 16px 20px;
 }
 .pv-text {
   width: 100%;
