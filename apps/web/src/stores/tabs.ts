@@ -53,8 +53,9 @@ export const useTabsStore = defineStore('tabs', () => {
     return next ? next.path : null
   }
 
+  /** 关闭其他页签（始终保留首页工作台与目标页签；首页不可关闭，2026-09-11 用户要求） */
   function removeOthers(path: string) {
-    tabs.value = tabs.value.filter((tab) => tab.path === path)
+    tabs.value = tabs.value.filter((tab) => tab.path === path || tab.path === '/dashboard')
   }
 
   function removeAll() {
