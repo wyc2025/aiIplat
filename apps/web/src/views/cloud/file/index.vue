@@ -235,7 +235,7 @@
         <template #empty>
           <el-empty
             v-if="!loadError"
-            description="空空如也，上传点什么吧"
+            description="将文件拖拽到此处，或点击上传"
           />
           <el-result
             v-else
