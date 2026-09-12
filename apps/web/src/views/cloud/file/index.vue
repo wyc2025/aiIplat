@@ -33,6 +33,25 @@
         >
           新建文件夹
         </el-button>
+        <!-- P4d T54：多选批量操作开关 -->
+        <el-button
+          :type="selectionMode ? 'warning' : 'default'"
+          :icon="Select"
+          @click="toggleSelectionMode"
+        >
+          {{ selectionMode ? '退出批量' : '批量操作' }}
+        </el-button>
+        <!-- P4d T53：粘贴（剪切板有内容时可用） -->
+        <el-button
+          v-if="clipHasItems"
+          type="primary"
+          plain
+          :icon="DocumentCopy"
+          :loading="pasting"
+          @click="pasteHere"
+        >
+          粘贴到当前目录（{{ clipItems.length }}）
+        </el-button>
         <el-button
           :icon="Refresh"
           @click="reload"
@@ -49,19 +68,75 @@
       </div>
     </div>
 
-    <!-- 面包屑 -->
+    <!-- 面包屑（P4d T53：同时是拖拽移动目标——拖到任意上级即可移入该目录） -->
     <div class="v-cf-crumbs">
       <el-breadcrumb separator="/">
         <el-breadcrumb-item>
-          <a @click="goDir(0)">根目录</a>
+          <a
+            :class="{ 'is-drop': dragOverKey === 'crumb:0' }"
+            @click="goDir(0)"
+            @dragover.prevent="onCrumbDragOver('crumb:0')"
+            @dragleave="onCrumbDragLeave('crumb:0')"
+            @drop.prevent.stop="onCrumbDrop($event, 0)"
+          >根目录</a>
         </el-breadcrumb-item>
         <el-breadcrumb-item
           v-for="c in crumbs"
           :key="c.id"
         >
-          <a @click="goDir(Number(c.id))">{{ c.name }}</a>
+          <a
+            :class="{ 'is-drop': dragOverKey === `crumb:${c.id}` }"
+            @click="goDir(Number(c.id))"
+            @dragover.prevent="onCrumbDragOver(`crumb:${c.id}`)"
+            @dragleave="onCrumbDragLeave(`crumb:${c.id}`)"
+            @drop.prevent.stop="onCrumbDrop($event, Number(c.id))"
+          >{{ c.name }}</a>
         </el-breadcrumb-item>
       </el-breadcrumb>
+    </div>
+
+    <!-- P4d T54：多选工具栏（批量删除 / 批量移动 / 打包下载） -->
+    <div
+      v-if="selectionMode"
+      class="v-cf-bulk"
+    >
+      <span class="v-cf-bulk-info">已选 {{ selectedRows.length }} 项</span>
+      <el-button
+        link
+        type="primary"
+        @click="toggleAllSelected"
+      >
+        {{ allSelected ? '取消全选' : '全选' }}
+      </el-button>
+      <el-button
+        v-permission="'cloud:file:delete'"
+        link
+        type="danger"
+        :disabled="selectedRows.length === 0"
+        :loading="batchBusy"
+        @click="batchRemove"
+      >
+        批量删除
+      </el-button>
+      <el-button
+        v-permission="'cloud:file:upload'"
+        link
+        type="primary"
+        :disabled="selectedRows.length === 0"
+        @click="batchMoveToClipboard"
+      >
+        批量移动
+      </el-button>
+      <el-button
+        v-permission="'cloud:file:list'"
+        link
+        type="primary"
+        :disabled="selectedRows.length === 0"
+        :loading="packing"
+        @click="batchPackDownload"
+      >
+        打包下载
+      </el-button>
     </div>
 
     <!-- 文件列表（T48 drop zone：拖入文件批量入队上传；文件夹拖拽整批拒绝并提示 D35） -->
@@ -81,8 +156,21 @@
         :page-no="pageNo"
         :page-size="pageSize"
         :pagination="false"
+        :row-class-name="rowClassName"
         @retry="reload"
       >
+        <!-- P4d T54：多选列（自带勾选状态，不依赖 el-table selection，避免穿透封装组件） -->
+        <el-table-column
+          v-if="selectionMode"
+          width="44"
+        >
+          <template #default="{ row }">
+            <el-checkbox
+              :model-value="isSelected(row)"
+              @change="toggleRow(row)"
+            />
+          </template>
+        </el-table-column>
         <el-table-column
           label="名称"
           min-width="240"
@@ -90,7 +178,14 @@
           <template #default="{ row }">
             <span
               class="v-cf-name"
+              :class="{ 'is-cutting': isCutting(row), 'is-drop': dragOverKey === `row:${row.id}` }"
+              :draggable="true"
               @dblclick="onDblClick(row)"
+              @dragstart="onRowDragStart($event, row)"
+              @dragend="onRowDragEnd"
+              @dragover.prevent="onRowDragOver($event, row)"
+              @dragleave="onRowDragLeave($event, row)"
+              @drop.prevent.stop="onRowDrop($event, row)"
             >
               <el-icon v-if="row.isDir"><FolderOpened /></el-icon>
               <el-icon v-else><Document /></el-icon>
@@ -135,7 +230,7 @@
         />
         <el-table-column
           label="操作"
-          width="440"
+          width="560"
           fixed="right"
         >
           <template #default="{ row }">
@@ -185,8 +280,17 @@
             >
               重命名
             </el-button>
+            <!-- P4d T53：剪切（进内存剪切板，切到目标目录后点「粘贴」） -->
             <el-button
-              v-if="!row.isDir"
+              v-permission="'cloud:file:upload'"
+              link
+              type="primary"
+              @click="cutRows([row])"
+            >
+              剪切
+            </el-button>
+            <!-- P4d D48：文件夹亦可分享（动态子树） -->
+            <el-button
               v-permission="'cloud:share:create'"
               link
               type="primary"
@@ -194,33 +298,55 @@
             >
               分享管理
             </el-button>
-            <!-- P4c F1：设为公开（生成公开链接）/ 复制公开链接 / 取消公开（token 轮换） -->
-            <el-button
-              v-if="row.isPublic !== 1 || !row.publicToken"
-              v-permission="'cloud:file:public'"
-              link
-              type="primary"
-              @click="onSetPublic(row)"
-            >
-              设为公开
-            </el-button>
-            <template v-else>
+            <!-- P4d T57/D49：公开语义分流（站点子树内=设为私有/取消私有；站点外=token 公开；站点根恒公开无按钮） -->
+            <template v-if="row.inSite">
               <el-button
-                v-permission="'cloud:file:public'"
-                link
-                type="primary"
-                @click="onCopyPublicLink(row)"
-              >
-                复制公开链接
-              </el-button>
-              <el-button
+                v-if="!row.isSiteRoot && row.isPublic !== 2"
                 v-permission="'cloud:file:public'"
                 link
                 type="warning"
-                @click="onCancelPublic(row)"
+                @click="onSetPrivate(row)"
               >
-                取消公开
+                设为私有
               </el-button>
+              <el-button
+                v-if="!row.isSiteRoot && row.isPublic === 2"
+                v-permission="'cloud:file:public'"
+                link
+                type="primary"
+                @click="onCancelPrivate(row)"
+              >
+                取消私有
+              </el-button>
+            </template>
+            <template v-else>
+              <el-button
+                v-if="row.isPublic !== 1 || !row.publicToken"
+                v-permission="'cloud:file:public'"
+                link
+                type="primary"
+                @click="onSetPublic(row)"
+              >
+                设为公开
+              </el-button>
+              <template v-else>
+                <el-button
+                  v-permission="'cloud:file:public'"
+                  link
+                  type="primary"
+                  @click="onCopyPublicLink(row)"
+                >
+                  复制公开链接
+                </el-button>
+                <el-button
+                  v-permission="'cloud:file:public'"
+                  link
+                  type="warning"
+                  @click="onCancelPublic(row)"
+                >
+                  取消公开
+                </el-button>
+              </template>
             </template>
             <el-button
               v-permission="'cloud:file:delete'"
@@ -328,7 +454,7 @@
       <div v-loading="shareLoading">
         <template v-if="shareMode === 'create'">
           <p class="v-cf-tip">
-            确认后将生成公开链接，访客凭链接免登录下载该文件。
+            确认后将生成分享链接，访客凭链接免登录访问该{{ shareFile?.isDir ? '文件夹' : '文件' }}（可设 4~8 位提取码）。
           </p>
           <div class="v-cf-share-row">
             <span class="v-cf-share-label">有效期：</span>
@@ -347,6 +473,17 @@
               </el-radio>
             </el-radio-group>
           </div>
+          <!-- P4d T55：提取码（可选，4~8 位；留空 = 无密码） -->
+          <div class="v-cf-share-row">
+            <span class="v-cf-share-label">提取码：</span>
+            <el-input
+              v-model="sharePassword"
+              placeholder="4~8 位，留空则无需提取码"
+              maxlength="8"
+              show-password
+              style="width: 240px"
+            />
+          </div>
         </template>
         <template v-else>
           <el-input
@@ -360,7 +497,27 @@
             </template>
           </el-input>
           <p class="v-cf-tip">
-            有效期至：{{ shareExpireText }}，访客凭链接免登录下载。
+            有效期至：{{ shareExpireText }}，访客凭链接免登录访问。
+          </p>
+          <!-- P4d T55：提取码管理（当前：已设置/未设置；留空保存 = 移除） -->
+          <div class="v-cf-share-row">
+            <span class="v-cf-share-label">提取码：</span>
+            <el-input
+              v-model="sharePasswordInput"
+              placeholder="4~8 位；留空保存 = 移除提取码"
+              maxlength="8"
+              show-password
+              style="width: 240px"
+            />
+            <el-button
+              :loading="sharePwdSubmitting"
+              @click="submitSharePassword"
+            >
+              保存
+            </el-button>
+          </div>
+          <p class="v-cf-tip">
+            当前：{{ shareHasPassword ? '已设置提取码' : '无提取码' }}（修改后已通过验证的访客需重新输入）
           </p>
         </template>
       </div>
@@ -537,6 +694,31 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- P4d T54：批量操作失败汇总面板 -->
+    <el-dialog
+      v-model="batchResultVisible"
+      title="批量操作结果"
+      width="480px"
+    >
+      <p>以下 {{ batchFailures.length }} 项未完成：</p>
+      <ul class="v-cf-fail-list">
+        <li
+          v-for="f in batchFailures"
+          :key="f.name"
+        >
+          {{ f.name }}：{{ f.reason }}
+        </li>
+      </ul>
+      <template #footer>
+        <el-button
+          type="primary"
+          @click="batchResultVisible = false"
+        >
+          知道了
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -545,11 +727,12 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useClipboard } from '@vueuse/core'
-import { Upload, FolderAdd, Refresh, FolderOpened, Document } from '@element-plus/icons-vue'
+import { Upload, FolderAdd, Refresh, FolderOpened, Document, Select, DocumentCopy } from '@element-plus/icons-vue'
 import ProTable from '@/components/ProTable/index.vue'
 import FileEditorDialog from '../components/FileEditorDialog.vue'
 import UploadQueue from './UploadQueue.vue'
 import { useUploadQueue } from './useUploadQueue'
+import { useMoveClipboard } from './useMoveClipboard'
 import { formatSize, formatTime } from '@/utils/format'
 import {
   listFiles,
@@ -557,13 +740,16 @@ import {
   mkdir as apiMkdir,
   renameFile,
   removeFile,
+  moveFile,
+  packDownloadBlob,
   createPublicLink,
   cancelPublicLink,
+  setFilePublic,
   unzipFile,
   previewFileBlob,
   downloadFileBlob,
 } from '@/api/cloud/file'
-import { createShare, stopShare, extendShare } from '@/api/cloud/share'
+import { createShare, stopShare, extendShare, updateSharePassword } from '@/api/cloud/share'
 import type { CloudFile, BreadcrumbItem } from '@/types/api'
 
 const route = useRoute()
@@ -587,6 +773,32 @@ const currentDir = ref(0)
 
 const fileInput = ref<HTMLInputElement>()
 const submitting = ref(false)
+
+// ==================== P4d T53/T54：剪切板 + 多选批量状态 ====================
+/** 内部移动的自定义 MIME（R40：与外部文件拖入的 'Files' 区分） */
+const MOVE_MIME = 'application/x-iplat-move'
+
+const {
+  items: clipItems,
+  hasItems: clipHasItems,
+  idSet: clipIdSet,
+  cut: clipCut,
+  removeByIds: clipRemove,
+} = useMoveClipboard()
+
+const selectionMode = ref(false)
+const selectedIds = ref<string[]>([])
+const selectedRows = computed(() => list.value.filter((r) => selectedIds.value.includes(r.id)))
+const allSelected = computed(() => list.value.length > 0 && selectedIds.value.length === list.value.length)
+const batchBusy = ref(false)
+const packing = ref(false)
+const pasting = ref(false)
+
+const dragOverKey = ref('')
+const moveDragRow = ref<CloudFile | null>(null)
+
+const batchResultVisible = ref(false)
+const batchFailures = ref<Array<{ name: string; reason: string }>>([])
 
 // ==================== 上传队列（P4c T48：并发 3、单失败不阻塞、汇总面板） ====================
 const {
@@ -659,6 +871,11 @@ const shareId = ref('')
 const shareDays = ref(7)
 const shareLoading = ref(false)
 const shareSubmitting = ref(false)
+// P4d T55：提取码（创建时可选；详情态可修改/移除）
+const sharePassword = ref('')
+const sharePasswordInput = ref('')
+const shareHasPassword = ref(false)
+const sharePwdSubmitting = ref(false)
 const extendVisible = ref(false)
 const extendDays = ref(7)
 const extendSubmitting = ref(false)
@@ -698,6 +915,7 @@ async function loadDir(dir: number) {
     const filesRes = await listFiles(dir)
     list.value = filesRes.list ?? []
     total.value = list.value.length
+    selectedIds.value = []
     quota.value = Number(filesRes.quota)
     used.value = Number(filesRes.used)
     crumbs.value = dir === 0 ? [] : await filePath(dir)
@@ -956,6 +1174,8 @@ async function copyPublicLink() {
 function openShare(row: CloudFile) {
   shareFile.value = row
   shareDays.value = 7
+  sharePassword.value = ''
+  sharePasswordInput.value = ''
   if (row.shared) {
     // 已分享：幂等取现存有效链接展示（后端 findActiveShare 保证不重复建行）
     shareMode.value = 'detail'
@@ -966,6 +1186,7 @@ function openShare(row: CloudFile) {
         shareId.value = res.id
         shareUrl.value = `${window.location.origin}${res.url}`
         shareExpireText.value = res.expireAt ? new Date(res.expireAt).toLocaleString() : '永久'
+        shareHasPassword.value = res.hasPassword
       })
       .catch(() => {
         shareVisible.value = false
@@ -974,24 +1195,31 @@ function openShare(row: CloudFile) {
         shareLoading.value = false
       })
   } else {
-    // 未分享（或已停止/已过期）：先选有效期，确定后才真正创建分享
+    // 未分享（或已停止/已过期）：先选有效期（可填提取码），确定后才真正创建分享
     shareMode.value = 'create'
     shareId.value = ''
     shareUrl.value = ''
     shareExpireText.value = ''
+    shareHasPassword.value = false
     shareVisible.value = true
   }
 }
 
-/** 确认分享：此时才调创建接口 */
+/** 确认分享：此时才调创建接口（提取码 4~8 位，留空 = 无密码） */
 async function submitShare() {
   if (!shareFile.value) return
+  const password = sharePassword.value.trim()
+  if (password && (password.length < 4 || password.length > 8)) {
+    ElMessage.warning('提取码需为 4~8 位')
+    return
+  }
   shareSubmitting.value = true
   try {
-    const res = await createShare(Number(shareFile.value.id), shareDays.value)
+    const res = await createShare(Number(shareFile.value.id), shareDays.value, password || undefined)
     shareId.value = res.id
     shareUrl.value = `${window.location.origin}${res.url}`
     shareExpireText.value = res.expireAt ? new Date(res.expireAt).toLocaleString() : '永久'
+    shareHasPassword.value = res.hasPassword
     shareMode.value = 'detail'
     ElMessage.success('分享成功')
     reload()
@@ -999,6 +1227,27 @@ async function submitShare() {
     // 拦截器提示
   } finally {
     shareSubmitting.value = false
+  }
+}
+
+/** 保存提取码（P4d T55：留空 = 移除；修改后旧访问凭证失效） */
+async function submitSharePassword() {
+  if (!shareId.value) return
+  const value = sharePasswordInput.value.trim()
+  if (value && (value.length < 4 || value.length > 8)) {
+    ElMessage.warning('提取码需为 4~8 位')
+    return
+  }
+  sharePwdSubmitting.value = true
+  try {
+    const res = await updateSharePassword(Number(shareId.value), value || null)
+    shareHasPassword.value = res.hasPassword
+    sharePasswordInput.value = ''
+    ElMessage.success(res.hasPassword ? '提取码已更新' : '提取码已移除')
+  } catch {
+    // 拦截器提示
+  } finally {
+    sharePwdSubmitting.value = false
   }
 }
 
@@ -1056,6 +1305,270 @@ async function submitExtendShare() {
   }
 }
 
+// ==================== P4d T53：剪切 / 粘贴 / 拖拽移动 ====================
+
+function isCutting(row: CloudFile): boolean {
+  return clipIdSet.value.has(row.id)
+}
+
+/** 剪切中的行整行半透明（PRD F1：剪切后列表行半透明显示） */
+function rowClassName({ row }: { row: CloudFile }): string {
+  return isCutting(row) ? 'is-cutting-row' : ''
+}
+
+/** 剪切（单行与批量共用）：入剪切板 → 进入目标目录 → 点「粘贴」 */
+function cutRows(rows: CloudFile[]): void {
+  clipCut(rows.map((r) => ({ id: r.id, name: r.name, isDir: r.isDir })))
+  ElMessage.success(`已剪切 ${rows.length} 项，请进入目标目录后点击「粘贴」`)
+}
+
+/** 拖拽内外区分（R40）：dataTransfer.types 含自定义 MIME = 内部移动；含 Files = 外部上传（走 T48 队列） */
+function isInternalDrag(e: DragEvent): boolean {
+  return Array.from(e.dataTransfer?.types ?? []).includes(MOVE_MIME)
+}
+
+function onRowDragStart(e: DragEvent, row: CloudFile): void {
+  moveDragRow.value = row
+  e.dataTransfer?.setData(MOVE_MIME, row.id)
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+}
+
+function onRowDragEnd(): void {
+  moveDragRow.value = null
+  dragOverKey.value = ''
+}
+
+/** 文件夹行悬停高亮（移动样式，与上传的列表区整框高亮区分） */
+function onRowDragOver(e: DragEvent, row: CloudFile): void {
+  if (!isInternalDrag(e) || !row.isDir) return
+  dragOverKey.value = `row:${row.id}`
+}
+
+function onRowDragLeave(_e: DragEvent, row: CloudFile): void {
+  if (dragOverKey.value === `row:${row.id}`) dragOverKey.value = ''
+}
+
+async function onRowDrop(e: DragEvent, row: CloudFile): Promise<void> {
+  if (!isInternalDrag(e) || !row.isDir) return
+  const source = moveDragRow.value
+  dragOverKey.value = ''
+  moveDragRow.value = null
+  if (!source || source.id === row.id) return
+  await doMove([source], Number(row.id))
+}
+
+/** 面包屑悬停高亮（拖到任意上级即可移入） */
+function onCrumbDragOver(key: string): void {
+  if (moveDragRow.value) dragOverKey.value = key
+}
+
+function onCrumbDragLeave(key: string): void {
+  if (dragOverKey.value === key) dragOverKey.value = ''
+}
+
+async function onCrumbDrop(e: DragEvent, id: number): Promise<void> {
+  if (!isInternalDrag(e)) return
+  const source = moveDragRow.value
+  dragOverKey.value = ''
+  moveDragRow.value = null
+  if (!source) return
+  await doMove([source], id)
+}
+
+/**
+ * 移动（单条/多条共用，D42 队列逐条）：
+ * 先试一批（不带 confirmPublic）；命中公开目标（R39 targetPublic）的项**整批一次确认**后带 confirmPublic 重发。
+ */
+async function doMove(targets: Array<{ id: string }>, targetParentId: number): Promise<void> {
+  if (targets.length === 0) return
+  pasting.value = true
+  try {
+    const pending: Array<{ id: string }> = []
+    let moved = 0
+    for (const target of targets) {
+      const res = await moveFile(Number(target.id), targetParentId)
+      if (res.targetPublic) pending.push(target)
+      else moved++
+    }
+    if (pending.length > 0) {
+      try {
+        await ElMessageBox.confirm(
+          '目标目录处于公开状态，移入后内容将对外可见（可被公开访问）。确认继续？',
+          '公开继承警告',
+          { type: 'warning', confirmButtonText: '仍然移入', cancelButtonText: '取消' },
+        )
+      } catch {
+        // 用户取消：已移动的保留，未执行项留在剪切板便于改投他处
+        clipRemove(targets.filter((t) => !pending.includes(t)).map((t) => t.id))
+        if (moved > 0) reload()
+        return
+      }
+      for (const target of pending) {
+        await moveFile(Number(target.id), targetParentId, true)
+        moved++
+      }
+    }
+    clipRemove(targets.map((t) => t.id))
+    if (moved > 0) {
+      ElMessage.success(`已移动 ${moved} 项`)
+      reload()
+    }
+  } catch {
+    // 错误已由拦截器提示；失败项保留在剪切板
+  } finally {
+    pasting.value = false
+  }
+}
+
+/** 粘贴到当前目录 */
+async function pasteHere(): Promise<void> {
+  await doMove(clipItems.value, currentDir.value)
+}
+
+// ==================== P4d T54：多选 / 批量操作 ====================
+
+function isSelected(row: CloudFile): boolean {
+  return selectedIds.value.includes(row.id)
+}
+
+function toggleRow(row: CloudFile): void {
+  selectedIds.value = isSelected(row)
+    ? selectedIds.value.filter((id) => id !== row.id)
+    : [...selectedIds.value, row.id]
+}
+
+function toggleAllSelected(): void {
+  selectedIds.value = allSelected.value ? [] : list.value.map((r) => r.id)
+}
+
+function toggleSelectionMode(): void {
+  selectionMode.value = !selectionMode.value
+  if (!selectionMode.value) selectedIds.value = []
+}
+
+/** 批量移动：复用剪切粘贴链路（批量入剪切板） */
+function batchMoveToClipboard(): void {
+  if (selectedRows.value.length === 0) return
+  cutRows(selectedRows.value)
+  selectedIds.value = []
+}
+
+/** 批量删除：前端队列（并发 3，单失败独立记录）→ 汇总面板 */
+async function batchRemove(): Promise<void> {
+  const rows = selectedRows.value
+  if (rows.length === 0) return
+  try {
+    await ElMessageBox.confirm(`确认删除选中的 ${rows.length} 项？将移入回收站`, '提示', {
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  batchBusy.value = true
+  const failures: Array<{ name: string; reason: string }> = []
+  let ok = 0
+  await runWithConcurrency(rows, 3, async (row) => {
+    try {
+      await removeFile(Number(row.id))
+      ok++
+    } catch (error) {
+      failures.push({ name: row.name, reason: (error as Error).message || '删除失败' })
+    }
+  })
+  batchBusy.value = false
+  selectedIds.value = []
+  ElMessage.success(`已删除 ${ok} 项${failures.length > 0 ? `，失败 ${failures.length} 项` : ''}`)
+  reload()
+  if (failures.length > 0) {
+    batchFailures.value = failures
+    batchResultVisible.value = true
+  }
+}
+
+/** 打包下载（P4d T54/D45）：流式 zip，浏览器下载 */
+async function batchPackDownload(): Promise<void> {
+  const rows = selectedRows.value
+  if (rows.length === 0) return
+  packing.value = true
+  try {
+    const blob = await packDownloadBlob(rows.map((r) => r.id))
+    saveBlob(blob, buildPackFilename())
+    ElMessage.success('打包完成，开始下载')
+  } catch (error) {
+    ElMessage.error((error as Error).message || '打包下载失败')
+  } finally {
+    packing.value = false
+  }
+}
+
+/** 并发受限的队列执行（D42：批量操作前端队列，并发 3） */
+async function runWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  let cursor = 0
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++
+      await worker(items[index])
+    }
+  })
+  await Promise.all(runners)
+}
+
+function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  // 延后回收：下载启动是异步的，紧接 revoke 有取消下载的风险（浏览器差异）
+  window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
+}
+
+/** 包名与后端同格式：iplat-pack-yyyyMMdd-HHmm.zip */
+function buildPackFilename(): string {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `iplat-pack-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.zip`
+}
+
+// ==================== P4d T57：公开语义分流（D49/R45） ====================
+
+/** 站点子树内：设为私有（is_public → 2 显式阻断，R45） */
+async function onSetPrivate(row: CloudFile): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      `确认将「${row.name}」设为私有？其内容将不再对外公开。`,
+      '设为私有',
+      { type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  try {
+    await setFilePublic(Number(row.id), false)
+    ElMessage.success('已设为私有')
+    reload()
+  } catch {
+    // 拦截器提示
+  }
+}
+
+/** 站点子树内：取消私有（is_public → 0 继承，随站点根公开；复用取消公开接口的归 0 语义） */
+async function onCancelPrivate(row: CloudFile): Promise<void> {
+  try {
+    await cancelPublicLink(Number(row.id))
+    ElMessage.success('已取消私有（恢复继承站点公开状态）')
+    reload()
+  } catch {
+    // 拦截器提示
+  }
+}
+
 // 路由 query 变化（浏览器前进后退）同步
 watch(
   () => route.query.dir,
@@ -1070,6 +1583,43 @@ watch(
 </script>
 
 <style scoped>
+/* P4d T53：剪切中的行半透明（PRD F1） */
+:deep(.el-table .is-cutting-row) {
+  opacity: 0.5;
+}
+/* 移动拖拽目标高亮（文件夹行 / 面包屑项；与上传的列表区整框高亮样式区分 R40） */
+.v-cf-name.is-drop,
+.v-cf-crumbs a.is-drop {
+  background: var(--el-color-primary-light-8);
+  border-radius: 3px;
+  outline: 1px dashed var(--el-color-primary);
+  outline-offset: 1px;
+}
+/* P4d T54：多选工具栏 */
+.v-cf-bulk {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  background: var(--el-color-warning-light-9);
+  border: 1px solid var(--el-color-warning-light-7);
+  border-radius: 4px;
+  font-size: 13px;
+}
+.v-cf-bulk-info {
+  color: #606266;
+}
+/* 批量操作失败汇总 */
+.v-cf-fail-list {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  color: var(--el-color-danger);
+  font-size: 13px;
+  max-height: 240px;
+  overflow: auto;
+}
+
 .v-cf-share-row {
   display: flex;
   align-items: center;

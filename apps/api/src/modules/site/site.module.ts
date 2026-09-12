@@ -3,6 +3,7 @@ import { SiteArticleModule } from './article/article.module'
 import { SiteColumnModule } from './column/column.module'
 import { SiteCommentModule } from './comment/comment.module'
 import { SiteFacadeModule } from './facade/site-facade.module'
+import { SiteRootModule } from './facade/site-root.module'
 import { SiteManageModule } from './manage/manage.module'
 import { SiteOpenModule } from './open/open.module'
 import { SiteTagModule } from './tag/tag.module'
@@ -17,6 +18,7 @@ import { SiteTemplateModule } from './template/template.module'
 @Module({
   imports: [
     SiteFacadeModule,
+    SiteRootModule,
     SiteOpenModule,
     SiteManageModule,
     SiteColumnModule,
@@ -25,6 +27,6 @@ import { SiteTemplateModule } from './template/template.module'
     SiteCommentModule,
     SiteTemplateModule,
   ],
-  exports: [SiteFacadeModule],
+  exports: [SiteFacadeModule, SiteRootModule],
 })
 export class SiteModule {}

@@ -162,7 +162,12 @@ export class OpenStaticController {
       res.set('Content-Security-Policy', CSP_SANDBOX)
     }
     if (mime.attachment) {
-      res.set('Content-Disposition', `attachment; filename="${file.name}"`)
+      // filename 走 ASCII 兜底 + filename*（UTF-8 原名）：中文名直接进 quoted-string 会让 Node 抛
+      // ERR_INVALID_CHAR（500 → 下载变白页，2026-09-12 与云盘 pack 同批修复），口径同 cloud 域四处单文件下载
+      res.set(
+        'Content-Disposition',
+        `attachment; filename="${this.asciiFallback(file.name)}"; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+      )
     }
 
     // 9. socket 空闲超时（res.setTimeout 仅针对本响应：无数据流动 30s 触发；响应 finish 自动清除，
@@ -241,6 +246,12 @@ export class OpenStaticController {
       throw new BusinessException(ErrorCode.NotFound, '资源不存在')
     }
     return { found: false }
+  }
+
+  /** filename 的 ASCII 兜底（quoted-string 内的非 ASCII/引号/反斜杠一律替换，照 T27 口径） */
+  private asciiFallback(name: string): string {
+    const ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_')
+    return ascii || 'file'
   }
 
   /** 解析单区间 Range（bytes=start-end / start- / -suffix），与 P3 transfer 口径一致 */

@@ -7,9 +7,13 @@ import { registerDynamicRoutes } from './dynamic'
 
 const WHITE_LIST = ['/login', '/404']
 
-/** 免登录公开页（云盘访客分享页 /share/:token 与公开落地页 /view/*，凭 token 访问，不要求登录态） */
+/**
+ * 免登录公开页（云盘访客分享页与公开落地页，凭 token 访问，不要求登录态）：
+ * - /share/*：访客分享页（P4d 起含子路由 /share/:token/file 单文件预览）
+ * - /view/*：公开落地页（P4c）
+ */
 function isPublicRoute(to: { path: string; name: unknown | symbol }): boolean {
-  return WHITE_LIST.includes(to.path) || to.name === 'share-visitor' || to.path.startsWith('/view/')
+  return WHITE_LIST.includes(to.path) || to.path.startsWith('/share/') || to.path.startsWith('/view/')
 }
 
 /**

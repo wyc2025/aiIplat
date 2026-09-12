@@ -17,7 +17,7 @@
           {{ info.name }}
         </h3>
         <p class="pv-meta">
-          {{ formatSize(info.size) }} · {{ formatTime(info.updatedAt) }}
+          {{ formatSize(info.size) }}<span v-if="info.updatedAt"> · {{ formatTime(info.updatedAt) }}</span>
         </p>
 
         <!-- 内容区：按类型分支（D33 瘦版：video/audio 原生 controls，img 直显，PDF 内嵌，文本预格式化，其他图标） -->
@@ -93,12 +93,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Download, Document } from '@element-plus/icons-vue'
-import { pubDownloadUrl, pubFileInfo, pubRawUrl, pubSubFileInfo } from '@/api/cloud/public'
 import MarkdownView from '@/components/MarkdownView/index.vue'
 import type { PubFileInfo } from '@/types/api'
+import { createPublicSource, type PublicSource } from './usePublicSource'
 
 /** 类型分支白名单（F2；文本/音视频集合与后端 R26 口径对齐，以 ext 为准） */
 const VIDEO_EXTS = new Set(['mp4', 'webm', 'ogg'])
@@ -108,19 +108,36 @@ const MD_EXTS = new Set(['md', 'markdown'])
 const TEXT_EXTS = new Set(['txt', 'json', 'js', 'ts', 'vue', 'css', 'xml', 'yml', 'yaml', 'csv', 'log'])
 /** 文本分支截断展示上限（完整内容走下载） */
 const TEXT_TRUNCATE = 100_000
+/** 需提取码（P4d 30017：分享页据此回退到密码门禁） */
+const CODE_NEED_PASSWORD = 30017
+
+/**
+ * 数据源适配（D46）：公开页（pub）由路由 token 自建；分享页（share）由父级传入自带 sid 的 source。
+ * path 缺省：公开落地页直接文件；文件夹内子文件页从 query.path 取。
+ */
+const props = defineProps<{ source?: PublicSource; path?: string }>()
+const emit = defineEmits<{ (e: 'need-password'): void }>()
 
 const route = useRoute()
+const source = computed<PublicSource>(
+  () =>
+    props.source ??
+    createPublicSource({ kind: 'pub', token: route.params.token as string }),
+)
+/** 子项寻址路径（分享页由父级传入；公开落地页取 route.query.path） */
+const targetPath = computed<string | undefined>(() => {
+  if (props.path !== undefined) return props.path
+  if (props.source) return undefined
+  return route.name === 'public-subfile-view' ? ((route.query.path as string) ?? '') : undefined
+})
+
 const loading = ref(true)
 const failed = ref(false)
 const info = ref<PubFileInfo | null>(null)
 const textBody = ref('')
 const textTruncated = ref(false)
 
-/** 寻址模式：/view/d/{token}/file?path= → 子文件寻址；/view/f/{token} → 直链 */
-const isSub = computed(() => route.name === 'public-subfile-view')
-const token = computed(() => route.params.token as string)
-const subPath = computed(() => (isSub.value ? ((route.query.path as string) ?? '') : undefined))
-const rawUrl = computed(() => pubRawUrl(token.value, subPath.value))
+const rawUrl = computed(() => source.value.rawUrl(targetPath.value))
 
 /** 渲染分支（ext 小写；空 ext 走 other） */
 const branch = computed(() => {
@@ -149,7 +166,7 @@ function formatTime(iso: string): string {
 
 function onDownload() {
   const a = document.createElement('a')
-  a.href = pubDownloadUrl(token.value, subPath.value)
+  a.href = source.value.downloadUrl(targetPath.value)
   a.download = info.value?.name ?? ''
   document.body.appendChild(a)
   a.click()
@@ -178,20 +195,34 @@ function ensureNoindex(): void {
   document.head.appendChild(meta)
 }
 
-onMounted(async () => {
-  ensureNoindex()
+/** 取元信息（+ 文本内容）；同路由换子项（targetPath 变化）时复用 */
+async function load(): Promise<void> {
+  loading.value = true
+  failed.value = false
+  textBody.value = ''
+  textTruncated.value = false
   try {
-    info.value = isSub.value
-      ? await pubSubFileInfo(token.value, subPath.value ?? '')
-      : await pubFileInfo(token.value)
+    info.value = await source.value.fileInfo(targetPath.value)
     if (branch.value === 'text' || branch.value === 'markdown') await loadText()
-  } catch {
-    // 统一失败态，不区分原因（40400 防探测口径：token 无效/已取消/已删除/被阻断同形）
-    failed.value = true
+  } catch (error) {
+    // 分享页：未过密码门/凭证过期 → 交由父级回退到门禁页（P4d 30017）
+    if ((error as { code?: number }).code === CODE_NEED_PASSWORD) {
+      emit('need-password')
+    } else {
+      // 统一失败态，不区分原因（40400 防探测口径）
+      failed.value = true
+    }
   } finally {
     loading.value = false
   }
+}
+
+onMounted(() => {
+  ensureNoindex()
+  load()
 })
+// 子项寻址变化（同一 FileView 实例换文件）重载
+watch(targetPath, load)
 </script>
 
 <style scoped>

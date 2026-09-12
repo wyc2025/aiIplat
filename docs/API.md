@@ -2,7 +2,7 @@
 
 > 本文档是前后端接口的唯一事实来源。与代码冲突时以本文档为准并修正代码。
 > 通用约定（统一响应、错误码、分页、bigint→string、时间格式）见 ARCHITECTURE.md 4.3 节，此处不再重复。
-> 当前覆盖：P2a（ai 域 + system 域在线用户增量）、P2b（AI 工具调用）、P3（cloud 域 + 头像上传）、P4a（site 域 + 开放层 + cloud 公开机制增量）、P4b（AI 站点工具 + 在线编辑 + 模板库）、P4c（云盘公开链接 + /api/pub/ 公开访问端点 + 在线解压，T46~~T49，见 §8；批量上传为纯前端，后端零改动）。system 域既有接口以代码与 Swagger 为准。
+> 当前覆盖：P2a（ai 域 + system 域在线用户增量）、P2b（AI 工具调用）、P3（cloud 域 + 头像上传）、P4a（site 域 + 开放层 + cloud 公开机制增量）、P4b（AI 站点工具 + 在线编辑 + 模板库）、P4c（云盘公开链接 + /api/pub/ 公开访问端点 + 在线解压，T46~~T49，见 §8；批量上传为纯前端，后端零改动）、**P4d（移动/打包下载/分享升级/公开语义分流，T52~~T56，见 §9；剪切粘贴、多选批量与语义分流为前端能力，后端仅 §9 所列增量）**。system 域既有接口以代码与 Swagger 为准。
 
 ## ai 域错误码（20xxx）
 
@@ -209,7 +209,7 @@ Content-Type: application/json　Accept: text/event-stream
 | 30006 | 超出目录限制（深度>10 / 单目录>500 项 / 名称>64 字符） | 提示具体限制           |
 | 30007 | 回收站记录不存在                                       | 刷新回收站列表         |
 | 30008 | 分享链接无效（不存在/已停止/已过期/文件已删/未过审）   | 访客页提示失效         |
-| 30009 | 文件夹暂不支持创建公开链接                             | 提示                   |
+| 30009 | 文件夹暂不支持创建分享链接                             | 提示                   |
 | 30010 | 文件未通过内容审核，禁止分享                           | 提示（开关开启后生效） |
 | 30011 | 用户仍有云盘文件，禁止删除（R10 删用户预检）           | 提示                   |
 
@@ -247,7 +247,9 @@ Content-Type: application/json　Accept: text/event-stream
 | DELETE | /api/cloud/recycle/:id     | cloud:recycle:delete  | 彻底删除：递归整棵子树 + 物理删文件 + 连带删分享 + used 回扣，挂 @OperationLog                                                    |
 | DELETE | /api/cloud/recycle/clear   | cloud:recycle:delete  | 清空回收站（全部顶层被删项同上处理），挂 @OperationLog                                                                            |
 
-### 5.5 公开链接
+### 5.5 分享链接
+
+> 术语口径（W2 统一）：P3 语境「分享链接」= cloud_share 表（有效期 + 计次 + 可停止）；P4c 语境「公开链接」= cloud_file.public_token（长期 + 文件自身属性）。二者是两个独立实体。
 
 管理侧（登录）：
 
@@ -435,11 +437,9 @@ Content-Type: application/json　Accept: text/event-stream
 
 开放静态资源 Cache-Control 由「html no-cache、白名单 public max-age=3600」**统一改为 `no-cache`**（ETag/304 协商保留不变）。理由：AI/编辑器高频迭代要求改完立即可见；未变资源仅 304 头部零字节体，个人站点量级成本可接受。CSP sandbox / nosniff / CORS / CORP 均不变。
 
-## 8. P4c 增补：云盘公开链接 + 公开访问端点（T46 已落地）
+## 8. P4c：云盘公开链接 + 公开访问端点 + 在线解压
 
-> 本节随任务增量补入；解压接口（T49）与前端落地页（T47，非 HTTP 契约）落地后补入，T50 全量复核并与 docs/P4C/API-P4C-增补.md 收敛。
-
-### 8.1 错误码新增（T46）
+### 8.1 错误码新增
 
 | code  | 含义                   | 前端处理       |
 | ----- | ---------------------- | -------------- |
@@ -458,7 +458,7 @@ Content-Type: application/json　Accept: text/event-stream
 > 既有 `POST /api/cloud/file/set-public`（P4a 语义：isPublic 二元入参、0→显式阻断）**保留不动**，站点公开目录机制依赖。
 > 软删轮换（D30）：带 token 的行进回收站时 token 同步置空（isPublic 不动，保护站点根锚点）——旧链接 40400，还原后仍 40400，重新公开得新 token。
 
-### 8.3 公开访问端点（免登录，前缀 /api/pub，@Public；T46）
+### 8.3 公开访问端点（免登录，前缀 /api/pub，@Public）
 
 统一纪律：独立限流桶（raw/download **静态 120 次/分/IP**，info/list **数据 60 次/分/IP**，超限 42900——限流是 40400 防探测口径的唯一例外，与站点开放层一致）；资源类失败统一 **40400**（HTTP 200 + 统一体 code，不区分原因防探测）；`Cache-Control: no-cache` + ETag（304）；raw/download 为流式响应（@SkipTransform，不走统一响应体），支持 Range（bytes=start-end / start- / -N → 206 + Content-Range；语法非法回 200 全量；越界 416）。
 
@@ -475,10 +475,107 @@ Content-Type: application/json　Accept: text/event-stream
 > **判定链**（每端点统一）：token 查 cloud_file（`deletedAt null` 且 `is_public=1`）→ 祖先上溯（任一祖先 `is_public=2`，或祖先行缺失/已删 → 40400，R25）→ path 逐段下行（任一段不存在或 `is_public=2`（阻断不继承）→ 40400；有界 ≤10 层，拒 `..`/反斜杠/非法编码）。allow_listing 校验仅作用于 list 端点（关闭列表后知道完整路径的子文件仍可达，D32）。
 > 前缀 `/api/pub/` 与 `/api/open/` 并列（D31 零歧义）；main.ts 开放层 CORP 改写与 CORS 反射已同步覆盖 `/api/pub`。
 
-### 8.4 在线解压（T49，cloud:file:upload 权限 + @OperationLog('云盘','在线解压')）
+### 8.4 在线解压（cloud:file:upload 权限 + @OperationLog('云盘','在线解压')）
 
 | 方法 | 路径                      | 说明                                                                                                                                                                                                                                                                                                                           |
 | ---- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | POST | /api/cloud/file/:id/unzip | 在线解压（无请求体，同步执行，前端 timeout 0）。校验：目标为 zip 且 size ≤ CLOUD_MAX_FILE_SIZE（30014）→ 包名文件夹深度/父目录子项数（30006）→ 逐条解压（Zip Slip 30016 / 条目数与累计总大小 30015 / 配额 30003）。响应 `{ folderId, folderName, fileCount, totalSize }`。解压目标 = 同目录下包名文件夹（R31，同名自动 "(1)"） |
 
 > 安全四件套（R29）与 tmp 中转事务（D36/R30）见 ARCHITECTURE.md §16.4。批量拖拽上传（T48）为纯前端能力（并发 3 调既有单文件上传接口，D34），无新接口。
+
+## 9. P4d：移动 + 打包下载 + 分享升级 + 公开语义分流
+
+> 移动的剪切/粘贴/拖拽、多选批量（批量删除/批量移动）、公开语义分流（按钮组按 `inSite`）均为**前端能力**，后端只提供本节所列接口与字段。
+> 章节号接 §8；增补文档 `docs/P4D/API-P4D-增补.md` 已并入（保留为历史参考，冲突以本文为准）。
+
+### 9.1 错误码新增（30xxx 段，续接 30016 之后）
+
+| code  | 含义                                                         | 前端处理     |
+| ----- | ------------------------------------------------------------ | ------------ |
+| 30017 | 该分享需要提取码（未验证或凭证过期）                         | 跳密码门禁页 |
+| 30018 | 提取码错误（含连续 5 次锁 10 分钟，message 带剩余次数/秒数） | 门禁页提示   |
+| 30019 | 非法移动目标（移入自身子树 / 站点根 / 回收站）               | 提示         |
+
+### 9.2 移动（登录态，`cloud:file:upload` + @OperationLog('云盘','移动')）
+
+`POST /api/cloud/file/:id/move`
+
+请求：
+
+```json
+{ "targetParentId": "1234567890", "confirmPublic": false }
+```
+
+响应：
+
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": { "id": "...", "name": "文档.md", "finalName": "文档(1).md", "targetPublic": true }
+}
+```
+
+- `targetPublic: true` 且未带 `confirmPublic` → **不执行移动**，仅返回标记（前端弹 R39 公开继承警告）；带 `confirmPublic: true` 重发才执行
+- 「已执行」的判定：`targetPublic === false` 或请求带了 `confirmPublic: true`
+- 目标可为根目录（`targetParentId: "0"`）；同父目录移动 → 幂等返回（不改名不写库）
+- 批量移动 = 前端队列逐条调用（D42）；批量遇公开目标**整批一次确认**
+- 失败码：30001（不存在/无权/目标非目录）、30019（自身子树 / 站点根 / 回收站项 / 回收站目标）、30006（目标目录 500 项上限 / 目标深度+源子树高度 >10）
+- 移动不改 used；公开性按新父目录上溯重新判定；`public_token` 挂 fileId 不受影响（D30）
+
+### 9.3 打包下载（登录态，`cloud:file:list`，@SkipTransform 流式）
+
+`POST /api/cloud/file/pack-download`
+
+请求：`{ "ids": ["id1", "id2", ...] }`（1~100 项，文件/文件夹混合）
+
+- 响应：`application/zip` 流式（yazl，零落盘）；`Content-Disposition: attachment; filename="iplat-pack-yyyyMMdd-HHmm.zip"; filename*=UTF-8''…`；`Cache-Control: no-store`
+- zip 内保持目录结构（目录递归展开，有界 ≤10 层），条目名由 yazl 统一置 UTF-8 flag（Windows 解压不乱码）；条目总数超 5000 截断并记运行日志
+- 回收站项 / 不存在项 / 超 `CLOUD_MAX_FILE_SIZE` 的条目跳过，响应头 `X-Pack-Skipped: n` 计数；无有效条目 → 30001（不下载空包）
+- 管理侧视角：打包自有文件**不查三态**（自己的文件自己的包）
+- 前端：多选工具栏「打包下载」触发，经 axios Blob 下载（自动带 token + 401 静默刷新）
+
+### 9.4 file.list 响应扩展
+
+`GET /api/cloud/file/list` 行内新增：
+
+| 字段         | 类型    | 说明                                                                     |
+| ------------ | ------- | ------------------------------------------------------------------------ |
+| `inSite`     | boolean | 是否位于站点子树内（含站点根本身）；R46/D49：前端据此分流公开/私有按钮组 |
+| `isSiteRoot` | boolean | 是否站点根目录；R45：站点根恒公开锚点，无「设为私有」                    |
+
+`shared` 口径扩展（D48）：文件夹亦可分享，目录与文件一并统计有效分享。
+
+### 9.5 分享升级
+
+#### 管理侧（登录态，既有接口扩展）
+
+| 方法 | 路径                          | 说明                                                                                                                       |
+| ---- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| POST | /api/cloud/share/create       | body 加 `password?: string`（4~8 位，留空 = 无密码）；`fileId` 可为**文件夹**（D48）；响应加 `hasPassword: boolean`        |
+| GET  | /api/cloud/share/list         | item 加 `itemType: 'file'\|'folder'`、`hasPassword: boolean`（**不返回密码本体**）                                         |
+| POST | /api/cloud/share/:id/password | 修改 / 移除提取码（body `{ password: string\|null }`，null 或空 = 移除）；响应 `{ id, hasPassword }`；变更后旧访问凭证失效 |
+
+> 权限：`:id/password` 复用 `cloud:share:create`（分享内容的创建/编辑一体），不新增权限标识与菜单。
+> 注：P3 的 30009「文件夹暂不支持创建分享链接」自 P4d 起不再触发（D48 支持文件夹分享），常量保留备用。
+
+#### 访客侧（@Public，独立限流 30 次/分/IP 沿用）
+
+| 方法 | 路径                               | 说明                                                                                                                                                                                                                                                        |
+| ---- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST | /api/cloud/share/:token/verify     | body `{ password }` → 签发短期凭证；无密码分享直通；响应 `{ sid, expiresIn, needPassword }`；错误 30018（连续 5 次锁 10 分钟）                                                                                                                              |
+| GET  | /api/cloud/share/:token            | info：`fileName/itemType/size/mime/ext/updatedAt/expireAt/visitCount/needPassword`；`path` 可选 = 文件夹内子项；未过密码门 → 30017                                                                                                                          |
+| GET  | /api/cloud/share/:token/raw        | 文件流 inline + Range；MIME 口径 R44 同 R26（html/htm/svg 强制 attachment）；`path` 可选                                                                                                                                                                    |
+| GET  | /api/cloud/share/:token/list?path= | 文件夹分享单层列表（动态子树 R43：新增即见/删除即消失；`is_public=2` 项过滤不可见）；响应 `{ path, items: [{ name, isDir, size, ext, updatedAt }] }`                                                                                                        |
+| GET  | /api/cloud/share/:token/download   | 文件 attachment + Range（既有，扩展 `path`）；成功 `visit_count+1`（raw 不计次）                                                                                                                                                                            |
+| GET  | /api/cloud/share/:token/pack       | 文件夹整包 zip（流式；访客视角过滤阻断项与子树）；`Content-Disposition: attachment; filename="<ASCII 兜底>.zip"; filename*=UTF-8''<源文件夹名>.zip`；**前端经 fetch + Blob 下载**（可带请求头凭证、显示加载态、错误转提示，避免服务端错误被导航渲染成白页） |
+
+- 凭证携带：请求头 `X-Share-Sid`；**媒体类原生子资源（video/img/iframe/a download）无法带自定义头，故等价接受 `?sid=` 查询参数**
+- sid 有效期：Redis `share:pass:{token}:{sid}`，TTL = min(2h, 分享剩余有效期)
+- 失效口径沿用：过期/停止/源删除 → 30008；限流 → 42900；未过密码门 → 30017
+- 文件夹分享为**动态子树**语义：分享后向内新增内容访客即可见，删除即消失（`is_public=2` 显式阻断项及其子树对外不可见，R43）
+
+### 9.6 公开语义分流（D49/R45，无新接口）
+
+- 前端按 `file.list` 的 `inSite` 切换按钮组：站点子树内 = 「设为私有 / 取消私有」（站点根无按钮），站点外 = 「设为公开 / 复制公开链接 / 取消公开」
+- 旧 `POST /api/cloud/file/set-public` **保留**（站点机制与开放层依赖），前端仅站点子树内调用（语义 = 设为私有，落库 is_public=2）；「取消私有」走 `DELETE /api/cloud/file/:id/public`（is_public 归 0=继承）

@@ -55,7 +55,7 @@
         </el-button>
       </template>
       <el-table-column
-        label="文件"
+        label="名称"
         min-width="180"
       >
         <template #default="{ row }">
@@ -68,6 +68,36 @@
           >
             源文件已删
           </el-tag>
+        </template>
+      </el-table-column>
+      <!-- P4d T56：类型列（文件/文件夹） -->
+      <el-table-column
+        label="类型"
+        width="90"
+      >
+        <template #default="{ row }">
+          <el-tag
+            :type="row.itemType === 'folder' ? 'warning' : 'info'"
+            size="small"
+          >
+            {{ row.itemType === 'folder' ? '文件夹' : '文件' }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <!-- P4d T56：提取码列（仅展示是否设置，密码本体不出后端） -->
+      <el-table-column
+        label="提取码"
+        width="110"
+      >
+        <template #default="{ row }">
+          <span
+            v-if="row.hasPassword"
+            class="v-share-mask"
+          >••••（已设置）</span>
+          <span
+            v-else
+            class="v-share-none"
+          >无</span>
         </template>
       </el-table-column>
       <el-table-column
@@ -322,5 +352,9 @@ onMounted(reload)
 }
 .v-share-none {
   color: var(--el-text-color-secondary);
+}
+.v-share-mask {
+  color: var(--el-text-color-regular);
+  font-size: 12px;
 }
 </style>

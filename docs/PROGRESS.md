@@ -2,19 +2,21 @@
 
 > 本文件由 AI 在每完成一个任务后更新。开工前先读本文件，从"进行中 / 下一个待办"继续。
 
-## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32），P4a 个人网站模块全部完成（T33~~T40），P4b（AI 编写站点 + 在线编辑器 + 模板库）全部完成（T41~~T45），P4c（云盘公开机制 + 批量拖拽上传 + 在线解压）全部完成（T46~~T50）
+## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32），P4a 个人网站模块全部完成（T33~~T40），P4b（AI 编写站点 + 在线编辑器 + 模板库）全部完成（T41~~T45），P4c（云盘公开机制 + 批量拖拽上传 + 在线解压）全部完成（T46~~T50），**P4c 走查补丁 W1~~W4 已套（纯文档）**，**P4d（云盘操作增强 + 分享升级 + 公开语义分流）全部完成（T52~~T58）**
 
 ## 里程碑总览
 
-| 阶段 | 目标                                        | 状态   |
-| ---- | ------------------------------------------- | ------ |
-| P1   | 后台管理底座                                | 已完成 |
-| P2a  | AI 模块：对话 + 套餐积分（ai 域）           | 已完成 |
-| P2b  | AI 模块：工具调用 Agent 化                  | 已完成 |
-| P3   | 云盘模块（cloud 域）                        | 已完成 |
-| P4a  | 个人网站：开放站点 + 文章模块（site 域）    | 已完成 |
-| P4b  | 个人网站：AI 编写站点 + 在线编辑器 + 模板库 | 已完成 |
-| P4c  | 云盘：公开机制 + 批量拖拽上传 + 在线解压    | 已完成 |
+| 阶段 | 目标                                               | 状态   |
+| ---- | -------------------------------------------------- | ------ |
+| P1   | 后台管理底座                                       | 已完成 |
+| P2a  | AI 模块：对话 + 套餐积分（ai 域）                  | 已完成 |
+| P2b  | AI 模块：工具调用 Agent 化                         | 已完成 |
+| P3   | 云盘模块（cloud 域）                               | 已完成 |
+| P4a  | 个人网站：开放站点 + 文章模块（site 域）           | 已完成 |
+| P4b  | 个人网站：AI 编写站点 + 在线编辑器 + 模板库        | 已完成 |
+| P4c  | 云盘：公开机制 + 批量拖拽上传 + 在线解压           | 已完成 |
+| P4d  | 云盘：移动/批量/打包下载 + 分享升级 + 公开语义分流 | 已完成 |
+| P4e  | 多站点（配额化 + AI 工具单数语义改造 + 删站并入）  | 未开始 |
 
 ## P4a 任务拆解（个人网站·site 域）
 
@@ -48,6 +50,18 @@
 | T48  | 批量上传队列（并发 3 / 单失败不阻塞 / 逐文件进度 + 总进度 / 汇总面板）+ 列表区 drop zone + 文件夹拖拽提示 + beforeunload                                                                                                                                                                              | 已完成 | 2026-09-09 |
 | T49  | 在线解压：特批依赖 yauzl + iconv-lite 接入 + 安全四件套（Zip Slip / 双上限 / GBK / 不递归）+ tmp 中转事务 + CLOUD_UNZIP_* 配置组 + 错误码 30014~~30016 + 前端解压入口                                                                                                                                 | 已完成 | 2026-09-10 |
 | T50  | 联调验收（对照第 6 节 12 条）+ 文档回写（ARCHITECTURE 并入 §16 并删指针行 / API.md 并入 / 资产表 / PLATFORM-GUIDE ≤2000 字核查 / README.txt 三套同步补 raw 直链说明 / PROGRESS）+ 根 README.md 刷新（路线图勾至 P4c、目录补 cloud/site、技术栈补 CodeMirror 与 yauzl/iconv-lite、索引补 P3~~P4c PRD） | 已完成 | 2026-09-10 |
+
+## P4d 任务拆解（云盘操作增强 + 分享升级 + 公开语义分流）
+
+| 编号 | 任务                                                                                                                                                                                                                                         | 状态   | 完成日期   |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ---------- |
+| T52  | cloud 域 move 接口（防环/站点根/回收站 30019 + 同行同目录幂等 + R4 同名 + R39 targetPublic 标记）+ file.list 加 inSite/isSiteRoot（R46/R45）+ 错误码 30017~30019 + SiteRootService（站点根锚点查询，零跨域依赖）                             | 已完成 | 2026-09-12 |
+| T53  | 剪切/粘贴前端（useMoveClipboard/半透明行/粘贴按钮）+ 拖拽移动（行与面包屑拖放目标、dataTransfer.types 内外区分 R40、双高亮样式）+ 公开继承警告弹窗（R39 整批一次确认）                                                                       | 已完成 | 2026-09-12 |
+| T54  | 多选模式（批量操作开关/复选框列/多选工具栏）+ 批量删除与批量移动（前端队列并发 3 D42 + 失败汇总面板）+ 打包下载（PackService：yazl 流式 D45/R41，零落盘 + X-Pack-Skipped）与前端 Blob 入口                                                   | 已完成 | 2026-09-12 |
+| T55  | 分享升级后端：cloud_share 加 password_hash（bcrypt）+ 提取码校验与短期凭证 sid + 防爆破限流（R42）+ 文件夹分享（动态子树 R43 + 阻断项过滤）+ share raw/list/pack 与 `path` 子项寻址 + 密码修改端点 + share.list 扩展（itemType/hasPassword） | 已完成 | 2026-09-12 |
+| T56  | 分享访客页改造：usePublicSource 数据源适配层（pub/share 双寻址复用 D46）+ FileView/FolderView 接 source prop + 密码门禁页 + /share/:token/file 子文件路由 + 分享管理页（类型列/提取码掩码列）                                                | 已完成 | 2026-09-12 |
+| T57  | 公开语义分流（D49/R45）：站点子树「设为私有/取消私有」按钮组 + 站点外 token 公开按钮组 + 站点根保护 + 旧 set-public 前端入口收敛（仅站点子树内保留）                                                                                         | 已完成 | 2026-09-12 |
+| T58  | 联调验收（对照 PRD-P4D 第 6 节 11 条）+ 文档回写（ARCHITECTURE 并入 §17 并标注增补已并入 / API.md 并入 §9 / 资产表 + Redis Key 表 / PLATFORM-GUIDE 1998 字核查 / PROGRESS）+ 接口实测 50/50 + 双端构建                                       | 已完成 | 2026-09-12 |
 
 ## P2a 任务拆解（AI 模块）
 
@@ -192,7 +206,7 @@
 
 ## 进行中
 
-（空；P4b 全部完成（T41~~T45），下一阶段 P4c 未开始）
+（空；P4d 全部完成（T52~~T58，含 P4c 走查补丁 W1~~W4），下一阶段 P4e 多站点未开始）
 
 ## 遗留问题
 
@@ -906,6 +920,112 @@
 
 **遗留（非阻塞）**：浏览器人工复验清单——公开落地页五类型分支渲染 / 文件夹下钻交互 / 批量上传队列面板与拖拽 / 解压按钮流程（逻辑与端点已全量自动化覆盖，属体验级复核）。
 
+### T52~T58 完成记录（2026-09-12）：P4d 云盘操作增强 + 分享升级 + 公开语义分流（P4d 收官）
+
+**前置动作**：P4c 走查补丁 W1~~W4 已套（纯文档，见文末注记）；依赖 `yazl@^3.3.1` 已按 D45 特批加入 apps/api（**唯一新增依赖**，类型走本地窄声明 `src/types/yazl.d.ts`）。
+
+**落地内容**：
+
+1. **T52 移动 + list 扩展**：`POST /cloud/file/:id/move`（`cloud:file:upload` + @OperationLog）：源在回收站 / 移入自身或自身子树 / 源为站点根 → 30019；目标非当前用户未删除文件夹 → 30001/30019；R6 目标子项 <500 且「目标深度 + 源子树高度 ≤10」（30006）；R4 同名自动"(1)"（`resolveNameConflict` 加 `excludeId` 排除源自身）；**R39 `targetPublic`**（目标上溯遇第一个非继承节点定生死，与 P4a 三态同口径）——未带 `confirmPublic` 时**不写库**仅返回标记，前端确认后重发才执行；同父目录 → 幂等返回；used 不变。`file.list` 行内新增 `inSite`（R46）/ `isSiteRoot`（R45），`shared` 口径扩展为目录+文件（D48）。
+2. **站点根锚点查询（域边界落地）**：新增 `modules/site/facade/site-root.service.ts` + `site-root.module.ts`（`getRootFolderId` / `isSiteRoot`，**零跨域依赖**），cloud 域 `FileModule` 直接 imports 该模块——**不复用 SiteFacadeModule**（后者注入 CloudFacade → 依赖 CloudModule，会成环）；cloud 只取「站点根 id」这一事实，上溯/子树判定在自己域内完成（铁律 6）。
+3. **T53 剪切/粘贴 + 拖拽移动**：`useMoveClipboard`（模块级单例、会话内存态）；剪切行整行半透明（`row-class-name`）；工具栏「粘贴到当前目录（n）」；拖拽行到**文件夹行 / 面包屑项**执行移动（两处高亮同一套移动样式），`dataTransfer.types` 含自定义 MIME `application/x-iplat-move` = 内部移动、含 `Files` = 外部上传（T48 队列 + 列表区整框高亮），两套高亮不混用（R40）；公开目标警告**整批一次确认**（批量场景不逐项弹窗）。
+4. **T54 多选批量 + 打包下载**：`selectionMode` + 自持 `selectedIds`（不穿透 ProTable 封装）+ 多选工具栏（全选/批量删除/批量移动/打包下载）；批量删除并发 3（D42）+ 失败汇总面板；批量移动 = 批量入剪切板再粘贴；`POST /cloud/file/pack-download`（`cloud:file:list`，@SkipTransform）经 **PackService**（yazl 逐条 `addFile` → zip 流 → 响应，**零临时落盘/禁整包进内存** D45/R41），zip 内保留目录结构、条目名 UTF-8 flag（yazl 恒置）、条目总数超 5000 截断、回收站/超限条目跳过计 `X-Pack-Skipped`、无有效条目 30001；前端走 axios Blob 并按 `blob.type` 识别统一体错误。StorageService 新增 `resolvePath`。
+5. **T55 分享升级后端**：迁移 `20260912000000_add_cloud_share_password`（`password_hash` VARCHAR(64) NULL，bcrypt 哈希，NULL = 无密码）；文件夹分享开放（`file_id` 指向目录行，无需改列）；`POST /cloud/share/:token/verify`（无密码直通 / 有密码 bcrypt 比对 + `share:passfail:{ip}:{token}` 连续 5 次锁 10 分钟 → 30018 带剩余次数/秒数）→ 签发 sid（Redis `share:pass:{token}:{sid}`，TTL = min(2h, 分享剩余有效期)）；访客端点 `info`（needPassword/itemType/mime/ext/updatedAt，`path` 可选子项）/ `raw`（inline + Range，MIME 口径 R44 同 R26）/ `list?path=`（动态子树 R43，`is_public=2` 项过滤不可见）/ `download` / `pack`（复用 yazl 链路，`publicOnly` 过滤阻断子树）；未过密码门 → 30017；`POST /cloud/share/:id/password` 修改/移除（变更后旧凭证 scanDel 失效）；`share.list` 加 `itemType`/`hasPassword`。
+6. **T56 分享访客页**：`usePublicSource` 适配层（`{kind, token, sid, title}` → 统一 fileInfo/folderList/rawUrl/downloadUrl/packUrl）；`FileView`/`FolderView` 改为接收可选 `source` prop（缺省按路由自建 pub 源 → **公开落地页零改动**），分享页复用同一渲染组件（D46 语义分、体验不分）；密码门禁页（输码/错误提示/剩余次数）+ sid 存 sessionStorage；新增 `/share/:token/file?path=` 子文件路由（guard 按 `/share/` 前缀放行）；分享管理页加「类型」「提取码（掩码）」列；我的文件页分享弹框支持设置/修改提取码。
+7. **T57 公开语义分流**：按钮组按 `row.inSite` 渲染——站点子树内「设为私有（`set-public` false → is_public=2）/取消私有（`DELETE .../public` → is_public=0 继承）」，站点根无按钮（R45）；站点外「设为公开/复制公开链接/取消公开」；旧 `set-public` 前端入口只保留在站点子树内（P4c 走查观察 1 的误用阻断路径消除），后端接口保留（站点机制依赖）。
+
+**验收对照（PRD-P4D 第 6 节 11 条）**：
+
+| #   | 条目                | 证据                                                                                                                     |
+| --- | ------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| 1   | 剪切粘贴/同名 (n)   | 冒烟：move 正常 + `finalName=a.txt`；同名 → `a(1).txt` ✓                                                                 |
+| 2   | 拖拽移动 / 内外区分 | 文件夹行与面包屑均为 drop 目标 + 高亮；外部 `Files` 走 T48 队列（高亮样式分离 R40）；防环 30019 ✓（前端交互待人工复验）  |
+| 3   | 公开继承警告        | 未确认 → `targetPublic=true` 且**未移动**；确认后移动成功 ✓                                                              |
+| 4   | 多选批量            | 多选列 + 工具栏；批量删除并发 3 队列 + 失败汇总面板；批量移动入剪切板 ✓（浏览器交互待人工复验）                          |
+| 5   | 打包下载            | zip 魔数/Content-Type/ASCII+UTF-8 文件名；3 条目目录结构保留；中文名 UTF-8；零落盘（yazl 流式）；X-Pack-Skipped=1 ✓      |
+| 6   | 提取码              | 30017 / 30018（剩余次数）/ 正确签发 sid / 5 次锁定 / 移除后免密直通 / 无密码分享回归 ✓                                   |
+| 7   | 分享页预览          | info 含 itemType/mime/ext/updatedAt；raw inline + 子文件 `path` 寻址；download attachment + 计次；40400 口径统一 30008 ✓ |
+| 8   | 文件夹分享动态子树  | list 实时读库（新增即见/删除即消失）+ 下钻 + 整包 zip（含阻断过滤实现）✓                                                 |
+| 9   | 语义分流            | list `inSite`/`isSiteRoot` 正确返回；前端按钮组按 inSite 渲染（站点根无按钮）；旧入口收敛 ✓                              |
+| 10  | 回归                | P4c 公开机制（token/落地页/40117）不受影响；旧无密码分享全链路通过；开放层/P4a 站点链路未动 ✓                            |
+| 11  | 构建与依赖          | api `tsc` + `nest build` 0 错误、web `vue-tsc` + `vite build` 0 错误、双端 eslint 0；新增依赖仅 yazl ✓                   |
+
+**接口实测（临时 API 实例 PORT=3001 + Node fetch 冒烟脚本，50/50 全过后脚本已删）**：登录 → `inSite/isSiteRoot` 字段校验 → 建目录/上传 → 正常移动 + 同名 (1) → 移入自身/自身后代/回收站项移动/站点根移动 全部 30019 → R39 targetPublic 未确认不落库 + 确认后落库 → pack（zip 结构/UTF-8/条目数/skip 计数/空包 30001）→ 分享提取码全链路（30017/30018/sid/info/list 下钻/子文件 raw+download/整包）→ 提取码修改与移除 → share.list 扩展字段 → 停止后 30008 → 防爆破第 5 次锁定 → 无密码文件分享回归（info/raw/download/计次）→ 收尾自清理（测试项软删+彻底删除、分享停止、Redis 键清理，核查 `t58` 残留 0）。
+
+**踩坑/偏差（登记）**：
+
+1. **`SharePasswordDto` 误带 `id` 字段**（冒烟抓出）：原设计把分享 id 也放进 body 校验，而实际由路径参数承载 → `POST /cloud/share/:id/password` 抛 40001（`id` 缺失）。修复：DTO 去掉 `id`，service 签名改 `updatePassword(userId, id, dto)`。教训：**路径参数与 body 不得双份冗余校验**，前端只发变化字段。
+2. **访客端点支持可选 `path`**（增补文档只给 list 带 path）：PRD F3「文件夹分享 = 列表 + 下钻 + **单文件预览**」要求子文件可寻址，落地为 info/raw/download 均可选 path（缺省 = 分享项自身，raw/download 要求命中文件）。已回写 ARCHITECTURE §17.8。
+3. **`?sid=` 等价通道**：媒体原生子资源无法自定义请求头，故访客端点同时接受查询参数 sid（§17.8 登记；短时效 + 绑定 token，泄漏面与签名 URL 同级）。
+4. **file.list 增补 `isSiteRoot`**：R45「站点根无设为私有」需要前端可判定站点根，只有 `inSite` 无法区分（站点根自身也 inSite=true）。
+5. **「取消私有」复用 `DELETE /cloud/file/:id/public`**（is_public 归 0=继承）：`set-public` 契约二元（0→落库 2），无法直接写 0；该接口的「归 0」语义正是「取消私有」所需终态（D49 的 0↔2）。
+6. **同父目录移动 = 幂等返回**（不改名不写库）：文档未定义，按最小惊讶原则实现。
+7. **深度上限同步校验**：pids §17.2 只列了目标 500 项上限，落地同时校验「目标深度 + 源子树高度 ≤10」（R6 深度口径，防移动造出超深树）。
+8. **PROGRESS 任务表编号衔接**：PRD-P4D 任务表原写「T52~~T58」，实际落地与之一一对应（T51 为已撤销路径模式增补，跳过不复用）。
+9. **既有数据观察（非本期引入）**：核对记账时发现 admin 的 `cloud_usage.used`（90,523,618）比其全部 `cloud_file` 行 size 之和（90,546,369）少 **22,751 字节**（差额远大于本期测试数据量级——本期全部测试文件合计 <100 字节且已彻底删除回扣；user 8 的 69 字节差额可由「头像软删回退」完全解释）。判断为 P3/T49 时期遗留的历史漂移，本期未做一次性校正（避免动用户数据），**登记待后续核对**：如需校正，口径应为「未删除行 + 回收站行（R3 软删不扣）− 已回退头像行」。
+
+**文档回写（全部完成）**：
+
+1. **ARCHITECTURE.md**：**新增 §17 全节**（17.1 数据库 / 17.2 移动与批量含打包 / 17.3 分享升级 / 17.4 前端 / 17.5 错误码 / 17.6 域边界 SiteRootService / 17.7 Redis Key / 17.8 实现偏差 8 条 / 17.9 演进预留）；§4.7 错误码表补 30017~~30019；§9 资产表补 7 行（usePublicSource / PackService / 分享密码门 / useMoveClipboard / SiteRootService / StorageService.resolvePath / 依赖白名单 P4d）；§9 Redis Key 表补 `share:pass` / `share:passfail`；§3.2 免登录路由改为 `/share/*` 前缀；§16.7 演进预留的「文件夹打包下载」标记为 P4d 已实现
+2. **API.md**：头部覆盖行补 P4d；**新增 §9 全节**（错误码 / move / 打包下载 / list 扩展 / 分享升级管理侧与访客侧 / 语义分流），并按实现写明 `path` 与 `?sid=` 扩展
+3. **PLATFORM-GUIDE.md**：云盘章节补移动/批量/打包/提取码/文件夹分享/语义分流与阻断拒访提示；个人网站「文件管理」口径改为「公开性由设为私有/取消私有与站点状态决定」；**字数核查 1998 ≤ 2000**（为容纳 P4d 摘要同步压缩了系统管理与个人网站若干措辞，事实不减）
+4. **两份 P4D 增补文档**：头部标注「已并入、保留为历史细节参考」（同 P3/P4a/P4b/P4c 惯例）
+5. **三套模板 README.txt**：本次 P4d 未变更站点开放 API，**无需改动**（T58 复核确认）；根 README.md 路线图如需勾选 P4d 由下次刷新统一处理
+
+**浏览器实测（T58 补做：agent-browser 0.34 + 真实 Chromium，对 dev server 5173 + API 3000 真机走查）**：
+
+| #   | 走查项               | 结果                                                                                                                                                                                               |
+| --- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | 剪切/粘贴            | 剪切后行 `is-cutting-row`、计算 opacity=0.5 半透明 ✓；工具栏出现「粘贴到当前目录（1）」✓；进目标目录粘贴 → 文件迁入 + 「已移动 1 项」提示 + 剪切板清空 ✓                                           |
+| 2   | 拖拽移动（内部）     | 真实鼠标拖拽 `bw-a` → `bw-b` 行：移动成功 ✓；拖到面包屑「根目录」：移出成功 ✓（经合成 DragEvent 复验：`dataTransfer.types=["application/x-iplat-move"]`、dragover `defaultPrevented=true`）        |
+| 3   | 多选批量             | 「批量操作」→ 复选框列 + 多选工具栏（已选 n 项/全选/批量删除/批量移动/打包下载）✓；勾 2 项 → 已选 2 项 ✓；批量删除确认「确认删除选中的 2 项？」→「已删除 2 项」+ 选区清空 ✓                        |
+| 4   | 打包下载             | 前端产出 zip Blob（314 B、`application/zip`、魔数 PK\x03\x04、2 条目、含 `bw-a/` 目录前缀与两个文件名）✓（Playwright 无法保存 blob 下载，改由页内解析字节验证）                                    |
+| 5   | 分享提取码           | 分享弹窗新增「提取码」输入 → 创建成功（「分享成功」）→ 详情态显示链接 + 「当前：已设置提取码」✓；访客输错 → 门禁页内联「提取码错误，还可尝试 4 次」✓；输对 → 内容页 ✓                              |
+| 6   | 分享访客页（文件夹） | 标题取源文件夹名 `bw-b` + 面包屑 + 列表（bw-1.txt 22 B）+ 「下载全部（zip）」✓；点文件 → `/share/:token/file?path=bw-1.txt` 文本分支渲染正文 ✓                                                     |
+| 7   | 访客整包下载         | 页内实测同一 URL：带 `?sid=` → 200 `application/zip`、`Content-Disposition: attachment; filename="bw-b.zip"; filename*=UTF-8''bw-b.zip`、1 条目含 `bw-b/bw-1.txt` ✓；不带 sid → 业务码 **30017** ✓ |
+| 8   | 公开语义分流         | 站点根「我的站点」行：公开标签 + 仅 重命名/剪切/分享管理/删除（**无任何公开性按钮**）✓；站点子树内每行均为「设为私有」且全文无「设为公开」✓；站点外行为 token 公开组 ✓                             |
+| 9   | 列表/状态标记        | 文件夹分享后行显示「已分享」✓（D48 口径扩展生效）                                                                                                                                                  |
+| 10  | 控制台               | 无 Vue 告警/报错（仅 guard.ts 既有 debug `console.warn`）；走查后 Web 静态检查 0 错误                                                                                                              |
+
+**走查发现并修复的真实缺陷（3 处，均已浏览器复验通过）**：
+
+1. **文件夹分享内点击文件不切换预览（真 bug，T56 遗留）**：`/share/:token` 与 `/share/:token/file` 复用同一组件实例，路由切换 `onMounted` 不重跑 → `state` 仍为 `folder`，点击文件后停留文件夹视图（还把文件当目录去 list，显示空表）。修复：`watch(() => route.name)` 重新决策渲染分支。
+2. **FileView `watch` 未导入 → setup 抛错整页空白（修复 1 时引入，浏览器立刻抓到）**：子文件预览页 DOM 只有空壳 + 控制台 `Unhandled error during execution of setup function at <FileView>`。修复：补 `watch` 导入。
+3. **`saveBlob` 立即 `revokeObjectURL` 有取消下载风险**：改为 `setTimeout(..., 10_000)` 延后回收（浏览器差异下更稳妥）。同类写法在既有 `download(row)`（P3）仍存在，按铁律 4 未顺手改动，登记待评估。
+4. 另修文案：分享创建弹窗「免登录下载该文件」→ 按 `shareFile.isDir` 自适应「访问该文件夹/文件（可设 4~8 位提取码）」。
+
+**走查观察（未改，登记）**：
+
+1. `ElMessageBox`（确认框）按钮显示英文 `OK` / `Cancel`，而内容为中文——项目未配置 Element Plus 中文语言包（P3 起既有，全局性问题）。
+2. `router/guard.ts` 残留两条 debug `console.warn`（含整张路由表 JSON dump），每次导航刷屏（P1 起既有）。
+3. Playwright 合成鼠标的拖拽在「需滚动/目标过小」时不投递 drop（面包屑）；已用真实 DragEvent 复验处理链正确，属自动化局限而非应用缺陷。
+4. Playwright 无法保存 `blob:` 触发的下载（打包下载），改用页内 `createObjectURL` 拦截 + `arrayBuffer()` 解析字节验证。
+
+**走查后数据核对**：`cloud_usage.used` 与走查前完全一致（admin `90,523,618`）→ 配额无漂移；测试项/测试分享全部清除（`bw*` 残留 0、cloud_share 行数不变、`share:*` Redis 键已删）。
+
+### 用户报障修复（2026-09-12 当日，P4d 交付后）：分享文件夹「下载全部」跳白页
+
+**现象**：用户分享了一个（中文名）文件夹，访客页点「下载全部（zip）」，浏览器跳到空白页提示无法访问该网站。
+
+**根因（已复现并定位）**：`PackService.stream` 的 `Content-Disposition` 把包名直接写进 quoted-string：`filename="${filename}"`。分享侧包名取源文件夹名（`sanitizeFileName(file.name) + '.zip'`），**中文名含非 ASCII 字符 → Node 抛 `ERR_INVALID_CHAR`**（响应头只允许 \x20-\x7E 与 \x80-\xFF）→ 500。又因为 `res.status(200).set({...})` 是**先设 Content-Type: application/zip 再设 Content-Disposition**，异常时 Content-Type 已发出，错误响应带着 `application/zip` 头返回 `{"code":50000}` → 浏览器无法渲染 → 白页。管理侧包名是 ASCII 生成名（`iplat-pack-*.zip`）所以从未暴露。
+
+**修复**：① 后端 `PackService` 补项目既有口径的 ASCII 兜底（`filename="<ascii>"` + `filename*=UTF-8''<原名>`，与 transfer/pub/share 三处单文件下载一致）；② 前端访客页「下载全部」由原生 `<a>` 导航改为 **fetch + Blob**（带请求头凭证、加载态、错误转可读提示），并校验 `res.ok` 与 `content-type`，杜绝"服务端错误被渲染成白页"这一类问题（原 `?sid=` 通道仍保留给媒体子资源）。
+
+**验证**：API 层复测——管理侧 200（ASCII 包名不变）、分享侧 200（`filename="_____.zip"; filename*=UTF-8''%E4%B8%AD%E6%96%87…zip`，包内条目 `中文分享夹/子文件.txt` 正确）；浏览器复测中文名分享页——点「下载全部」页面**不跳转**、提示「打包完成，开始下载」、产出 199 B `application/zip`（魔数 PK、1 条目、UTF-8 中文条目名）、下载名 `中文分享夹.zip` ✓。
+
+**同类隐患（同一批一并修复）**：全仓扫描 `Content-Disposition` 共 5 处，其中 `apps/api/src/modules/site/open/open-static.controller.ts:165` 的 `attachment; filename="${file.name}"` 是**同一写法**——站点开放层下载「非白名单类型 + 中文名」的站点文件会同样 500（站点模板文件多为 ASCII，故一直未暴露）。已按同口径修复（ASCII 兜底 + `filename*`，并补该 controller 的 private `asciiFallback`），实测：`/api/open/wyc/<中文名>.bin` → 200 `application/octet-stream` + `attachment; filename="____.bin"; filename*=UTF-8''…`；ASCII 名对照 `filename="plain-verify.bin"` 行为不变。至此五处响应头口径完全一致（transfer / pack / share / pub / open-static）。
+
+> 附带观察（P4a 既有设计，非本次问题）：开放层「路径→文件」解析存在短时缓存。实测中先删后传同名文件后立刻再取会短暂 40400（命中旧解析缓存），与 PLATFORM-GUIDE「取消公开最长 60 秒生效」同源的缓存 TTL 行为。
+
+**遗留（非阻塞）**：
+
+1. 剩余人工体验项（无缺陷迹象，建议真机手感确认）：外部文件拖入的整框高亮与内部移动高亮的观感差异、批量移动多选后的整批公开警告弹窗、分享页大文件视频预览。
+2. 打包下载超大选择集（数千文件）同步耗时——同 D36 口径留异步演进位（§17.9）。
+3. 提取码强度（4~8 位可猜性）——防爆破限流兜底，是否强制最小 6 位待体验定。
+4. `cloud_usage.used` 的 22,751 字节历史差额（见踩坑 9）待核对。
+5. 剪切板为会话内存态（刷新清空）——PRD §8 遗留待确认 3 既定口径；如需持久化见 §17.9。
+6. 既有 `download(row)` 的立即 `revokeObjectURL` 写法与 `ElMessageBox` 英文按钮、guard.ts debug 日志（见走查观察 1/2 与缺陷 3）——非本期范围，待统一处理。
+
 ### P1 最终状态总结（三句话）
 
 1. **跑通方式**：`docker compose up -d` 启动 MySQL/Redis 后，在自有 PowerShell 窗口分别执行 `pnpm --filter @iplat/api start:prod`（dist 已构建；重新构建需先 `Remove-Item -Recurse -Force apps\api\dist` 再 `nest build` 绕过 safe-delete 拦截）和 `pnpm --filter @iplat/web dev`，浏览器访问 http://localhost:5173 以 admin/Admin@123 登录即可完整使用全部功能（Swagger 见 http://localhost:3000/api/docs）。
@@ -935,4 +1055,5 @@
 
 ---
 
-> 2026-08-30：P4b 走查补丁 B1~B6 已套用（纯文档修订，ARCHITECTURE.md §4.8/§9/§15.4/§15.5a/§15.8 + API.md §6.4/§7.4）。
+> 2026-08-30：P4b 走查补丁 B1~~B6 已套用（纯文档修订，ARCHITECTURE.md §4.8/§9/§15.4/§15.5a/§15.8 + API.md §6.4/§7.4）。
+> 2026-09-12：P4c 走查补丁 W1~~W4 已套用（纯文档，无代码改动、无回归）：W1 API.md §8 去阶段标注改「## 8. P4c：云盘公开链接 + 公开访问端点 + 在线解压」并删头部过渡注/各小节 (T46)/(T49) 标注；W2 术语统一（30009 文案与 API §5.5 章节名改「分享链接」+ P3/P4c 双含义口径注、ARCHITECTURE §4.7 配置表 `CLOUD_PUBLIC_SHARE_RATE_LIMIT` 注释改「分享（cloud_share）限流」并注明未实现保留占位）；W3 ARCHITECTURE §16.2 MIME 行末补三份白名单分置对照（transfer 预览 / site open/mime.ts / pub-mime.ts，域边界优先）；W4 §16.2 限流补硬编码 120/60 决议（瘦版定值，演进升配置组）。观察 1 处置（双「取消公开」语义）已并入 PLATFORM-GUIDE 字数核查流程，随 T58 手册更新落档。

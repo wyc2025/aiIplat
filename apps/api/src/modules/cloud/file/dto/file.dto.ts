@@ -59,6 +59,22 @@ export class SetPublicLinkDto {
   allowListing?: boolean
 }
 
+/** 移动（P4d T52：剪切/粘贴与拖拽移动共用） */
+export class MoveFileDto {
+  @ApiProperty({ description: '目标父目录 ID，0=根目录' })
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  targetParentId!: number
+
+  @ApiPropertyOptional({
+    description: '已确认公开继承警告（R39）：目标处于公开状态时，第二次重发须带 true 才真正执行',
+  })
+  @IsOptional()
+  @IsBoolean()
+  confirmPublic?: boolean
+}
+
 /** 重命名 */
 export class RenameDto {
   @ApiProperty({ description: '文件/文件夹 ID' })

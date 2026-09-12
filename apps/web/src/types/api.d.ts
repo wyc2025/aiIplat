@@ -167,6 +167,10 @@ export interface CloudFile {
   publicToken?: string | null
   /** 公开文件夹是否允许访客浏览列表（0|1，仅文件夹有意义，P4c D32） */
   allowListing?: number
+  /** 是否位于站点子树（含站点根本身，仅 list 接口返回；P4d R46/D49：前端据此切换公开/私有按钮组） */
+  inSite?: boolean
+  /** 是否站点根目录（仅 list 接口返回；P4d R45：站点根恒公开，不提供「设为私有」） */
+  isSiteRoot?: boolean
 }
 
 /** 面包屑节点 */
@@ -221,11 +225,15 @@ export interface PubFolderList {
   items: PubListItem[]
 }
 
-/** 公开链接（我的分享；status 由后端计算：1 有效 / 0 已停止 / 2 已过期） */
+/** 分享链接（我的分享；status 由后端计算：1 有效 / 0 已停止 / 2 已过期） */
 export interface CloudShare {
   id: string
   fileId: string
   fileName: string
+  /** P4d：源为文件夹时 itemType='folder'（管理页类型列） */
+  itemType: 'file' | 'folder'
+  /** P4d：是否设置提取码（不返回密码本体） */
+  hasPassword: boolean
   size: string
   /** 源文件是否已被删除（彻底删除/回收站中） */
   fileDeleted: boolean
@@ -242,6 +250,8 @@ export interface CloudShareCreateResult {
   token: string
   url: string
   expireAt: string | null
+  /** P4d：当前是否设置了提取码 */
+  hasPassword: boolean
 }
 
 /** 回收站项 */
@@ -255,15 +265,42 @@ export interface CloudRecycleItem {
   parentName: string | null
 }
 
-/** 访客分享信息 */
+/** 访客分享信息（P4d 扩展：needPassword/itemType/mime/ext 供密码门与预览分支） */
 export interface CloudSharePublic {
   token: string
   fileName: string
+  itemType: 'file' | 'folder'
   size: string
   mime: string | null
+  ext: string | null
+  updatedAt: string
   expireAt: string | null
   isExpired: boolean
   visitCount: number
+  /** 是否需要提取码（前端未持 sid 时信息接口返回 30017） */
+  needPassword: boolean
+}
+
+/** 提取码校验结果（P4d：通过后签发短期凭证 sid，后续请求经 X-Share-Sid 携带） */
+export interface ShareVerifyResult {
+  sid: string
+  expiresIn: number
+  needPassword: boolean
+}
+
+/** 文件夹分享单层列表项（形态同 pub d/list） */
+export interface ShareListItem {
+  name: string
+  isDir: boolean
+  size: number
+  ext: string
+  updatedAt: string
+}
+
+/** 文件夹分享单层列表响应 */
+export interface ShareFolderList {
+  path: string
+  items: ShareListItem[]
 }
 
 export interface OperationLogItem {

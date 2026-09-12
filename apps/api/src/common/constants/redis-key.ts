@@ -34,4 +34,8 @@ export const RedisKey = {
   siteRate: (bucket: string, ip: string) => `site:rate:${bucket}:${ip}`,
   /** 云盘公开端点独立限流计数：pub:rate:{bucket}:{ip}，INCR + 首次 60s TTL（bucket = static|data，P4c R32） */
   pubRate: (bucket: string, ip: string) => `pub:rate:${bucket}:${ip}`,
+  /** 分享提取码通过后的短期访问凭证：share:pass:{token}:{sid}，TTL = min(2h, 分享剩余有效期)（P4d R42） */
+  sharePass: (token: string, sid: string) => `share:pass:${token}:${sid}`,
+  /** 分享提取码错误计数（IP+token，连续 5 次锁 10 分钟，照登录 10102 口径）：share:passfail:{ip}:{token}（P4d R42） */
+  sharePassFail: (ip: string, token: string) => `share:passfail:${ip}:${token}`,
 } as const

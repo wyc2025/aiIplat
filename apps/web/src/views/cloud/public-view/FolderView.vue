@@ -21,7 +21,7 @@
 
       <template v-else-if="!loading && state === 'ok'">
         <h3 class="pv-name">
-          文件夹浏览
+          {{ source.title }}
         </h3>
         <!-- 面包屑（path 逐段下钻；点击回跳） -->
         <div class="pv-crumb">
@@ -85,6 +85,20 @@
             </template>
           </el-table-column>
         </el-table>
+        <!-- 文件夹分享：整包下载（D48；公开落地页无此入口） -->
+        <div
+          v-if="source.loadPack"
+          class="pv-actions"
+        >
+          <el-button
+            type="primary"
+            :icon="Download"
+            :loading="packing"
+            @click="onPackDownload"
+          >
+            下载全部（zip）
+          </el-button>
+        </div>
         <p class="pv-tip">
           点击文件夹继续浏览，点击文件打开查看页
         </p>
@@ -96,17 +110,29 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Document, Folder } from '@element-plus/icons-vue'
-import { pubFolderList, PubApiError } from '@/api/cloud/public'
+import { ElMessage } from 'element-plus'
+import { Document, Folder, Download } from '@element-plus/icons-vue'
+import { PubApiError } from '@/api/cloud/public'
 import type { PubListItem } from '@/types/api'
+import { createPublicSource, type PublicSource } from './usePublicSource'
+
+/** 需提取码（P4d 30017） */
+const CODE_NEED_PASSWORD = 30017
+
+const props = defineProps<{ source?: PublicSource }>()
+const emit = defineEmits<{ (e: 'need-password'): void }>()
 
 const route = useRoute()
 const router = useRouter()
+const source = computed<PublicSource>(
+  () => props.source ?? createPublicSource({ kind: 'pub', token: route.params.token as string }),
+)
+
 const loading = ref(true)
 const state = ref<'ok' | 'listing-disabled' | 'failed'>('ok')
 const items = ref<PubListItem[]>([])
+const packing = ref(false)
 
-const token = computed(() => route.params.token as string)
 /** 当前相对路径（与后端 path 口径一致：'/' 连接、无首尾斜杠；'' = 根） */
 const currentPath = computed(() => (route.query.path as string) ?? '')
 const segments = computed(() => currentPath.value.split('/').filter(Boolean))
@@ -124,18 +150,53 @@ function formatTime(iso: string): string {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString()
 }
 
-/** 下钻/回跳：path 同步进 query（可分享、可前进后退） */
+/** 下钻/回跳：path 同步进 query（可分享、可前进后退）；沿用当前路由前缀（/view/d/{token} 或 /share/{token}） */
 function goPath(path: string): void {
-  router.push({ path: `/view/d/${token.value}`, query: path ? { path } : {} })
+  router.push({ path: route.path, query: path ? { path } : {} })
 }
 
-/** 点行：文件夹下钻；文件进落地页（知道完整路径即可访问，D32/R33） */
+/** 点行：文件夹下钻；文件进查看页（公开页 /view/d/{token}/file；分享页 /share/{token}/file） */
 function onRowClick(row: PubListItem): void {
   const next = currentPath.value ? `${currentPath.value}/${row.name}` : row.name
   if (row.isDir) {
     goPath(next)
-  } else {
-    router.push({ path: `/view/d/${token.value}/file`, query: { path: next } })
+    return
+  }
+  router.push({ path: `${route.path}/file`, query: { path: next } })
+}
+
+/** Blob 落盘（延后回收 URL：下载启动是异步的，紧接 revoke 有取消下载的风险） */
+function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
+}
+
+/**
+ * 整包下载（仅分享文件夹）：fetch + Blob（带请求头凭证）——
+ * 服务端错误可转成可读提示，不像原生 <a> 导航那样把 4xx/5xx 渲染成白页。
+ */
+async function onPackDownload(): Promise<void> {
+  if (!source.value.loadPack) return
+  packing.value = true
+  try {
+    const blob = await source.value.loadPack()
+    saveBlob(blob, `${source.value.title}.zip`)
+    ElMessage.success('打包完成，开始下载')
+  } catch (error) {
+    const err = error as { code?: number; message?: string }
+    if (err.code === CODE_NEED_PASSWORD) {
+      emit('need-password')
+      return
+    }
+    ElMessage.error(err.message || '打包下载失败')
+  } finally {
+    packing.value = false
   }
 }
 
@@ -151,11 +212,16 @@ function ensureNoindex(): void {
 async function load(): Promise<void> {
   loading.value = true
   try {
-    const res = await pubFolderList(token.value, currentPath.value || undefined)
+    const res = await source.value.folderList(currentPath.value || undefined)
     items.value = res.items
     state.value = 'ok'
   } catch (e) {
-    state.value = e instanceof PubApiError && e.code === 40117 ? 'listing-disabled' : 'failed'
+    const code = e instanceof PubApiError ? e.code : (e as { code?: number }).code
+    if (code === CODE_NEED_PASSWORD) {
+      emit('need-password')
+      return
+    }
+    state.value = code === 40117 ? 'listing-disabled' : 'failed'
   } finally {
     loading.value = false
   }
@@ -216,6 +282,9 @@ watch(currentPath, load)
 .pv-table {
   width: 100%;
   background: #fff;
+}
+.pv-actions {
+  margin-top: 16px;
 }
 .pv-tip {
   color: #c0c4cc;

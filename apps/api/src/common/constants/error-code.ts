@@ -110,7 +110,7 @@ export const ErrorCode = {
   CloudRecycleNotFound: 30007,
   /** 分享链接无效（不存在/已停止/已过期/文件已删/未过审） */
   CloudShareInvalid: 30008,
-  /** 文件夹暂不支持创建公开链接 */
+  /** 文件夹暂不支持创建分享链接 */
   CloudShareNotAllowed: 30009,
   /** 文件未通过内容审核，禁止分享 */
   CloudAuditNotPassed: 30010,
@@ -126,6 +126,12 @@ export const ErrorCode = {
   CloudUnzipLimitExceeded: 30015,
   /** 压缩包含非法路径条目（Zip Slip 拦截，整包拒绝，P4c T49 unzip） */
   CloudUnzipIllegalEntry: 30016,
+  /** 该分享需要提取码（未验证或凭证过期，P4d D47） */
+  CloudShareNeedPassword: 30017,
+  /** 提取码错误（含连续错误锁定提示剩余秒数，P4d R42） */
+  CloudSharePasswordWrong: 30018,
+  /** 非法移动目标（移入自身子树 / 站点根 / 回收站，P4d R37） */
+  CloudMoveTargetInvalid: 30019,
 
   // ========== site 域（40xxx 段，40101 起；40001/40100/40300/40400/42900 为通用码已占用，见 API.md §6.1） ==========
   /** 站点不存在或未开通 */

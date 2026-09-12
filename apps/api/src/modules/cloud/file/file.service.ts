@@ -6,9 +6,11 @@ import { ErrorCode } from '../../../common/constants/error-code'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { StorageService } from '../../../infra/storage/storage.service'
+import { SiteRootService } from '../../site/facade/site-root.service'
 import type {
   FileListQueryDto,
   MkdirDto,
+  MoveFileDto,
   RenameDto,
   SetPublicDto,
   SetPublicLinkDto,
@@ -48,6 +50,7 @@ export class FileService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly storage: StorageService,
+    private readonly siteRoot: SiteRootService,
   ) {}
 
   /** 目录内容列表：文件夹在前（名称升序），文件在后（修改时间倒序），不分页 */
@@ -68,12 +71,13 @@ export class FileService {
       .filter((f) => f.isDir === 0)
       .sort((a, b) => b.updateTime.getTime() - a.updateTime.getTime())
 
-    // 聚合"有效分享"标记（仅文件可分享）：有 status=1 且未过期的链接 → shared=true
-    const fileIds = files.map((f) => f.id)
+    // 聚合"有效分享"标记（P4d D48 起文件夹亦可分享，故目录与文件一并统计）：
+    // 有 status=1 且未过期的链接 → shared=true
+    const sharedIds = [...dirs, ...files].map((f) => f.id)
     const sharedSet = new Set<bigint>()
-    if (fileIds.length > 0) {
+    if (sharedIds.length > 0) {
       const shares = await this.prisma.cloudShare.findMany({
-        where: { userId, fileId: { in: fileIds }, status: 1 },
+        where: { userId, fileId: { in: sharedIds }, status: 1 },
         select: { fileId: true, expireAt: true },
       })
       const now = Date.now()
@@ -84,6 +88,14 @@ export class FileService {
       }
     }
 
+    // R46（P4d T52）：inSite 标记——沿 parentId 上溯是否经过站点根锚点（site_site.root_folder_id）。
+    // 站点根由 site 域经 SiteRootService 提供（域边界纪律），上溯在 cloud 域内完成（有界 ≤10，与公开判定链同口径）。
+    const siteRootId = await this.siteRoot.getRootFolderId(userId)
+    let dirInSite = false
+    if (siteRootId !== null && parentId !== BigInt(0)) {
+      dirInSite = parentId === siteRootId || (await this.isWithinSubtree(userId, parentId, siteRootId))
+    }
+
     const list = [...dirs, ...files].map((f) => ({
       id: f.id,
       name: f.name,
@@ -92,12 +104,16 @@ export class FileService {
       ext: f.ext,
       mime: f.mime,
       updateTime: f.updateTime,
-      shared: f.isDir === 0 && sharedSet.has(f.id),
+      shared: sharedSet.has(f.id),
       // R23（走查 W2 修复）：返回原始三态 int（0=继承 / 1=显式公开 / 2=显式阻断），前端双标签；有效公开性以开放层访问时上溯判定为准
       isPublic: f.isPublic,
       // P4c F1：公开链接 token（仅显式公开行有值，供「复制公开链接」）；allowListing 仅文件夹有意义（D32）
       publicToken: f.isPublic === 1 ? f.publicToken : null,
       allowListing: f.allowListing,
+      // P4d R46/D49：位于站点子树内（含站点根本身）→ 前端按钮组改「设为私有/取消私有」；站点外走 token 公开
+      inSite: dirInSite || (siteRootId !== null && f.id === siteRootId),
+      // P4d R45：站点根目录行无「设为私有」（恒公开锚点，整站关闭走站点 status）
+      isSiteRoot: siteRootId !== null && f.id === siteRootId,
     }))
 
     const { quota, used } = await this.getQuota(userId)
@@ -167,6 +183,90 @@ export class FileService {
       data: { name: dto.name },
     })
     return { id: updated.id.toString(), name: updated.name }
+  }
+
+  /**
+   * 移动单个项（P4d F1/T52，剪切粘贴与拖拽移动共用；批量 = 前端队列逐条调用 D42）：
+   * 校验链：源归属（30001）→ 源在回收站（30019，R38）→ 目标为当前用户的未删除目录（0=根目录）
+   * → 源为站点根（30019，R37）→ 防环：目标位于源子树内（含源自身，30019）→ R39 公开继承标记
+   * → 同父目录幂等返回 → R6 目标子项上限/深度上限（30006）→ R4 同名自动"(1)" → 更新 parentId。
+   * 公开性按新父目录上溯重新判定（三态自然语义）；token 挂 fileId 不受影响（D30）；used 不变。
+   * 响应 `{ id, name, finalName, targetPublic }`：targetPublic 且未带 confirmPublic 时**不执行移动**，
+   * 仅返回标记供前端弹 R39 警告后重发（批量场景整批一次确认）。
+   */
+  async move(userId: bigint, id: bigint, dto: MoveFileDto) {
+    const source = await this.prisma.cloudFile.findFirst({ where: { id, userId } })
+    if (!source) {
+      throw new BusinessException(ErrorCode.CloudFileNotFound, '文件/文件夹不存在或无权访问')
+    }
+    if (source.deletedAt) {
+      throw new BusinessException(ErrorCode.CloudMoveTargetInvalid, '回收站中的项不可移动')
+    }
+
+    const targetParentId = BigInt(dto.targetParentId)
+    // 目标校验：0=根目录（无实体行）；其余必须为当前用户的未删除文件夹
+    if (targetParentId !== BigInt(0)) {
+      const target = await this.prisma.cloudFile.findFirst({ where: { id: targetParentId, userId } })
+      if (!target) {
+        throw new BusinessException(ErrorCode.CloudFileNotFound, '目标目录不存在或无权访问')
+      }
+      if (target.deletedAt) {
+        throw new BusinessException(ErrorCode.CloudMoveTargetInvalid, '目标目录在回收站中，不可移入')
+      }
+      if (target.isDir !== 1) {
+        throw new BusinessException(ErrorCode.CloudFileNotFound, '目标不是文件夹')
+      }
+    }
+
+    // R37：站点根目录禁止移动（移动会破坏站点子树锚点）
+    if (await this.siteRoot.isSiteRoot(userId, source.id)) {
+      throw new BusinessException(ErrorCode.CloudMoveTargetInvalid, '站点根目录不可移动')
+    }
+
+    // R37 防环：目标不能是源自身，也不能位于源的子树内
+    if (
+      targetParentId === source.id ||
+      (targetParentId !== BigInt(0) && (await this.isWithinSubtree(userId, targetParentId, source.id)))
+    ) {
+      throw new BusinessException(ErrorCode.CloudMoveTargetInvalid, '不能移动到自身或其子目录下')
+    }
+
+    // R39 公开继承标记：目标上溯是否命中公开锚点（首个非继承节点法定生死，与 P4a 三态语义同口径）
+    const targetPublic = targetParentId !== BigInt(0) ? await this.isTargetPublic(userId, targetParentId) : false
+
+    // 同父目录：幂等返回（不重命名、不写库）
+    if (targetParentId === source.parentId) {
+      return { id: source.id.toString(), name: source.name, finalName: source.name, targetPublic }
+    }
+
+    // R6：目标目录子项上限（500）
+    const childCount = await this.prisma.cloudFile.count({
+      where: { userId, parentId: targetParentId, deletedAt: null },
+    })
+    if (childCount >= MAX_CHILDREN) {
+      throw new BusinessException(ErrorCode.CloudDirLimitExceeded, '目标目录子项已达上限 500 个')
+    }
+
+    // R6：深度上限（目标深度 + 源子树高度 ≤ 10）
+    const targetDepth = await this.computeDepth(targetParentId, userId)
+    const height = await this.subtreeHeight(userId, source)
+    if (targetDepth + height > MAX_DEPTH) {
+      throw new BusinessException(ErrorCode.CloudDirLimitExceeded, '目录深度不能超过 10 层')
+    }
+
+    // R4：同名自动 "(1)"（排除源自身，避免同父目录场景误判）
+    const finalName = await this.resolveNameConflict(userId, targetParentId, source.name, source.id)
+
+    // R39：未确认公开继承后果时不动库，仅返回标记
+    if (targetPublic && dto.confirmPublic !== true) {
+      return { id: source.id.toString(), name: source.name, finalName, targetPublic: true }
+    }
+
+    await this.prisma.cloudFile.update({
+      where: { id },
+      data: { parentId: targetParentId, name: finalName },
+    })
+    return { id: source.id.toString(), name: source.name, finalName, targetPublic }
   }
 
   /** 删除：软删入回收站（R2：只标记自身，后代不变）；公开行同步置空 token（P4c D30 轮换，还原后旧链接仍 40400） */
@@ -396,10 +496,17 @@ export class FileService {
     return depth
   }
 
-  /** 同名自动重命名：同目录下（未删除项）已存在则追加 "(1)"、"(2)"…（TransferService 上传复用） */
-  async resolveNameConflict(userId: bigint, parentId: bigint, name: string): Promise<string> {
+  /** 同名自动重命名：同目录下（未删除项）已存在则追加 "(1)"、"(2)"…（TransferService 上传复用；
+   * move 场景传 excludeId 排除源自身） */
+  async resolveNameConflict(
+    userId: bigint,
+    parentId: bigint,
+    name: string,
+    excludeId?: bigint,
+  ): Promise<string> {
+    const exclude = excludeId ? { id: { not: excludeId } } : {}
     const exists = await this.prisma.cloudFile.findFirst({
-      where: { userId, parentId, name, deletedAt: null },
+      where: { userId, parentId, name, deletedAt: null, ...exclude },
     })
     if (!exists) return name
 
@@ -411,11 +518,63 @@ export class FileService {
     for (let i = 1; i < MAX_CHILDREN; i++) {
       const candidate = `${baseName}(${i})${ext}`
       const conflict = await this.prisma.cloudFile.findFirst({
-        where: { userId, parentId, name: candidate, deletedAt: null },
+        where: { userId, parentId, name: candidate, deletedAt: null, ...exclude },
       })
       if (!conflict) return candidate
     }
     // 理论不可达（500 项上限），兜底返回带时间戳的名称
     return `${baseName}(${Date.now()})${ext}`
+  }
+
+  /** candidateId 是否为 ancestorId 自身或其后代（有界上溯 ≤10 层防环；0=根目录恒 false） */
+  private async isWithinSubtree(userId: bigint, candidateId: bigint, ancestorId: bigint): Promise<boolean> {
+    let cursor = candidateId
+    for (let i = 0; i <= MAX_DEPTH && cursor !== BigInt(0); i++) {
+      if (cursor === ancestorId) return true
+      const row = await this.prisma.cloudFile.findFirst({
+        where: { id: cursor, userId },
+        select: { parentId: true },
+      })
+      if (!row) return false
+      cursor = row.parentId
+    }
+    return false
+  }
+
+  /**
+   * 目标是否处于公开状态（R39 判定）：自目标上溯遇第一个非继承节点定生死
+   * （1=显式公开 → true / 2=显式阻断 → false），一路继承到根 → false（与 P4a 三态上溯同口径）。
+   */
+  private async isTargetPublic(userId: bigint, targetId: bigint): Promise<boolean> {
+    let cursor = targetId
+    for (let i = 0; i <= MAX_DEPTH + 1 && cursor !== BigInt(0); i++) {
+      const row = await this.prisma.cloudFile.findFirst({
+        where: { id: cursor, userId },
+        select: { isPublic: true, parentId: true },
+      })
+      if (!row) return false
+      if (row.isPublic === 1) return true
+      if (row.isPublic === 2) return false
+      cursor = row.parentId
+    }
+    return false
+  }
+
+  /** 子树高度（源自身计 1；文件恒 1；有界 ≤ MAX_DEPTH，用于移动后深度上限校验 R6） */
+  private async subtreeHeight(userId: bigint, source: { id: bigint; isDir: number }): Promise<number> {
+    if (source.isDir !== 1) return 1
+    let level = 1
+    let queue: bigint[] = [source.id]
+    while (queue.length > 0) {
+      const children = await this.prisma.cloudFile.findMany({
+        where: { userId, parentId: { in: queue }, deletedAt: null, isDir: 1 },
+        select: { id: true },
+      })
+      if (children.length === 0) break
+      level++
+      if (level > MAX_DEPTH) break // 异常深子树按上限截断（正常树 ≤10）
+      queue = children.map((c) => c.id)
+    }
+    return level
   }
 }

@@ -127,6 +127,14 @@ export class StorageService implements OnModuleInit {
     return createReadStream(this.resolveStorage(storageName), options)
   }
 
+  /**
+   * 解析正式区文件的绝对路径（P4d T54：yazl 打包需按路径惰性读盘，addFile 只接受真实路径）。
+   * 路径穿越校验与内部读写同源（resolveStorage），业务层不得自行拼接 UPLOAD_DIR。
+   */
+  resolvePath(storageName: string): string {
+    return this.resolveStorage(storageName)
+  }
+
   /** 正式区文件元信息；不存在返回 null（DB 有记录但物理丢失 = 数据不一致，由业务层报错） */
   async stat(storageName: string): Promise<{ size: number } | null> {
     try {

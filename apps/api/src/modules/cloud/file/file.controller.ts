@@ -9,6 +9,7 @@ import {
   FileListQueryDto,
   FilePathQueryDto,
   MkdirDto,
+  MoveFileDto,
   RenameDto,
   SetPublicDto,
   SetPublicLinkDto,
@@ -57,6 +58,20 @@ export class FileController {
   @ApiOperation({ summary: '重命名（同名冲突阻止）' })
   rename(@CurrentUser('userId') userId: string, @Body() dto: RenameDto) {
     return this.fileService.rename(BigInt(userId), dto)
+  }
+
+  @Post(':id/move')
+  @RequirePermission('cloud:file:upload')
+  @OperationLog('云盘', '移动')
+  @ApiOperation({
+    summary: '移动（P4d：防环/站点根/回收站 30019 + R4 同名 + targetPublic 公开继承标记 R39）',
+  })
+  move(
+    @CurrentUser('userId') userId: string,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: MoveFileDto,
+  ) {
+    return this.fileService.move(BigInt(userId), BigInt(id), dto)
   }
 
   @Post('set-public')

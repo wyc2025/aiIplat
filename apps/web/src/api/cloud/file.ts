@@ -24,6 +24,45 @@ export const renameFile = (id: number, name: string) =>
 /** 删除（软删入回收站） */
 export const removeFile = (id: number) => del(`/cloud/file/${id}`)
 
+/** 移动结果（P4d T52：targetPublic 且未确认时未执行移动，前端弹 R39 警告后带 confirmPublic 重发） */
+export interface MoveFileResult {
+  id: string
+  name: string
+  finalName: string
+  targetPublic: boolean
+}
+
+/**
+ * 移动（P4d：剪切/粘贴与拖拽移动共用；批量 = 队列逐条调用 D42）。
+ * confirmPublic=true 表示已确认「目标处于公开状态、移入后对外可见」（R39）。
+ */
+export const moveFile = (id: number, targetParentId: number, confirmPublic = false): Promise<MoveFileResult> =>
+  post<MoveFileResult>(`/cloud/file/${id}/move`, { targetParentId, confirmPublic })
+
+/**
+ * 批量打包下载（P4d T54）：流式 zip，浏览器原生下载。
+ * 走 axios Blob（同预览/下载口径：自动带 token，享受 401 静默刷新）；timeout=0 大包不限时。
+ * 后端业务错误为 HTTP 200 + JSON 统一体，此处按 content-type 识别并抛出（否则会被存成 .zip）。
+ */
+export const packDownloadBlob = async (ids: string[]): Promise<Blob> => {
+  const blob = (await instance.post(`/cloud/file/pack-download`, { ids }, {
+    responseType: 'blob',
+    timeout: 0,
+  })) as unknown as Blob
+  if (blob.type.includes('application/json')) {
+    const text = await blob.text()
+    let message = '打包下载失败'
+    try {
+      const body = JSON.parse(text) as { message?: string }
+      if (body.message) message = body.message
+    } catch {
+      // 非 JSON 体：用默认文案
+    }
+    throw new Error(message)
+  }
+  return blob
+}
+
 /**
  * 上传文件（multipart/form-data，全程流式，配额校验）。
  * overwrite=1 且同目录存在同名文件时物理替换（URL 不变）；缺省同名自动 (1)。

@@ -15,6 +15,7 @@
 | P4a  | 个人网站：开放站点（静态托管 + 文章/评论/栏目）+ 开放数据 API                                         | ✅ 已完成 |
 | P4b  | 个人网站：AI 编写站点（工具三件套）+ 在线编辑器 + 模板库                                              | ✅ 已完成 |
 | P4c  | 云盘增强：公开链接（/view 免登录落地页）+ 批量拖拽上传 + 在线解压                                     | ✅ 已完成 |
+| P4d  | 云盘增强二期：移动（剪切/拖拽）+ 多选批量 + 打包下载 + 分享升级（提取码/文件夹分享）+ 公开语义分流    | ✅ 已完成 |
 
 ## 技术栈
 
@@ -117,6 +118,7 @@ pnpm dev:web           # 前端 http://localhost:5173
 | [docs/PRD-P4A-SITE.md](./docs/PRD-P4A-SITE.md) / [ARCHITECTURE-P4A-增补](./docs/ARCHITECTURE-P4A-增补.md)                 | P4a 个人网站（开放站点 + 文章）                   |
 | [docs/PRD-P4B-SITE.md](./docs/PRD-P4B-SITE.md) / [ARCHITECTURE-P4B-增补](./docs/ARCHITECTURE-P4B-增补.md)                 | P4b AI 编写站点 + 在线编辑器 + 模板库             |
 | [docs/P4C/PRD-P4C-PUBLIC.md](./docs/P4C/PRD-P4C-PUBLIC.md) / [ARCHITECTURE-P4C-增补](./docs/P4C/ARCHITECTURE-P4C-增补.md) | P4c 公开机制 + 批量上传 + 在线解压                |
+| [docs/P4D/PRD-P4D-CLOUD.md](./docs/P4D/PRD-P4D-CLOUD.md) / [ARCHITECTURE-P4D-增补](./docs/P4D/ARCHITECTURE-P4D-增补.md)   | P4d 移动/批量/打包下载 + 分享升级 + 语义分流      |
 | [docs/PLATFORM-GUIDE.md](./docs/PLATFORM-GUIDE.md)                                                                        | 平台使用手册（注入 AI system prompt）             |
 | [docs/PROGRESS.md](./docs/PROGRESS.md)                                                                                    | 进度台账（任务拆解与完成记录，AI 每次交付后更新） |
 
@@ -126,7 +128,9 @@ pnpm dev:web           # 前端 http://localhost:5173
 - [x] AI 对话 + 多厂商切换 + 套餐积分
 - [x] AI 工具调用（自然语言操作系统）+ 平台知识问答
 - [x] 云盘（公开链接 / 批量拖拽上传 / 在线解压）
+- [x] 云盘增强二期（移动与批量 / 打包下载 / 分享提取码与文件夹分享 / 公开语义分流）
 - [x] 个人网站（支持 AI 生成站点）
+- [ ] 多站点（P4e：配额化 + AI 工具单数语义改造 + 删站并入）
 - [ ] AI 定时任务、真实支付接入、RAG 知识库
 
 ## License

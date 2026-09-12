@@ -45,11 +45,19 @@ export const staticRoutes: RouteRecordRaw[] = [
     meta: { title: '404', hidden: true },
   },
   {
-    // 云盘公开分享访客页：独立根路由（免登录、无布局侧边栏），凭 token 访问
+    // 云盘分享访客页：独立根路由（免登录、无布局侧边栏），凭 token 访问；
+    // P4d 起：文件分享渲染 FileView、文件夹分享渲染 FolderView（含下钻与整包下载）
     path: '/share/:token',
     name: 'share-visitor',
     component: () => import('@/views/cloud/share-visitor/index.vue'),
     meta: { title: '文件分享', hidden: true },
+  },
+  {
+    // 文件夹分享内子文件预览（P4d D48；路径前缀同 /share/*，守卫按前缀放行）
+    path: '/share/:token/file',
+    name: 'share-visitor-file',
+    component: () => import('@/views/cloud/share-visitor/index.vue'),
+    meta: { title: '文件查看', hidden: true },
   },
   {
     // 云盘公开落地页（P4c D33）：独立根路由（免登录、无布局、极简无品牌），凭 token 访问

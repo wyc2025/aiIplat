@@ -478,10 +478,12 @@ model CloudShare {
   id         BigInt    @id @default(autoincrement())
   /// 创建者
   userId     BigInt    @map("user_id")
-  /// 逻辑关联 cloud_file（仅文件，is_dir=0）
+  /// 逻辑关联 cloud_file（P4d D48 起可为文件夹行，is_dir=1）
   fileId     BigInt    @map("file_id")
   /// 随机 URL-safe 串（crypto.randomBytes）
-  token      String    @unique @map("token") @db.VarChar(32)
+  token        String  @unique @map("token") @db.VarChar(32)
+  /// 提取码哈希（P4d D47/R42：bcrypt，不明文）；NULL = 无密码
+  passwordHash String? @map("password_hash") @db.VarChar(64)
   /// 下载成功 +1
   visitCount Int       @default(0) @map("visit_count")
   /// null = 永久
