@@ -32,7 +32,7 @@
         <span class="v-user">
           <el-avatar
             :size="28"
-            :src="userStore.avatar || undefined"
+            :src="userStore.avatarUrl || undefined"
           >
             {{ userStore.nickname.charAt(0) }}
           </el-avatar>

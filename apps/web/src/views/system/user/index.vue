@@ -159,6 +159,16 @@
           >
             配额
           </el-button>
+          <!-- 站点配额：admin 自己这一行也给入口（否则超管永远卡在默认 SITE_DEFAULT_LIMIT=1，无法自测/自用多站）；
+               后端只校验 site:admin:quota 权限 + 「下限 = 当前站点数」，调整自身同样安全 -->
+          <el-button
+            v-permission="'site:admin:quota'"
+            link
+            type="primary"
+            @click="openSiteQuota(row)"
+          >
+            站点配额
+          </el-button>
           <el-button
             v-if="row.username !== 'admin'"
             v-permission="'system:user:delete'"
@@ -379,6 +389,50 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 站点配额调整弹窗（P4E T63：site:admin:quota） -->
+    <el-dialog
+      v-model="siteQuotaVisible"
+      title="调整站点配额"
+      width="480px"
+      :close-on-click-modal="false"
+      destroy-on-close
+    >
+      <el-form
+        v-loading="siteQuotaLoading"
+        label-width="96px"
+      >
+        <el-form-item label="用户">
+          <span>{{ siteQuotaRow?.nickname }}（{{ siteQuotaRow?.username }}）</span>
+        </el-form-item>
+        <el-form-item label="已有站点数">
+          <span>{{ siteQuotaUsed }}</span>
+          <span class="v-quota-hint">（配额下限）</span>
+        </el-form-item>
+        <el-form-item label="站点数上限">
+          <el-input-number
+            v-model="siteQuotaLimit"
+            :min="siteQuotaUsed"
+            :step="1"
+            :controls="true"
+            style="width: 160px"
+          />
+          <span class="v-quota-unit">个</span>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="siteQuotaVisible = false">
+          取 消
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="siteQuotaSubmitting"
+          @click="handleSiteQuotaSubmit"
+        >
+          确 定
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -400,6 +454,7 @@ import {
 } from '@/api/system/user'
 import { getAllRoles } from '@/api/system/role'
 import { getDeptList } from '@/api/system/dept'
+import { getUserSiteQuota, updateUserSiteQuota } from '@/api/site/site'
 import FormDialog from '@/components/FormDialog/index.vue'
 import ProTable from '@/components/ProTable/index.vue'
 import { useTable } from '@/hooks/useTable'
@@ -676,6 +731,48 @@ async function handleQuotaSubmit() {
     // 错误已由拦截器提示
   } finally {
     quotaSubmitting.value = false
+  }
+}
+
+// ========== 站点配额调整（site:admin:quota，P4E T63） ==========
+const siteQuotaVisible = ref(false)
+const siteQuotaLoading = ref(false)
+const siteQuotaSubmitting = ref(false)
+const siteQuotaRow = ref<UserRow | null>(null)
+const siteQuotaUsed = ref(0)
+const siteQuotaLimit = ref(1)
+
+async function openSiteQuota(row: UserRow) {
+  siteQuotaRow.value = row
+  siteQuotaVisible.value = true
+  siteQuotaLoading.value = true
+  try {
+    const res = await getUserSiteQuota(row.id)
+    siteQuotaUsed.value = res.used
+    // 上限初值：不低于已有站点数
+    siteQuotaLimit.value = Math.max(res.limit, res.used)
+  } catch {
+    // 错误已由拦截器提示
+  } finally {
+    siteQuotaLoading.value = false
+  }
+}
+
+async function handleSiteQuotaSubmit() {
+  if (!siteQuotaRow.value) return
+  if (siteQuotaLimit.value < siteQuotaUsed.value) {
+    ElMessage.warning('配额下限为当前站点数，不可更低')
+    return
+  }
+  siteQuotaSubmitting.value = true
+  try {
+    await updateUserSiteQuota({ userId: siteQuotaRow.value.id, limit: siteQuotaLimit.value })
+    ElMessage.success('站点配额已更新')
+    siteQuotaVisible.value = false
+  } catch {
+    // 错误已由拦截器提示
+  } finally {
+    siteQuotaSubmitting.value = false
   }
 }
 </script>

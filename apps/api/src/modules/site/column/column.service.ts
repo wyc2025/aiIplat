@@ -9,8 +9,11 @@ import type { CreateColumnDto, UpdateColumnDto } from './dto/column.dto'
 const MAX_LEVEL = 3
 
 /**
- * 栏目管理（PRD F2 / API.md §6.2）：树形 ≤3 级（R6）、删除保护（有子栏目或文章含草稿 → 40107）、
- * 换父级防环（禁止指向自身或后代）；写操作后 scanDel site:data:{siteId}:* 失效开放层热缓存（D12）。
+ * 栏目管理（PRD F2 / API.md §6.2；P4E T61 多站点作用域化）：树形 ≤3 级（R6）、
+ * 删除保护（有子栏目或文章含草稿 → 40107）、换父级防环（禁止指向自身或后代）；
+ * 写操作后 scanDel site:data:{siteId}:* 失效开放层热缓存（D12）。
+ * 属主口径（API-P4E §10.3）：list/create 以请求 siteId 为准（40119）；
+ * update/delete 按实体反查所属站点再校验属主，不信任请求里的 siteId。
  */
 @Injectable()
 export class SiteColumnService {
@@ -20,8 +23,8 @@ export class SiteColumnService {
   ) {}
 
   /** 平铺裸数组（前端组树，平台惯例），含 articleCount（含草稿） */
-  async list(userId: bigint) {
-    const site = await this.assertSite(userId)
+  async list(userId: bigint, siteId: bigint) {
+    const site = await this.requireOwnedSite(userId, siteId)
     const [columns, counts] = await Promise.all([
       this.prisma.siteColumn.findMany({
         where: { siteId: site.id },
@@ -46,7 +49,7 @@ export class SiteColumnService {
 
   /** 新增栏目：≤3 级（R6） */
   async create(userId: bigint, dto: CreateColumnDto) {
-    const site = await this.assertSite(userId)
+    const site = await this.requireOwnedSite(userId, BigInt(dto.siteId))
     const parentId = BigInt(dto.parentId)
     if (parentId !== BigInt(0)) {
       const parent = await this.findOwned(site.id, parentId)
@@ -65,8 +68,7 @@ export class SiteColumnService {
 
   /** 编辑栏目：换父级防环（禁止指向自身或后代）+ 结果不得超 3 级（R6） */
   async update(userId: bigint, id: bigint, dto: UpdateColumnDto) {
-    const site = await this.assertSite(userId)
-    const column = await this.findOwned(site.id, id)
+    const { column, site } = await this.findOwnedColumn(userId, id)
 
     const data: { name?: string; sort?: number; parentId?: bigint } = {}
     if (dto.name !== undefined) data.name = dto.name
@@ -107,8 +109,7 @@ export class SiteColumnService {
 
   /** 删除栏目：有子栏目或文章（含草稿）→ 40107（R6） */
   async remove(userId: bigint, id: bigint) {
-    const site = await this.assertSite(userId)
-    const column = await this.findOwned(site.id, id)
+    const { column, site } = await this.findOwnedColumn(userId, id)
     const [childCount, articleCount] = await Promise.all([
       this.prisma.siteColumn.count({ where: { siteId: site.id, parentId: column.id } }),
       this.prisma.siteArticle.count({ where: { siteId: site.id, columnId: column.id } }),
@@ -126,16 +127,29 @@ export class SiteColumnService {
 
   // ================= 私有辅助 =================
 
-  /** 当前用户站点（R1 数据隔离前提）；未开通 → 40101 */
-  private async assertSite(userId: bigint) {
-    const site = await this.prisma.siteSite.findFirst({ where: { userId } })
+  /** 属主站点（P4E：不存在/非属主 → 40119；list/create 以请求 siteId 为准） */
+  private async requireOwnedSite(userId: bigint, siteId: bigint) {
+    const site = await this.prisma.siteSite.findFirst({ where: { id: siteId, userId } })
     if (!site) {
-      throw new BusinessException(ErrorCode.SiteNotFound, '站点不存在或未开通')
+      throw new BusinessException(ErrorCode.SiteForbidden, '站点不存在或非属主')
     }
     return site
   }
 
-  /** 本站栏目存在性（R1：他人/不存在一律 40106） */
+  /**
+   * 按实体反查属主（P4E T61：update/delete 不信任请求 siteId）：
+   * 栏目不存在 → 40106；栏目存在但站点非属主 → 40119。
+   */
+  private async findOwnedColumn(userId: bigint, id: bigint) {
+    const column = await this.prisma.siteColumn.findFirst({ where: { id } })
+    if (!column) {
+      throw new BusinessException(ErrorCode.SiteColumnNotFound, '栏目不存在')
+    }
+    const site = await this.requireOwnedSite(userId, column.siteId)
+    return { column, site }
+  }
+
+  /** 本站栏目存在性（R1：他人/不存在一律 40106；用于站内父级校验） */
   private async findOwned(siteId: bigint, id: bigint) {
     const column = await this.prisma.siteColumn.findFirst({
       where: { id, siteId },

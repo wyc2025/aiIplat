@@ -210,6 +210,23 @@ export class CloudFacade {
   }
 
   /**
+   * 删站内部通道（P4E R53）：站点根连同子树软删进回收站。
+   * 与 discardSiteDraft 的区别：discard 用于建站失败的未公开草稿回滚（物理删 + used 回退），
+   * removeSiteRoot 用于删站（软删 + **used 不动**——数据可还原，占用不释放）。
+   *
+   * R2 语义「只标记自身」：仅置根的 deleted_at，后代不自标（回收站按祖先链判定同属已删子树），
+   * 首次访问即整体不可达；同时置空根的 public_token（P4c D30 轮换，还原后旧链接仍 40400）。
+   * 该通道绕过 R52 用户面删除保护（cloud 域对站点根的 30020 拦截只作用于用户直接删除），
+   * 属主校验在 site 域完成（manage.getOwnedSite）。
+   */
+  async removeSiteRoot(userId: bigint, rootFolderId: bigint): Promise<void> {
+    await this.prisma.cloudFile.updateMany({
+      where: { id: rootFolderId, userId, deletedAt: null },
+      data: { deletedAt: new Date(), publicToken: null },
+    })
+  }
+
+  /**
    * 登记公开文件（供 site 域模板复制：写正式区 + 落 cloud_file + used 记账，复用 T27 链路）。
    * is_public 不写（默认 0=继承父目录）；isPublic 参数保留供特殊场景显式置公开。
    * used 记账用 upsert（配额懒创建：全新用户未做过云盘操作时 cloud_usage 行不存在，T40 联调修复）。

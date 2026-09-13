@@ -3,16 +3,16 @@ import { ApiPropertyOptional } from '@nestjs/swagger'
 import { Type } from 'class-transformer'
 import { IsIn, IsInt, IsOptional, IsString, Length, Min } from 'class-validator'
 import { ErrorCode } from '../../../common/constants/error-code'
-import { PageQueryDto } from '../../../common/dto/page-query.dto'
 import { PageResultDto } from '../../../common/dto/page-result.dto'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { RedisService } from '../../../infra/redis/redis.service'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
+import { SitePageQueryDto } from '../dto/site-id.dto'
 import type { CreateArticleDto, UpdateArticleDto, UpdateArticleStatusDto } from './dto/article.dto'
 import type { SiteArticle } from '@prisma/client'
 
-/** 文章列表查询（分页 + 筛选：栏目/标签/状态/标题关键词） */
-export class ArticleQueryDto extends PageQueryDto {
+/** 文章列表查询（分页 + 必带 siteId + 筛选：栏目/标签/状态/标题关键词） */
+export class ArticleQueryDto extends SitePageQueryDto {
   @ApiPropertyOptional({ description: '按栏目筛选' })
   @IsOptional()
   @Type(() => Number)
@@ -70,9 +70,11 @@ export function resolveSummary(summary: string | undefined, contentMd: string): 
 }
 
 /**
- * 文章管理（PRD F3 / API.md §6.2）：字数 R14 保存时统计、摘要自动生成、封面必须 media/ 前缀（40105）、
- * 发布状态机（首次发布写 published_at，下架再上架不刷新）、物理删除连带标签关联与评论（R7）、
- * tagIds 多对多整体重建；写操作后 scanDel site:data:{siteId}:*（D12）。
+ * 文章管理（PRD F3 / API.md §6.2；P4E T61 多站点作用域化）：字数 R14 保存时统计、摘要自动生成、
+ * 封面必须 media/ 前缀（40105）、发布状态机（首次发布写 published_at，下架再上架不刷新）、
+ * 物理删除连带标签关联与评论（R7）、tagIds 多对多整体重建；写操作后 scanDel site:data:{siteId}:*（D12）。
+ * 属主口径（API-P4E §10.3）：list/create 以请求 siteId 为准（40119）；
+ * detail/update/delete 按实体反查所属站点再校验属主，不信任请求里的 siteId。
  */
 @Injectable()
 export class SiteArticleService {
@@ -83,7 +85,7 @@ export class SiteArticleService {
 
   /** 分页列表：筛选 columnId/tagId/status/keyword（标题模糊） */
   async list(userId: bigint, query: ArticleQueryDto): Promise<PageResultDto<Record<string, unknown>>> {
-    const site = await this.assertSite(userId)
+    const site = await this.requireOwnedSite(userId, BigInt(query.siteId))
 
     // tagId 筛选：先查关联表得文章 ID 集（空集直接返回空页）
     let tagArticleIds: bigint[] | null = null
@@ -121,15 +123,14 @@ export class SiteArticleService {
 
   /** 详情（附加 contentMd） */
   async detail(userId: bigint, id: bigint) {
-    const site = await this.assertSite(userId)
-    const article = await this.findOwned(site.id, id)
+    const { article, site } = await this.findOwnedArticle(userId, id)
     const [item] = await this.toListItem(site.id, [article])
     return { ...item, contentMd: article.contentMd }
   }
 
   /** 新建文章 */
   async create(userId: bigint, dto: CreateArticleDto) {
-    const site = await this.assertSite(userId)
+    const site = await this.requireOwnedSite(userId, BigInt(dto.siteId))
     await this.assertColumn(site.id, BigInt(dto.columnId))
     await this.assertTags(site.id, dto.tagIds)
     this.assertCoverPath(dto.coverPath)
@@ -165,8 +166,7 @@ export class SiteArticleService {
 
   /** 编辑文章：提供即更新；tagIds 提供即整体重建；发布状态机同 status 接口 */
   async update(userId: bigint, id: bigint, dto: UpdateArticleDto) {
-    const site = await this.assertSite(userId)
-    const article = await this.findOwned(site.id, id)
+    const { article, site } = await this.findOwnedArticle(userId, id)
     if (dto.columnId !== undefined) {
       await this.assertColumn(site.id, BigInt(dto.columnId))
     }
@@ -212,8 +212,7 @@ export class SiteArticleService {
 
   /** 发布/下架：0 下架 / 1 发布；首次发布写 published_at（下架再上架不刷新） */
   async updateStatus(userId: bigint, id: bigint, dto: UpdateArticleStatusDto) {
-    const site = await this.assertSite(userId)
-    const article = await this.findOwned(site.id, id)
+    const { article, site } = await this.findOwnedArticle(userId, id)
     const publishedAt = this.resolvePublishedAt(article, dto.status)
     await this.prisma.siteArticle.update({
       where: { id: article.id },
@@ -225,8 +224,7 @@ export class SiteArticleService {
 
   /** 物理删除（R7）：连带 site_article_tag 与该文章全部评论，不进回收站 */
   async remove(userId: bigint, id: bigint) {
-    const site = await this.assertSite(userId)
-    const article = await this.findOwned(site.id, id)
+    const { article, site } = await this.findOwnedArticle(userId, id)
     await this.prisma.$transaction([
       this.prisma.siteArticleTag.deleteMany({ where: { articleId: article.id } }),
       this.prisma.siteComment.deleteMany({ where: { articleId: article.id } }),
@@ -238,22 +236,26 @@ export class SiteArticleService {
 
   // ================= 私有辅助 =================
 
-  /** 当前用户站点；未开通 → 40101 */
-  private async assertSite(userId: bigint) {
-    const site = await this.prisma.siteSite.findFirst({ where: { userId } })
+  /** 属主站点（P4E：不存在/非属主 → 40119；list/create 以请求 siteId 为准） */
+  private async requireOwnedSite(userId: bigint, siteId: bigint) {
+    const site = await this.prisma.siteSite.findFirst({ where: { id: siteId, userId } })
     if (!site) {
-      throw new BusinessException(ErrorCode.SiteNotFound, '站点不存在或未开通')
+      throw new BusinessException(ErrorCode.SiteForbidden, '站点不存在或非属主')
     }
     return site
   }
 
-  /** 本站文章存在性；不存在 → 40109（R1：他人/不存在一律同码） */
-  private async findOwned(siteId: bigint, id: bigint) {
-    const article = await this.prisma.siteArticle.findFirst({ where: { id, siteId } })
+  /**
+   * 按实体反查属主（P4E T61：detail/update/delete 不信任请求 siteId）：
+   * 文章不存在 → 40109；文章存在但站点非属主 → 40119。
+   */
+  private async findOwnedArticle(userId: bigint, id: bigint) {
+    const article = await this.prisma.siteArticle.findFirst({ where: { id } })
     if (!article) {
       throw new BusinessException(ErrorCode.SiteArticleNotFound, '文章不存在')
     }
-    return article
+    const site = await this.requireOwnedSite(userId, article.siteId)
+    return { article, site }
   }
 
   /** 栏目归属校验（本站）→ 40106 */

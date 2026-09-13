@@ -11,7 +11,7 @@
       >
         <el-avatar
           :size="84"
-          :src="userStore.userInfo?.avatar || undefined"
+          :src="userStore.avatarUrl || undefined"
         >
           {{ userStore.nickname.charAt(0) }}
         </el-avatar>
@@ -210,10 +210,8 @@ function beforeAvatarUpload(file: File): boolean {
 async function handleAvatarUpload(options: { file: File }) {
   try {
     const res = await uploadAvatar(options.file)
-    // 同步 userinfo.avatar（后端已落盘并登记云盘记录）
-    if (userStore.userInfo) {
-      userStore.userInfo = { ...userStore.userInfo, avatar: res.avatar }
-    }
+    // 同步 userinfo.avatar 并重新换取展示用 objectURL（后端已落盘并登记云盘记录，fileId 变化即天然版本化）
+    userStore.setAvatar(res.avatar)
     ElMessage.success('头像已更新')
   } catch {
     // 错误提示已由 request 拦截器统一弹出

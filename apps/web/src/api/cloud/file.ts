@@ -143,3 +143,16 @@ export const downloadFileBlob = (id: number): Promise<Blob> =>
     responseType: 'blob',
     timeout: 0,
   }) as unknown as Promise<Blob>
+
+/**
+ * 头像流（P3 端点 `GET /cloud/file/avatar/:id`，仅本人可读）。
+ * 与预览/下载同口径：必须走 axios 才能携带 Authorization——头像曾以 `<img src="/api/cloud/file/avatar/86">`
+ * 直连，原生请求带不了 token 会被 JwtAuthGuard 判 401，顶栏只能落回昵称首字母（PROGRESS 遗留 18）。
+ * userinfo.avatar 存的是「对外完整路径」（含 /api 前缀），而实例自带 baseURL（默认 /api），
+ * 故先剥掉前缀，避免拼出 /api/api/...（同 uploadFile 注释口径）。
+ */
+export const fetchAvatarBlob = (avatarUrl: string): Promise<Blob> =>
+  instance.get<Blob>(avatarUrl.replace(/^\/api(?=\/)/, ''), {
+    responseType: 'blob',
+    timeout: 0,
+  }) as unknown as Promise<Blob>

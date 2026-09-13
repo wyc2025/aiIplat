@@ -317,9 +317,9 @@ export interface OperationLogItem {
   createdAt: string
 }
 
-// ========== site 域实体（P4a） ==========
+// ========== site 域实体（P4a；P4E 多站点） ==========
 
-/** 我的站点（mine 接口；未开通为 null） */
+/** 站点（P4E 集合端点 list item / 详情；不再有「未开通为 null」语义） */
 export interface SiteSiteInfo {
   id: string
   slug: string
@@ -333,7 +333,23 @@ export interface SiteSiteInfo {
   siteUrl: string
   rootFolderId: string
   mediaFolderId: string
+  /** 文章数（含草稿） */
+  articleCount: number
   createdAt: string
+}
+
+/** 站点集合端点响应（P4E API §10.2：limit/used 为站点数配额） */
+export interface SiteListResult {
+  list: SiteSiteInfo[]
+  limit: number
+  used: number
+}
+
+/** 站点配额（admin 查询/调整，P4E API §10.4） */
+export interface SiteQuotaInfo {
+  userId: string
+  limit: number
+  used: number
 }
 
 /** 模板列表项（P4b T44；id = 模板目录名） */

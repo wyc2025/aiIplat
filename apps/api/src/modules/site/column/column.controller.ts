@@ -1,12 +1,15 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { CurrentUser } from '../../../gateway/decorators/current-user.decorator'
 import { OperationLog } from '../../../gateway/decorators/operation-log.decorator'
 import { RequirePermission } from '../../../gateway/decorators/require-permission.decorator'
-import { CreateColumnDto, UpdateColumnDto } from './dto/column.dto'
+import { ColumnQueryDto, CreateColumnDto, UpdateColumnDto } from './dto/column.dto'
 import { SiteColumnService } from './column.service'
 
-/** 栏目管理（site:column:*，API.md §6.2）：平铺裸数组由前端组树；写操作挂 @OperationLog */
+/**
+ * 栏目管理（site:column:*，API.md §6.2；P4E T61 siteId 作用域化）：
+ * 平铺裸数组由前端组树；list/create 必带 siteId；update/delete 按实体反查属主；写操作挂 @OperationLog。
+ */
 @ApiTags('个人网站-栏目管理')
 @ApiBearerAuth()
 @Controller('site/column')
@@ -15,15 +18,15 @@ export class SiteColumnController {
 
   @Get('list')
   @RequirePermission('site:column:list')
-  @ApiOperation({ summary: '栏目平铺列表（含 articleCount，前端组树）' })
-  list(@CurrentUser('userId') userId: string) {
-    return this.columnService.list(BigInt(userId))
+  @ApiOperation({ summary: '栏目平铺列表（必带 siteId；含 articleCount，前端组树）' })
+  list(@CurrentUser('userId') userId: string, @Query() query: ColumnQueryDto) {
+    return this.columnService.list(BigInt(userId), BigInt(query.siteId))
   }
 
   @Post()
   @RequirePermission('site:column:create')
   @OperationLog('个人网站', '新增栏目')
-  @ApiOperation({ summary: '新增栏目（≤3 级，R6）' })
+  @ApiOperation({ summary: '新增栏目（body 带 siteId；≤3 级，R6）' })
   create(@CurrentUser('userId') userId: string, @Body() dto: CreateColumnDto) {
     return this.columnService.create(BigInt(userId), dto)
   }

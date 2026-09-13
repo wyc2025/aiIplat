@@ -1,9 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Type } from 'class-transformer'
 import { IsInt, IsOptional, IsString, Length, Min } from 'class-validator'
+import { SiteIdDto } from '../../dto/site-id.dto'
+
+/** 栏目列表查询（P4E T61：必带 siteId，属主校验 40119） */
+export class ColumnQueryDto extends SiteIdDto {}
 
 /** 创建栏目（R6：≤3 级，层级校验在 Service；同级同名不去重） */
-export class CreateColumnDto {
+export class CreateColumnDto extends SiteIdDto {
   @ApiPropertyOptional({ description: '父栏目 ID（0 = 根，缺省 0）', default: 0 })
   @IsOptional()
   @Type(() => Number)
@@ -23,7 +27,7 @@ export class CreateColumnDto {
   sort: number = 0
 }
 
-/** 编辑栏目（name/sort/parentId 均可选；换父级禁止指向自身或后代且不得超 3 级） */
+/** 编辑栏目（name/sort/parentId 均可选；换父级禁止指向自身或后代且不得超 3 级；属主按实体反查） */
 export class UpdateColumnDto {
   @ApiPropertyOptional({ description: '栏目名称（1~32 字）' })
   @IsOptional()

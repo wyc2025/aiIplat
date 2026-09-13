@@ -13,6 +13,12 @@
       v-if="listSummary"
       class="v-tc-summary"
     >
+      <div
+        v-if="siteLabel"
+        class="v-tc-site"
+      >
+        目标站点：{{ siteLabel }}
+      </div>
       <el-table
         :data="listSummary"
         size="small"
@@ -143,6 +149,12 @@ const isExpired = computed(() => props.expired === true)
 /** 结构化摘要（数组）→ 渲染文件清单表格；字符串摘要维持 P2b 文本渲染 */
 const listSummary = computed(() => (Array.isArray(props.summary) ? props.summary : null))
 
+/** P4E T62：目标站点标识（多站 write_site_files 确认卡明示写入站点；缺省不渲染） */
+const siteLabel = computed(() => {
+  const site = listSummary.value?.[0]?.site
+  return site ? `${site.title}（${site.slug}）` : ''
+})
+
 function handleConfirm(approved: boolean) {
   submitting.value = true
   emit('confirm', approved)
@@ -181,6 +193,11 @@ function handleConfirm(approved: boolean) {
 }
 .v-tc-table {
   width: 100%;
+}
+.v-tc-site {
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: #606266;
 }
 .v-tc-estimate {
   margin-top: 4px;

@@ -58,6 +58,8 @@ const menuTree: MenuSeed[] = [
           { name: '分配角色', type: 3, perms: 'system:user:assign-role', sort: 6 },
           // P3：云盘配额调整（cloud 域按钮挂在用户管理下，属 admin 能力，不给 common）
           { name: '调整配额', type: 3, perms: 'cloud:admin:quota', sort: 7 },
+          // P4E：站点配额调整（site 域按钮挂在用户管理下，属 admin 能力，不给 common）
+          { name: '站点配额', type: 3, perms: 'site:admin:quota', sort: 8 },
         ],
       },
       {
@@ -316,6 +318,16 @@ const menuTree: MenuSeed[] = [
     icon: 'Monitor',
     sort: 6,
     children: [
+      // P4E：站点列表（多站点管理入口，D54）
+      {
+        name: '站点列表',
+        type: 2,
+        path: 'site/site',
+        component: 'site/site/index',
+        perms: 'site:site:manage',
+        icon: 'Grid',
+        sort: 1,
+      },
       {
         name: '站点设置',
         type: 2,
@@ -323,7 +335,7 @@ const menuTree: MenuSeed[] = [
         component: 'site/setting/index',
         perms: 'site:site:manage',
         icon: 'Operation',
-        sort: 1,
+        sort: 2,
       },
       {
         name: '栏目管理',
@@ -332,7 +344,7 @@ const menuTree: MenuSeed[] = [
         component: 'site/column/index',
         perms: 'site:column:list',
         icon: 'Menu',
-        sort: 2,
+        sort: 3,
         children: [
           { name: '栏目查询', type: 3, perms: 'site:column:list', sort: 1 },
           { name: '栏目新增', type: 3, perms: 'site:column:create', sort: 2 },
@@ -347,7 +359,7 @@ const menuTree: MenuSeed[] = [
         component: 'site/article/index',
         perms: 'site:article:list',
         icon: 'Document',
-        sort: 3,
+        sort: 4,
         children: [
           { name: '文章查询', type: 3, perms: 'site:article:list', sort: 1 },
           { name: '文章新增', type: 3, perms: 'site:article:create', sort: 2 },
@@ -363,7 +375,7 @@ const menuTree: MenuSeed[] = [
         component: 'site/tag/index',
         perms: 'site:tag:list',
         icon: 'Collection',
-        sort: 4,
+        sort: 5,
         children: [
           { name: '标签查询', type: 3, perms: 'site:tag:list', sort: 1 },
           { name: '标签新增', type: 3, perms: 'site:tag:create', sort: 2 },
@@ -378,7 +390,7 @@ const menuTree: MenuSeed[] = [
         component: 'site/comment/index',
         perms: 'site:comment:list',
         icon: 'ChatDotSquare',
-        sort: 5,
+        sort: 6,
         children: [
           { name: '评论查询', type: 3, perms: 'site:comment:list', sort: 1 },
           { name: '评论审核', type: 3, perms: 'site:comment:audit', sort: 2 },
@@ -498,7 +510,8 @@ async function main() {
     }
   }
 
-  // P4a：common 角色授予「个人网站」整棵子树（无 admin 专属按钮，全部授予）；
+  // P4a/P4E：common 角色授予「个人网站」整棵子树（含新增「站点列表」；无 admin 专属按钮，全部授予）；
+  // site:admin:quota 挂在「系统管理 → 用户管理」下（非本站子树），故 natural 不会授予 common；
   // cloud:file:public（设为公开）已由上方云盘子树 BFS 一并纳入（仅排除 cloud:admin:quota）
   const siteDir = await prisma.sysMenu.findFirst({
     where: { parentId: BigInt(0), name: '个人网站' },

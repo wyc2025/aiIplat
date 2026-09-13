@@ -10,8 +10,15 @@ import type { ApplyTemplateDto } from './dto/template.dto'
 /** 模板库资产目录（应用静态资产，读取用 fs；§15.7：实时读不缓存，模板由部署侧维护） */
 const TEMPLATES_DIR = join(process.cwd(), 'assets', 'site-templates')
 
+/** 模板列表项（id = 模板目录名） */
+export interface SiteTemplateItem {
+  id: string
+  name: string
+  description: string
+}
+
 /**
- * 模板库（P4b F5/§15.7）：
+ * 模板库（P4b F5/§15.7；P4E T61 应用模板站点化）：
  * - 列表：读 assets/site-templates 各子目录的 template.json，缺失或解析失败跳过并记运行日志；
  * - 应用：温和覆盖（R20/D23）——遍历模板文件（排除 template.json）经 SiteFacade.writeFiles
  *   批量写入（同路径软删旧版 + 新建，media/ 与模板外文件不动，写完 writeFiles 内部精确失效
@@ -24,7 +31,7 @@ export class SiteTemplateService {
   constructor(private readonly siteFacade: SiteFacade) {}
 
   /** 模板列表 [{ id, name, description }]（id = 模板目录名） */
-  async listTemplates(): Promise<Array<{ id: string; name: string; description: string }>> {
+  async listTemplates(): Promise<SiteTemplateItem[]> {
     let entries: Dirent[]
     try {
       entries = await readdir(TEMPLATES_DIR, { withFileTypes: true })
@@ -33,7 +40,7 @@ export class SiteTemplateService {
       return []
     }
 
-    const list: Array<{ id: string; name: string; description: string }> = []
+    const list: SiteTemplateItem[] = []
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
       try {
@@ -52,11 +59,15 @@ export class SiteTemplateService {
   }
 
   /** 应用模板（温和覆盖），返回逐文件应用清单（含部分成功明细） */
-  async applyTemplate(userId: bigint, dto: ApplyTemplateDto): Promise<SiteFileWriteResult[]> {
-    // 未开通优先（§15.7 步骤 1 顺序：40101 先于 40116）
-    const site = await this.siteFacade.getMySiteInfo(userId)
+  async applyTemplate(
+    userId: bigint,
+    siteId: bigint,
+    dto: ApplyTemplateDto,
+  ): Promise<SiteFileWriteResult[]> {
+    // 属主校验优先（P4E T61：站点不存在/非属主 40119 先于模板不存在 40116）
+    const site = await this.siteFacade.getSiteInfo(userId, siteId)
     if (!site) {
-      throw new BusinessException(ErrorCode.SiteNotFound, '您尚未开通个人网站')
+      throw new BusinessException(ErrorCode.SiteForbidden, '站点不存在或非属主')
     }
 
     // 模板目录（templateId 已由 DTO 正则挡穿越字符；目录不存在 → 40116）
@@ -79,6 +90,6 @@ export class SiteTemplateService {
     }
 
     // 写入经 SiteFacade.writeFiles（站点语义校验 + 机械写入 + 部分成功语义 + site:path 精确失效）
-    return this.siteFacade.writeFiles(userId, files)
+    return this.siteFacade.writeFiles(userId, site.id, files)
   }
 }

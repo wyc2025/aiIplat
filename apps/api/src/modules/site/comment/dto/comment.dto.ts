@@ -1,10 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Type } from 'class-transformer'
 import { IsIn, IsInt, IsOptional, IsString, Length, Min } from 'class-validator'
-import { PageQueryDto } from '../../../../common/dto/page-query.dto'
+import { SitePageQueryDto } from '../../dto/site-id.dto'
 
-/** 评论列表查询（筛选：审核状态/文章/昵称关键词） */
-export class CommentQueryDto extends PageQueryDto {
+/** 评论列表查询（P4E T61：必带 siteId；筛选：审核状态/文章/昵称关键词） */
+export class CommentQueryDto extends SitePageQueryDto {
   @ApiPropertyOptional({ description: '按审核状态筛选（0 待审核 / 1 已通过 / 2 已驳回）', enum: [0, 1, 2] })
   @IsOptional()
   @Type(() => Number)
@@ -26,7 +26,7 @@ export class CommentQueryDto extends PageQueryDto {
   keyword?: string
 }
 
-/** 审核评论（1 通过 / 2 驳回） */
+/** 审核评论（1 通过 / 2 驳回；属主按实体反查） */
 export class AuditCommentDto {
   @ApiProperty({ description: '审核结果（1 通过 / 2 驳回）', enum: [1, 2] })
   @Type(() => Number)

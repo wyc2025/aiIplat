@@ -132,6 +132,8 @@ export const ErrorCode = {
   CloudSharePasswordWrong: 30018,
   /** 非法移动目标（移入自身子树 / 站点根 / 回收站，P4d R37） */
   CloudMoveTargetInvalid: 30019,
+  /** 站点根目录禁止直接删除（须先删除站点，P4E R52） */
+  CloudSiteRootProtected: 30020,
 
   // ========== site 域（40xxx 段，40101 起；40001/40100/40300/40400/42900 为通用码已占用，见 API.md §6.1） ==========
   /** 站点不存在或未开通 */
@@ -168,6 +170,14 @@ export const ErrorCode = {
   SiteTemplateNotFound: 40116,
   /** 该文件夹未开放列表浏览（P4c，云盘公开文件夹 allow_listing=0 访问列表；开放层段） */
   CloudListingDisabled: 40117,
+  /**
+   * 站点数量已达上限（message 带 limit/used，P4E R47）。
+   * 编号说明：PRD-P4E 原定 40117，但该码已被 P4c 的 CloudListingDisabled 占用
+   * （前端 FolderView 与云盘公开页硬编码依赖），故 P4E 两码顺延为 40118/40119。
+   */
+  SiteQuotaExceeded: 40118,
+  /** 站点不存在或非属主（P4E R56；不暴露他人站点存在性） */
+  SiteForbidden: 40119,
 } as const
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode]

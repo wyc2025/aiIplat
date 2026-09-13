@@ -2,7 +2,7 @@
 
 > 本文件由 AI 在每完成一个任务后更新。开工前先读本文件，从"进行中 / 下一个待办"继续。
 
-## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32），P4a 个人网站模块全部完成（T33~~T40），P4b（AI 编写站点 + 在线编辑器 + 模板库）全部完成（T41~~T45），P4c（云盘公开机制 + 批量拖拽上传 + 在线解压）全部完成（T46~~T50），**P4c 走查补丁 W1~~W4 已套（纯文档）**，**P4d（云盘操作增强 + 分享升级 + 公开语义分流）全部完成（T52~~T58）**
+## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32），P4a 个人网站模块全部完成（T33~~T40），P4b（AI 编写站点 + 在线编辑器 + 模板库）全部完成（T41~~T45），P4c（云盘公开机制 + 批量拖拽上传 + 在线解压）全部完成（T46~~T50），**P4c 走查补丁 W1~~W4 已套（纯文档）**，**P4d（云盘操作增强 + 分享升级 + 公开语义分流）全部完成（T52~~T58）\**，\**P4e（多站点配额化 + 删站 + AI 多站语义 + sid 日志脱敏）全部完成（T59~~T65）**
 
 ## 里程碑总览
 
@@ -62,6 +62,21 @@
 | T56  | 分享访客页改造：usePublicSource 数据源适配层（pub/share 双寻址复用 D46）+ FileView/FolderView 接 source prop + 密码门禁页 + /share/:token/file 子文件路由 + 分享管理页（类型列/提取码掩码列）                                                | 已完成 | 2026-09-12 |
 | T57  | 公开语义分流（D49/R45）：站点子树「设为私有/取消私有」按钮组 + 站点外 token 公开按钮组 + 站点根保护 + 旧 set-public 前端入口收敛（仅站点子树内保留）                                                                                         | 已完成 | 2026-09-12 |
 | T58  | 联调验收（对照 PRD-P4D 第 6 节 11 条）+ 文档回写（ARCHITECTURE 并入 §17 并标注增补已并入 / API.md 并入 §9 / 资产表 + Redis Key 表 / PLATFORM-GUIDE 1998 字核查 / PROGRESS）+ 接口实测 50/50 + 双端构建                                       | 已完成 | 2026-09-12 |
+
+## P4e 任务拆解（多站点（配额化）+ 删站 + AI 多站语义 + sid 日志脱敏）
+
+> PRD-P4E-SITE / API-P4E-增补 / ARCHITECTURE-P4E-增补（已并入主文档 §18 / API §10，增补文档保留为历史参考）。
+> 决策 D51~~D57、规则 R47~~R57；错误码名义编号 40117 起，实际因 40117 已被 P4c 占用（CloudListingDisabled）顺延为 **40118/40119**（详见遗留问题 14）。
+
+| 编号 | 任务                                                                                                                                                                                                                                                                               | 状态   | 完成日期   |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ---------- |
+| T59  | 数据层：site_site 解除 user_id UNIQUE（补普通索引）+ 新表 site_quota（懒创建）+ 配置 SITE_DEFAULT_LIMIT + SiteRootService 多站签名 getRootFolderIds + cloud 域 inSite/isSiteRoot 多根适配 + R52 删除保护（30020）                                                                  | 已完成 | 2026-09-12 |
+| T60  | 站点 CRUD 后端：GET /api/site/manage/list、POST /api/site/manage、GET /api/site/manage/:id、PUT/DELETE /api/site/manage/:id（命名空间 T65 后调整，见遗留 14）+ 配额校验（40118）+ 删站级联（R53 经 CloudFacade.removeSiteRoot / R55 缓存三族）+ admin 配额端点（site:admin:quota） | 已完成 | 2026-09-12 |
+| T61  | 内容端点 siteId 作用域化：column/tag/article/comment（list/create 以请求 siteId 为准，update/delete 按实体反查属主）+ apply-template 路径参数站点化，统一 40119                                                                                                                    | 已完成 | 2026-09-12 |
+| T62  | AI 三件套 slug 可选参数 + resolveSite 解析（R56：0 站 40101 引导 / 1 站直通 / 多站 needSitePick / 查无 40119+站点列表）+ 新增 create_site 工具（R57，write 确认卡，配额满回喂 limit/used）                                                                                         | 已完成 | 2026-09-12 |
+| T63  | 前端：站点列表页（新建/编辑/删除/管理/复制 URL + 配额提示）+ 当前站 store（localStorage + 失效回退）+ SiteSwitcher 切换器（仅多站显示）+ 5 页 siteId 注入 + 用户管理「站点配额」按钮 + seed 菜单/权限增量                                                                          | 已完成 | 2026-09-12 |
+| T64  | sid 日志脱敏：common/utils/url-mask.util.ts（maskSensitiveQuery）+ GlobalExceptionFilter 异常日志过一遍（并补记 method/URL）+ OperationLog url 与 params 同口径 + deploy/nginx.conf 自定义 log_format（不含 $args）+ README 部署提示                                               | 已完成 | 2026-09-12 |
+| T65  | 收口：接口冒烟（站点 CRUD/配额/删站级联/云盘 30020/AI 11 工具/脱敏）+ 双端类型与 Lint 零错 + seed 执行 + 文档回写（ARCHITECTURE §18 / API §10 / 公共资产表 / PLATFORM-GUIDE 字数核查 / README）                                                                                    | 已完成 | 2026-09-12 |
 
 ## P2a 任务拆解（AI 模块）
 
@@ -206,7 +221,7 @@
 
 ## 进行中
 
-（空；P4d 全部完成（T52~~T58，含 P4c 走查补丁 W1~~W4），下一阶段 P4e 多站点未开始）
+（空；P4e 全部完成（T59~~T65），等待用户验收；下一阶段未定（PRD 路线图剩余：P5 个人网站进阶 / P6 自定义域名等））
 
 ## 遗留问题
 
@@ -223,6 +238,13 @@
 11. （P2b 经验）DeepSeek 思考模式（V4 系列，如 deepseek-v4-flash）多轮工具调用有两个硬约束，已处理但后续接新模型/厂商需注意：① 回喂 assistant 消息的 tool_calls 必须用嵌套结构 `{ id, type:'function', function:{ name, arguments } }`（引擎层 `toOpenAIMessages` 已转换）；② 若模型返回了 `reasoning_content`（思考过程），回喂时必须原样回传，否则 400 `The reasoning_content in the thinking mode must be passed back to the API`（ai_message 已加 reasoning_content 字段持久化跨 confirm 请求回传）。接入非思考型模型（如 kimi/qwen/glm 标准版）时不受此约束，但代码已兼容
 12. ~~（T27 核实的既有偏差）ARCHITECTURE §4.6 规划的 system 域通用上传口 `POST /api/system/file/upload`（Multer 10MB，落 sys_file）文档存在、代码从未实现~~ **已处理（2026-08-28）**：T30 头像上传实际经 `CloudFacade.saveAvatar` 落 cloud_file（虚拟 parentId=-1）实现，ARCHITECTURE §4.6 已修订为实际方案，本遗留关闭；sys_file 表暂无写入方，通用上传口如有新增消费场景再另起任务
 13. ~~（2026-08-29 发现）open-static.controller.ts 目录 301 补斜杠的 `Location: /{path}/` 丢失 `/api/open/{slug}` 前缀，访客直连 API 部署形态下目录形态链接会重定向到不存在的根路径~~ **已处理（2026-08-29）**：修复 Location 前缀；顺带根治同函数两处既有缺陷：① 目录存在但无 index.html 时 301 的 Location 与请求 URL 相同 → 浏览器无限重定向循环（现按 nginx 无 autoindex 语义改 40400）；② 根路径无斜杠（手输 `/api/open/{slug}`）直接出 index.html 导致相对引用（./api/*）基址错误（现 301 补斜杠修正）。临时实例（PORT=3001）实测六场景全过（根/目录 × 有无斜杠 × 有无 index.html + 不存在路径），ARCHITECTURE §14.4 R4 描述已同步，测试数据（cloud_file testdir）已清理
+
+14. ~~（P4e 实测发现）`GET /api/site/:id` 与既有 `GET /api/site/article`、`/api/site/comment`、`/api/site/templates` 在 Express 路由层不可共存：顶层参数段 `:id` 会先匹配静态段（ParseIntPipe 直接 400），且这些控制器分属不同模块、注册顺序不可控；P4e 当时的临时处置是把详情改为 `GET /api/site/detail/:id`（三态不对称）~~ **已处理（2026-09-13，用户拍板）**：站点 CRUD 整体收敛到 **`/api/site/manage/*`**（`GET /api/site/manage/list`、`POST /api/site/manage`、`GET/PUT/DELETE /api/site/manage/:id`），`/api/site/*` 顶层只剩静态段，静态路由永久安全、三态对称；前端 `api/site/site.ts` 五个路径同步，API §10.2 / ARCHITECTURE §18.2 已改写。**二次调整（同日）**：`POST /api/site/:id/apply-template` 也收进 `POST /api/site/manage/:id/apply-template`（见下方「事后调整 2」），至此 `/api/site/*` 顶层**无任何参数段**
+15. （P4e）~~**错误码实际编号与 PRD-P4E 名义编号不一致**：PRD §4 写 40117（配额满）/40118（不存在或非属主），但 40117 已于 P4c 被 `CloudListingDisabled` 占用（前端 FolderView/公开页硬编码依赖），故代码取 **40118 配额满 / 40119 不存在或非属主**（`ErrorCode.SiteQuotaExceeded` / `SiteForbidden`，error-code.ts 已注明）。ARCHITECTURE §18 / API §10 已按实际编号写入~~ **已决策（2026-09-13，用户拍板：保持代码现状、文档对齐）**：不再回改为 PRD 名义编号。已把 `PRD-P4E-SITE.md` 的 §4 错误码表（含编号顺延说明）、R47/R56/R57、验收 1/7 全部改为实际编号；`error-code.ts` / ARCHITECTURE §18.7 / API §10.2·10.7 本就是实际编号，全仓口径现已一致
+16. （P4e）**winston 日志未落地**：验收口径 9 提到"winston 日志中 sid 为 \*\*\*"，但仓库实际从未接入 winston（`package.json` 有依赖、`src` 内零使用），运行日志走 Nest `Logger`（console）。脱敏已在**唯一实际落点**生效：① GlobalExceptionFilter 的未捕获异常日志（本轮补记 method+URL）；② OperationLog 落库的 `url`/`params`。后续若正式接 winston，请沿用 `maskSensitiveQuery` 作为 url 字段的统一出口（已登记公共资产表）
+17. （环境）`pnpm -C apps/api build`（nest build）会因 safe-delete shim 拦截 `dist` 批量清空而失败（同遗留 2）；本轮验证改用 `tsc -p tsconfig.build.json` 增量输出 + `node dist/main.js`。另：**用 tsx 直接跑 Nest 应用不可行**（esbuild 不产出 `design:paramtypes` 元数据 → DI 全解析成 undefined），需要脚本化验证时应针对 `dist` 产物写普通 JS/CJS 脚本
+18. ~~（2026-09-13 浏览器走查观察到）顶栏头像图片请求 401：`GET /api/cloud/file/avatar/:id` 挂 `cloud:file:list` 需登录态，而页面用 `<img src>` 加载无法携带 `Authorization` 头 → 控制台稳定报 401，顶栏实际落回昵称首字母兜底~~ **已处理（2026-09-13，方案 C：前端 Blob + objectURL）**：新增 `api/cloud/file.ts#fetchAvatarBlob`（走 axios 带 token，剥 `/api` 前缀避免双前缀）+ `useUserStore` 增 `avatarUrl`（`syncAvatar()` 幂等取图、竞态丢弃、换头像/登出 `revokeObjectURL` 回收、失败静默回退首字母），`Navbar.vue` / `profile/index.vue` 改消费 `avatarUrl`，上传成功走 `userStore.setAvatar()`。实测：登录后顶栏与个人中心头像均为 `blob:` 且控制台 **零错误**（原 401 消失）；端点侧带 token 200 / 匿名 401（`image/png`，69B）。**升级触发条件**：接 MinIO/OSS 后改预签名 URL（可 `<img>` 直连 + 浏览器缓存 + 列表内展示他人头像），只需替换 `fetchAvatarBlob` 实现，组件与 store 契约不变。
+    **旁证（候选方案「把头像当公开资源走 public_token」已实测否决）**：头像行 `parent_id = -1`（`AVATAR_PARENT_ID` 虚拟父目录，避免污染根目录列表），而 `PubService.assertAncestorsNotBlocked`（pub.service.ts:186）从 `row.parentId` 上溯、**祖先行缺失即 40400** → `-1` 查不到行必然阻断。A/B 实测（对照组 = 根目录 t.txt）：对照建链后 `GET /api/pub/f/{token}/info` → code 0；头像 `POST /api/cloud/file/86/public` **建链成功**（`assertOwned` 不校验 parentId）但 `info`/`download` 全 **40400**（「能生成、永远打不开」的静默失败）；DB 直查确认 `id=86 parent_id=-1`。若将来要走公开 URL，需改判定链（把 -1 视作根）或给头像真实隐藏目录。测试后两个文件均已恢复（is_public=0 / token=null），临时脚本已删
 
 ## 完成记录
 
@@ -1025,6 +1047,52 @@
 4. `cloud_usage.used` 的 22,751 字节历史差额（见踩坑 9）待核对。
 5. 剪切板为会话内存态（刷新清空）——PRD §8 遗留待确认 3 既定口径；如需持久化见 §17.9。
 6. 既有 `download(row)` 的立即 `revokeObjectURL` 写法与 `ElMessageBox` 英文按钮、guard.ts debug 日志（见走查观察 1/2 与缺陷 3）——非本期范围，待统一处理。
+
+### T59~T65 完成记录（2026-09-12）：P4e 多站点（配额化）+ 删站 + AI 多站语义 + sid 日志脱敏（P4e 收官）
+
+**数据层（T59）**：`site_site` 删 `user_id` 唯一索引、补 `idx_site_user(user_id)` 普通索引；新表 `site_quota(user_id PK, quota int, create_time, update_time)`（懒创建，照 `cloud_usage` 先例）；配置 `site.defaultLimit`（env `SITE_DEFAULT_LIMIT`，默认 1 → 存量单站用户行为零变化）。迁移 `20260912100000_add_site_quota_and_multi_site`（手写 SQL + `prisma migrate deploy`，prisma generate 有 EPERM 告警属遗留 10 的老问题，类型已生成）。`SiteRootService.getRootFolderId` → `getRootFolderIds(userId): bigint[]`，cloud 域 `inSite`（祖先链命中任一站点根）/`isSiteRoot`（行本身是任一根）多根化；新增 R52 站点根删除保护（**30020**，提示"先到站点列表删站"）。
+
+**后端（T60/T61）**：`modules/site/manage/`（controller + service）替代 `mine` 单数系列（D52 无兼容期，旧端点直接删除）；`modules/site/quota/quota.service.ts` 承担配额（`getQuota` 懒创建 / `checkCanCreate` 在 `manage.create` 链首单点调用，手动建站与 AI 建站天然同口径）；`admin.controller.ts` 提供 `GET/PUT /api/site/admin/quota`（`site:admin:quota`，下限 = 当前站点数 → 低于则 40001）。建站链：配额 → slug 格式/保留字（40103）→ 全局唯一（40102）→ CloudFacade 建根目录（**目录名 = slug**，D57）→ `media/` → 模板四件套 → 落库，任一步失败 `discardSiteDraft` 回滚。删站链（R50/R53/R55）：事务内物理删 `site_comment → site_article_tag → site_article → site_tag → site_column → site_site` → `CloudFacade.removeSiteRoot`（软删进回收站、used 不动、绕过 R52 → **30020 与回收站可还原并存**）→ 清 `site:resolve:{slug}` / `scanDel site:path|data:{siteId}:*` → slug 立即释放；响应 `{ deletedArticles, recycledRoot }`。内容端点（`column/tag/article/comment`）全部 siteId 作用域化：list/create 以请求 siteId 为准、update/delete 按实体反查属主（不信任前端 siteId），统一 **40119**；`POST /api/site/:id/apply-template` 路径参数站点化。
+
+**AI（T62）**：三件套加可选 `slug`，统一入口 `resolveSiteForTool`（`facade.resolveSite`）——0 站回喂 40101 引导 / 1 站直通 / 多站回喂 `{ needSitePick, sites }` / 查无回喂 `{ ok:false, errorCode:40119, sites }`（不暴露他人站点存在性，R56）；新增 `create_site`（write 确认卡，summarize = "创建站点 {slug}（{title}）"，配额满回喂 `{ errorCode:40118, limit, used }`），工具总数 **11**。`write_site_files.summarize` 每项携带 `{ site: { slug, title } }`，前端 `ToolConfirmCard` 新增"目标站点"行（验收 8）。
+
+**前端（T63）**：新增 `views/site/site/index.vue`（站点列表：slug/标题/状态/文章数/创建时间/地址复制 + 管理/编辑/删除 + 配额提示，limit 满禁用新建，R50 确认文案列明三段影响）与 seed 菜单首项"站点列表"；`stores/site.ts`（站点列表 + 配额 + `currentSiteId` localStorage 持久化 + 失效回退链：缓存命中 → 唯一站 → 第一站 → 空态）；公共组件 `components/SiteSwitcher`（`v-if="multi"`，单站用户无感）；既有 5 页保持原路由，统一从 store 取 siteId 注入请求并 `watch(currentSiteId)` 重载（文章页同时重拉栏目/标签/媒体目录）；用户管理页加"站点配额"按钮与弹窗（`site:admin:quota`，common 不授该标识）。
+
+**脱敏（T64）**：`common/utils/url-mask.util.ts#maskSensitiveQuery(url, keys=['sid','password'])`（零新依赖，解析失败原样返回）；落点 = GlobalExceptionFilter 未捕获异常日志（并补记 method/URL）+ OperationLog 的 `url`（params 敏感键集合加 `sid`）；`deploy/nginx.conf` 换用不含 `$args` 的 `log_format iplat_main`（含备选 map 打码方案与理由），README 补部署口径提示。
+
+**验证（T65）**：`tsc --noEmit` + `eslint` 双端零错，`vue-tsc` 零错，seed 幂等执行（新增 2 条菜单：站点列表 + site:admin:quota）。接口实测（真实 HTTP，admin 单站数据）：`site/manage/list` 1/1、`site/templates` 3 套、`site/manage/:id` 命中 / 999999 → 40119、列/标/文章/评论按 siteId 取数且缺参 40001、异常 siteId 40119；admin 配额调 3 → 建站成功 → 重复 slug 40102 → 保留字 40103 → 再建 40118（message 带 2/2，回喂带 limit/used）→ 配额调低于站点数 40001；删站 `{ deletedArticles:0, recycledRoot:true }` → 详情 40119 → 同 slug 立即可再注册 → 回收站出现原站点根 → **云盘直接删站点根 30020（两个站点根均命中，R51/R52 多站语义生效）**；AI 工具脚本化实测（跑 dist 产物）：工具 11 个、单站零参数直通、多站省略 slug 回喂 needSitePick+2 站、slug 精确命中、README 可读、summarize 带站点标识；日志脱敏实测：`/api/site/admin/quota?sid=leak123&password=pw456` 落库为 `sid=***&password=***`。**测试产生的站点/回收站数据已全部清理，admin 配额已复位为 1**。
+
+**浏览器实测（Playwright，2026-09-13）**：登录 admin → 站点列表页渲染正常（配额 1/1、配额满时「新建站点」禁用、行内 管理/编辑/删除/复制 + 站点地址外链、列头七列齐全）；提配额到 2 后刷新即时反映（1/2、按钮解禁）→ UI 建站成功（列表 2 行、配额 2/2、按钮回禁用、localStorage `iplat:site:current` 切到新站）→ 栏目管理页顶出现切换器（当前站 = 新站、栏目 0 条）；切换器切到 wyc → 当前站与列表数据同步跟随（栏目 1 条、localStorage 更新），刷新后不丢（验收 6 持久化）→ 站点设置页正确作用于当前站（`/api/open/wyc/` + 模板库三套卡片）→ 行内「管理」= 设当前站 + 跳站点设置 → 删除当前站：R50 确认弹窗三段文案齐全，确认后列表/配额/按钮同步回退、**当前站自动回退到剩余站点**、单站时切换器消失（单站无感）、站点根出现在回收站；用户管理「站点配额」对非 admin 行可见，UI 调 3 → 回读 `limit=3` 生效（admin 可见可调；common 不可见的证据：角色-菜单数据校验该标识未授予 common 且 common 无「用户管理」菜单）。浏览器产出的临时站点 / 临时用户 / 回收站目录均已清理，admin 配额已复位为 1。测试快照等临时文件已删除。
+
+**开放层多站独立实测（2026-09-13 补测，验收 2/5 的开放层部分）**：建 `opena`/`openb` 两站（配额临时 3）→ `GET /api/open/opena/api/site` → `Open A Site`、`/api/open/openb/api/site` → `Open B Site`（两站数据互不串）→ 两站静态入口 `GET /api/open/{slug}/` 均 HTTP 200 返回各自 `index.html`（2106B）→ 删 `openb` 后再取：`/api/open/openb/api/site` → **40400**（`site:resolve`/`site:data` 缓存已随 R55 清掉）、静态入口 `/api/open/openb/` → 统一响应体 **40400「站点不存在」**（与"从未存在的 slug"响应逐字一致，不泄漏站点存在性）、`opena` 不受影响仍 code 0 → 清理后库内仍仅 `wyc`、回收站空、配额 1/1、`/api/open/wyc/` 正常 200。注：开放层失败是 **HTTP 200 + 业务码 40400**（本项目统一响应约定，R15 口径），非 HTTP 404——验收判据看业务码。
+
+**站点根保护与回收站还原实测（2026-09-13 补测，验收 4/5 剩余部分）**：建 `movetest`（rootFolderId=810）→ `POST /api/cloud/file/810/move` 目标为根目录 / 目标为普通目录，两次均 **30019「站点根目录不可移动」**（R37 多站判定生效）；`DELETE /api/site/manage/:id` 后该目录进回收站 → `POST /api/cloud/recycle/restore` 还原本后行状态为 `isDir=1 / isPublic=1 / inSite=false / isSiteRoot=false`——即**还原为普通文件夹、保留公开锚点、site 行已不存在故自动脱离站点语义（R54）**。清理：彻底删除该目录 + 回收站清空 + 配额复位 1，根目录行数回到测试前（16）。
+
+**文档回写**：ARCHITECTURE 并入 §18（+ §5 表清单、§9 公共资产表与 Redis Key 时点说明）、API 并入 §10（含 detail 路径与错误码实际编号说明）、PLATFORM-GUIDE 多站语义改写并压回 ≤2000 字、README 日志脱敏段、PROGRESS 本节 + 遗留 14~~17。
+
+**本期偏差（需用户确认，均已记录）**：① ~~详情路径 `GET /api/site/detail/:id`~~ → **已按用户拍板改为命名空间 `/api/site/manage/*`（2026-09-13，见遗留 14）**；② 错误码 40118/40119 代替 PRD 名义 40117/40118（遗留 15）。
+
+### 事后调整（2026-09-13，P4e 交付后，用户拍板）：站点 CRUD 收敛到 `/api/site/manage/*`
+
+**动因**：消除 `GET /api/site/detail/:id` 与 `PUT/DELETE /api/site/:id` 的三态不对称，并把「顶层参数段吞静态段」这一整类隐患从根上消掉（顶层只留静态段后，后续新增 `/api/site/<静态段>` 路由永久安全）。
+
+**改动面**（4 处代码 + 4 处文档）：
+
+- `manage.controller.ts`：`@Controller('site/manage')`，路由 `GET list` / `POST /` / `GET :id` / `PUT :id` / `DELETE :id`（`list` 仍声明在 `:id` 之前，控制器内顺序确定）；类注释改为命名空间说明 + 历史背景。
+- `site.module.ts`：路由口径注释同步。
+- 前端 `api/site/site.ts`：`listSites` / `createSite` / `getSite` / `updateSite` / `deleteSite` 五个路径改为 `/site/manage/*`（其余端点：templates、column、tag、article、comment、admin/quota、`:id/apply-template` **均不变**）。
+- 文档：API §10.2（路径表 + 命名空间说明改写）、ARCHITECTURE §18.2（目录树 + 路由要点）与 §18.10（演进预留行改为「apply-template 是否也收进 manage」）、本文件的 T60 行 / 遗留 14 / 偏差清单。
+
+**验证**：`tsc --noEmit` + eslint 双端零错；重启后端后 HTTP 实测新路径（`GET /api/site/manage/list` 1/1、`GET /api/site/manage/24` 命中、`/999999` → 40119、`PUT /api/site/manage/24` 空 body 幂等成功且数据不变、`DELETE` 删站级联；**旧路径 `/api/site/list`、`/api/site/:id`、旧 PUT/DELETE 均已 40400**；静态端点 `/api/site/templates`（3 套）、`/api/site/article`、`/api/site/comment` 不受影响）。
+**浏览器复测（路径收敛后重跑）**：站点列表页加载（新 GET）、行内「编辑」保存（新 PUT，弹窗正常关闭、无表单报错、数据未变）、UI 建站（新 POST：列表 2 行、配额 2/2、localStorage 切到新站）、UI 删站（新 DELETE：R50 确认后列表回 1 行、配额 1/2、当前站自动回退 24）。测试残留（临时站点 / 回收站目录）已清理，admin 配额复位为 1。
+
+### 事后调整 2（2026-09-13，同日，用户拍板三件事）
+
+1. **错误码保持现状 + 文档对齐**（遗留 15 关闭）：不再回改为 PRD 名义编号；`docs/P4E/PRD-P4E-SITE.md` 的 §4 错误码表（含顺延说明）+ R47/R56/R57 + 验收 1/7 已全部写成实际编号（**40118 配额满 / 40119 不存在或非属主**，40117 归 P4c `CloudListingDisabled`）。
+2. **`apply-template` 收进 manage 命名空间**：`POST /api/site/:id/apply-template` → **`POST /api/site/manage/:id/apply-template`**；`GET /api/site/templates` 保持顶层（模板库是平台级资源、与具体站点无关）。实现：template 模块内拆两个控制器（列表 `SiteTemplateController` 前缀 `site` / 应用 `SiteTemplateApplyController` 前缀 `site/manage`），避免把 SiteTemplateService 注入 manage 模块造成 `SiteManageModule → SiteTemplateModule → SiteFacadeModule → SiteManageModule` 循环；前端 `api/site/site.ts#applyTemplate` 同步。**至此 `/api/site/*` 顶层无任何参数段**。文档：API §10.2/§10.3、ARCHITECTURE §18.2/§18.10、P4E 增补头注同步。
+3. **修复 admin 无法调整自身站点配额（用户反馈）**：现象「admin 改不了自己的站点配额、只能 1 个」。根因：用户管理页「站点配额」按钮沿用了 `v-if="row.username !== 'admin'"`（与云盘「配额」按钮同款守卫），admin 自己那一行没有入口 → 永远停在 `SITE_DEFAULT_LIMIT=1`，超管想自测/自用多站必被 40118 拦。后端 `PUT /api/site/admin/quota` 无自身限制（只校验 `site:admin:quota` + 下限 = 当前站点数），故只去掉该 `v-if`（保留 `v-permission`）。**云盘「配额」按钮的同款守卫未动**（超出本次范围，如也要给 admin 自调可一并放开）。
+
+**验证（事后调整 2）**：`tsc --noEmit` / `eslint` / `vue-tsc` 双端零错 + 后端增量编译并重启；HTTP：`GET /api/site/templates` 仍 code 0（3 套）、旧 `POST /api/site/24/apply-template` → **40400（Cannot POST）**、新 `POST /api/site/manage/24/apply-template` 带非法 templateId → **40116「模板不存在」**（证明路由命中 + 属主校验通过 + 业务语义不变）；浏览器：用户管理 admin 行按钮由「编辑/重置密码」变为 **「编辑/重置密码/站点配额」**，弹窗显示「用户 超级管理员（admin）/ 已有站点数 1（配额下限）/ 站点数上限」，UI 调 2 → API 回读 **limit=2** 生效（复现原始反馈并确认修复），随后复位为 1。测试快照已删。
 
 ### P1 最终状态总结（三句话）
 

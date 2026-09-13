@@ -5,9 +5,10 @@ import {
   HttpException,
   Logger,
 } from '@nestjs/common'
-import type { Response } from 'express'
+import type { Request, Response } from 'express'
 import { ErrorCode } from '../../common/constants/error-code'
 import { BusinessException } from '../../common/exceptions/business.exception'
+import { maskSensitiveQuery } from '../../common/utils/url-mask.util'
 
 /** HTTP 状态码 → 统一错误码映射 */
 const HTTP_STATUS_TO_CODE: Record<number, number> = {
@@ -26,7 +27,9 @@ export class GlobalExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(GlobalExceptionFilter.name)
 
   catch(exception: unknown, host: ArgumentsHost): void {
-    const response = host.switchToHttp().getResponse<Response>()
+    const ctx = host.switchToHttp()
+    const response = ctx.getResponse<Response>()
+    const request = ctx.getRequest<Request>()
 
     if (exception instanceof BusinessException) {
       // 业务异常：HTTP 状态恒为 200，错误码在响应体
@@ -53,7 +56,11 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       return
     }
 
-    this.logger.error('未捕获异常', exception instanceof Error ? exception.stack : String(exception))
+    // P4E D56/T64：URL 记录前统一过 maskSensitiveQuery（sid / password 等查询参数打码）
+    this.logger.error(
+      `未捕获异常 ${request.method} ${maskSensitiveQuery(request.originalUrl)}`,
+      exception instanceof Error ? exception.stack : String(exception),
+    )
     response
       .status(500)
       .json({ code: ErrorCode.InternalError, message: '服务器内部错误', data: null })

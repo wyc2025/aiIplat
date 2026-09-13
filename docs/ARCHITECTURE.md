@@ -369,7 +369,7 @@ apps/api/src/
 
 ---
 
-## 5. 数据库设计（sys_ 前缀为 P1 底座；P2a 新增 7 张 ai_ 表；P3 新增 3 张 cloud_ 表；P4a 新增 6 张 site_ 表）
+## 5. 数据库设计（sys_ 前缀为 P1 底座；P2a 新增 7 张 ai_ 表；P3 新增 3 张 cloud_ 表；P4a 新增 6 张 site_ 表；**P4e 新增 1 张 `site_quota` 表并解除 `site_site.user_id` 唯一索引**）
 
 > Prisma model 用 PascalCase + `@@map("sys_user")`，字段 camelCase + `@map("user_name")`。以下为数据库层结构。时间字段统一 `created_at / updated_at`，软删除用 `deleted_at`。
 >
@@ -619,9 +619,9 @@ apps/api/src/
 | used        | bigint default 0 | 字节（R3 记账规则）                   |
 | update_time | datetime         |                                       |
 
-### site_ 域六表（P4a 新增，DDL 详见 §14.2）
+### site_ 域表（P4a 六表 + P4e 配额表，DDL 详见 §14.2 / §18.1）
 
-`site_site`（站点，每用户一行，user_id unique，slug unique，root_folder_id/media_folder_id 关联 cloud_file，status/comment_audit 开关，create_time/update_time）、`site_column`（栏目树 ≤3 级，索引 (site_id,parent_id)）、`site_tag`（unique(site_id,name)）、`site_article`（含 cover_path/word_count/view_count/status/published_at，索引 (site_id,status,published_at) 与 (site_id,column_id)，无 deleted_at——R7 物理删除）、`site_article_tag`（unique(article_id,tag_id)+双索引）、`site_comment`（audit_status/ip，索引 (article_id,audit_status) 与 (site_id,audit_status)）。
+`site_site`（站点，**P4e 起每用户多行**，slug unique，root_folder_id/media_folder_id 关联 cloud_file，status/comment_audit 开关，create_time/update_time；`user_id` 唯一索引已于 P4e 解除 → 普通索引 `idx_site_user(user_id)`）、`site_column`（栏目树 ≤3 级，索引 (site_id,parent_id)）、`site_tag`（unique(site_id,name)）、`site_article`（含 cover_path/word_count/view_count/status/published_at，索引 (site_id,status,published_at) 与 (site_id,column_id)，无 deleted_at——R7 物理删除）、`site_article_tag`（unique(article_id,tag_id)+双索引）、`site_comment`（audit_status/ip，索引 (article_id,audit_status) 与 (site_id,audit_status)）、**`site_quota`（P4e 新增，user_id PK + quota int，站点数上限，懒创建，照 `cloud_usage` 先例）**。
 `cloud_file` 加列 `is_public tinyint default 0`（三态语义，见 §4.8 / §14.2）。全部 relationMode="prisma" 逻辑外键，域内仅 article→column/articleTags/comments 三条 Prisma relation，跨域一律逻辑外键。
 
 ### 索引约定
@@ -814,6 +814,14 @@ main.ts 增补：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 函数�
 | SiteRootService / SiteRootModule | api/src/modules/site/facade | 站点根锚点查询（getRootFolderId / isSiteRoot）；零跨域依赖，供 cloud 域 import 不成环（P4d §17.6） | 已建（T52） |
 | StorageService.resolvePath | api/src/infra/storage | storage_name → 正式区绝对路径（yazl 惰性读盘用；穿越校验与内部读写同源） | 已建（T54） |
 | 依赖白名单（P4d） | apps/api/package.json | yazl@^3.3.1（流式打包），D45 特批；类型走本地窄声明 src/types/yazl.d.ts | 已建（T54） |
+| SiteQuotaService | api/src/modules/site/quota | 站点数配额（getQuota 懒创建 / checkCanCreate 建站链首单点 / adminUpdate 下限=站点数，P4E §18.2） | 已建（T60） |
+| CloudFacade.removeSiteRoot | api/src/modules/cloud/facade | 删站内部通道：站点根连同子树软删进回收站（used 不动，绕过 R52 用户面 30020） | 已建（T60） |
+| SiteFacade（P4E 扩展） | api/src/modules/site/facade | getSites / resolveSite(userId, slug?)（R56）/ createSite（R57 委托 manage）/ getQuota；原 listFiles/readFile/writeFiles/getSiteInfo 全部带 siteId | 已建（T60/T62） |
+| resolveSiteForTool | api/src/modules/ai/tool/tools/list-site-files.tool.ts | AI 工具站点解析统一入口（0 站 40101 / 1 站直通 / 多站 needSitePick / 查无 40119+站点列表） | 已建（T62） |
+| useSiteStore | web/src/stores/site.ts | 当前站点全局状态（站点列表 + 配额 + localStorage 持久化 + 失效回退链） | 已建（T63） |
+| SiteSwitcher | web/src/components/SiteSwitcher | 站点切换器（仅多站显示，单站用户无感；切换即改 store，页面 watch 重载） | 已建（T63） |
+| maskSensitiveQuery | api/src/common/utils/url-mask.util.ts | 日志 URL 查询参数脱敏（sid/password → \*\*\*，零依赖；异常/未命中原样返回） | 已建（T64） |
+| fetchAvatarBlob + useUserStore.avatarUrl | web/src/api/cloud/file.ts、web/src/stores/user.ts | 头像展示链（Blob → objectURL）：头像端点为登录态流式接口，`<img>` 直连带不了 Authorization 必然 401，故由 user store 统一取图（幂等 + 竞态丢弃 + revoke 回收），组件只消费 `avatarUrl`（空则回退昵称首字母）。**接 MinIO/OSS 改预签名 URL 时只需替换本实现** | 已建（P3 遗留 18 收口，2026-09-13） |
 
 ### Redis Key 增补约定（写入 RedisKey 常量）
 
@@ -831,6 +839,8 @@ main.ts 增补：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 函数�
 | `pub:rate:{bucket}:{ip}`             | counter，60s 窗口                                        | 云盘公开端点独立限流计数（P4c R32：bucket = static→raw/download 120次/分、data→info/list 60次/分），见 §16.2 |
 | `share:pass:{token}:{sid}`           | string，TTL = min(2h, 分享剩余有效期)                    | 分享提取码通过后的短期访问凭证（P4d R42）；改密码/移除密码时按前缀 scanDel 失效                              |
 | `share:passfail:{ip}:{token}`        | counter，10 分钟窗口                                     | 分享提取码错误计数（P4d R42：连续 5 次锁 10 分钟，照登录 10102 口径）                                        |
+
+> P4e 无新增 Key：删站在既有三族基础上扩展删除时机（`DEL site:resolve:{slug}` + `scanDel site:path|data:{siteId}:*`，R55）；`site:path` / `site:data` 按 siteId 隔离，多站天然不串。
 
 ---
 
@@ -947,7 +957,7 @@ apps/api/assets/site-templates/ # 模板库（P4b T44 迁移自单数 site-templ
 
 ### 14.2 数据表（6 张 site_ + cloud_file 加列；relationMode="prisma" 逻辑外键）
 
-**site_site —— 站点（每用户一站）**：`id` / `user_id`（unique，逻辑关联 sys_user）/ `slug`（unique varchar32，R11）/ `title` varchar50 / `description` varchar200 null / `root_folder_id`（逻辑关联 cloud_file）/ `media_folder_id` / `status` tinyint（1 启用 0 停用，R10）/ `comment_audit` tinyint / `create_time` `update_time`。
+**site_site —— 站点（P4e 起每用户多站，配额见 §18.1）**：`id` / `user_id`（逻辑关联 sys_user；唯一索引已于 P4e 解除，改普通索引 `idx_site_user`）/ `slug`（unique varchar32，R11）/ `title` varchar50 / `description` varchar200 null / `root_folder_id`（逻辑关联 cloud_file）/ `media_folder_id` / `status` tinyint（1 启用 0 停用，R10）/ `comment_audit` tinyint / `create_time` `update_time`。
 
 **site_column —— 栏目树**：`id` / `site_id` / `parent_id`（0=根，≤3 级 R6）/ `name` varchar32 / `sort` / `created_at` `updated_at`；索引 `(site_id,parent_id)`；同级同名不去重。
 
@@ -961,9 +971,11 @@ apps/api/assets/site-templates/ # 模板库（P4b T44 迁移自单数 site-templ
 
 **cloud_file 变更**：`is_public tinyint default 0` **三态**：0=继承父目录（新建默认）/ 1=显式公开（站点根恒为 1）/ 2=显式阻断。公开性上溯判定见 14.4。域内 Prisma relation 仅 article→column / articleTags / comments 三条，跨域一律逻辑外键。
 
-### 14.3 站点创建流程（manage.service）
+### 14.3 站点创建流程（manage.service；P4e 多站化后的现行口径见 §18.2）
 
-1. 校验 slug（R11 正则 + 保留字黑名单 + 全局唯一 40102/40103）；校验当前用户无站点（40101）
+> P4e 变更：第 1 步的「校验当前用户无站点（40101）」改为**配额校验**（40118），目录名由「我的站点」改为 **slug**（D57）；40101 收窄为「未开通站点」引导语义。其余流程不变。
+
+1. 校验 slug（R11 正则 + 保留字黑名单 + 全局唯一 40102/40103）；配额校验（P4e）
 2. 经 CloudFacade 建目录「我的站点」（重名自动"(1)"）`is_public=1`（继承锚点）→ media/ 子目录
 3. 模板复制：读 assets 四文件 → StorageService.writeFromBuffer → CloudFacade.registerPublicFile（used 记账 upsert，兼容懒创建）
 4. 落 site_site 行
@@ -1393,3 +1405,115 @@ cloud 域的 `inSite`（R46）与 move 的站点根保护（R37）需要「当�
 | 公开端点 Redis 缓存        | 访问量起来           | D38 预留不变（分享侧同款）                                                   |
 | 分享提取码跳转（短链带码） | 分享体验升级         | sid 机制已铺路，可签发一次性带码链接                                         |
 | 多站点（P4e）              | 用户拍板配额化       | D50：站点数上限配额（默认 1，admin 可调）+ AI 工具单数语义改造 + 删站并入    |
+
+---
+
+## 18. 多站点（配额化）+ 删站 + AI 多站语义 + sid 日志脱敏（P4e，自 ARCHITECTURE-P4E-增补.md 并入；增补文档保留为历史细节参考）
+
+> 决策 D51~~D57 / 规则 R47~~R57 / 任务 T59~~T65，见 PRD-P4E-SITE.md。既有约定（域边界 / 开放层判定链 / 三态 is_public / 统一响应）不动，本节只写增量；**§14（P4a 单站形态）中「每用户一个站点」的表述由本节取代**，其余（开放层、模板、评论审核等）不变。
+> 零新增第三方依赖。
+
+### 18.1 数据库变更（site 域）
+
+1. **`site_site` 解除 `user_id` UNIQUE**：迁移只删唯一索引、补普通索引 `idx_site_user(user_id)`（多站下按用户查列表）；`slug` UNIQUE 不动。
+2. **新表 `site_quota`（照 cloud_usage 先例）**：
+
+| 列                        | 类型      | 说明                                      |
+| ------------------------- | --------- | ----------------------------------------- |
+| user_id                   | bigint PK | 懒创建（首次建站/查配额时 upsert）        |
+| quota                     | int       | 站点数上限，默认取配置 SITE_DEFAULT_LIMIT |
+| create_time / update_time | datetime  | 惯例                                      |
+
+3. 配置：`site.defaultLimit`，env `SITE_DEFAULT_LIMIT`，默认 `1`（与 P4d 单站行为一致）。注意**站点数配额是 count 语义不是字节**，下限校验 R48 用 `count(site_site where user_id)`。
+4. 迁移文件 `20260912100000_add_site_quota_and_multi_site`（手写 SQL + `prisma migrate deploy`，同 T46 环境口径）。
+
+### 18.2 后端结构变更（modules/site/）
+
+```
+site/
+├── manage/                  # 站点 CRUD：mine 系列 → 集合端点改造（T60），T65 后收敛到 /api/site/manage/*
+│   ├── manage.controller.ts # GET /api/site/manage/list、POST /api/site/manage、GET/PUT/DELETE /api/site/manage/:id
+│   ├── manage.service.ts    # list / create（+配额校验 R47）/ detail / update / delete（§18.3 级联）
+│   └── admin.controller.ts  # GET/PUT /api/site/admin/quota（site:admin:quota，照 cloud admin 先例）
+├── quota/
+│   └── quota.service.ts     # getQuota(userId) 懒创建 / checkCanCreate(userId) / adminUpdate（下限=站点数）
+├── facade/
+│   ├── site-facade.service.ts  # + getSites / resolveSite(userId, slug?)（R56）/ createSite(userId, dto)（R57 委托 manage）/ getQuota / 既有多站化（getSiteInfo / listFiles / readFile / writeFiles 全部带 siteId）
+│   └── site-root.service.ts    # getRootFolderId → getRootFolderIds(userId): bigint[]；isSiteRoot 改集合判定（R51）
+└── article/column/tag/comment/ # 控制器与 service 全部 siteId 作用域化（T61）
+```
+
+- **配额单点**：`quota.service.checkCanCreate` 只在 `manage.create` 链首调用——手动建站与 AI create_site 同一入口，配额口径天然一致（D55）。
+- **属主校验统一**：`manage` 侧 `getOwnedSite(userId, siteId)`；内容端点按实体 `site_id` 反查站点再校验属主，避免信任前端传的 siteId 与实体不匹配（list/create 类以 siteId 为准，update/delete 类以实体反查为准），统一 **40119**。
+- **SiteRootService 多站化**（R51，取代 §17.6 单根签名）：`getRootFolderIds` 一次查出用户全部站点根 id（站点数受配额限制，集合很小，无分页必要）；cloud 域 `file.list` 的 `inSite` = 行的祖先链命中**任一**根、`isSiteRoot` = 行本身是**任一**根；move 的 R37 保护同口径扩展，**新增 R52 删除保护（30020）**：cloud 删除/回收站入口对站点根直接拦截，提示先删站点。
+- **路由命名空间（T65 后调整）**：站点级资源全部收在 `/api/site/manage/*`（`GET|POST /api/site/manage`、`GET|PUT|DELETE /api/site/manage/:id`、`POST /api/site/manage/:id/apply-template`），使 `/api/site/*` 顶层**只剩静态段**（平台级模板库 `templates` / 内容子资源 `column|tag|article|comment` / 管理员能力 `admin/quota`），三态对称且**后续新增顶层静态路由永久安全**。
+  - 为什么不用 `GET /api/site/:id`：Express 按注册顺序匹配，顶层参数段会吞掉 `/api/site/article`、`/api/site/comment`、`/api/site/templates`（实测 400，且这些控制器分属不同模块、注册顺序不可控）。详见 API §10.2 与 PROGRESS 遗留 14。
+  - 实现注意：应用模板（`SiteTemplateApplyController`）与模板列表（`SiteTemplateController`）按命名空间拆成同一模块下的两个控制器，避免把 SiteTemplateService 注入 manage 模块形成 `SiteManageModule → SiteTemplateModule → SiteFacadeModule → SiteManageModule` 循环。
+
+### 18.3 删站级联（manage.service.delete，R50/R53/R55）
+
+```
+属主校验（40119）
+→ 事务内物理删：site_comment → site_article_tag → site_article → site_tag → site_column → site_site（R7 传统，无回收站）
+→ CloudFacade.removeSiteRoot(rootFolderId)：站点根连同子树软删进回收站（deletedAt 置位，used 不动，R53 内部通道绕过 R52 的 30020）
+→ 缓存清理：DEL site:resolve:{slug} + scanDel site:path:{siteId}:* + scanDel site:data:{siteId}:*（R55，无新 Key）
+→ slug 立即可再注册（R49）
+→ 响应 { deletedArticles, recycledRoot: true }
+```
+
+- `removeSiteRoot` 是 CloudFacade 新增门面方法（管理侧语义，只抛 cloud 段码），与 `discardSiteDraft` 的区别：discard 用于建站失败的未公开草稿回滚（物理删 + used 回退），removeSiteRoot 用于删站（软删 + used 不动）。
+- 还原后语义 R54：回收站还原的目录成为普通文件夹，is_public 保持 1；site 行已不存在，R45 按钮组按 inSite 自动回普通组。不做「还原即恢复站点」的设计（PRD 非目标）。
+- 前端 R50 确认文案必须列明三段影响（文章/栏目/标签/评论物理删不可恢复；站点文件移入回收站可还原；slug 立即释放）。
+
+### 18.4 AI 工具改造（T62，ai 域 tools/ 下原位加改，handler 仍只注入 SiteFacade）
+
+| 工具                                                      | risk                | parameters 变更                 | 行为                                                                                                                                                                                                                                              |
+| --------------------------------------------------------- | ------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_site_files` / `read_site_file` / `write_site_files` | read/read/write     | 加 `slug?: string`              | `resolveSiteForTool`（统一入口，list-site-files.tool.ts）：slug 提供 → 查无回喂 `{ ok:false, errorCode:40119, sites }`；省略 → 0 站 40101 引导 / 1 站直通 / 多站回喂 `{ needSitePick:true, sites:[{slug,title}] }`                                |
+| `create_site`（新增，工具总数 11）                        | **write**（确认卡） | `{ slug, title, description? }` | summarize 摘要「创建站点 {slug}（{title}）」；执行走 manage 创建链；配额满回喂 `{ ok:false, errorCode:40118, message, limit, used }`、slug 冲突 40102 / 保留字 40103 回喂 `{ ok:false, errorCode, message }`，均不抛栈（R57），模型可换 slug 重试 |
+
+- description 纪律同步更新：四件套统一写明「多站点用户建议先 list 或询问用户目标站点 slug」；`write_site_files` 的 summarize 每项携带 `{ site: { slug, title } }`（验收 8），前端 `ToolConfirmCard` 渲染「目标站点」行。
+- `create_site` 的 `limit/used` 取自 `SiteFacade.getQuota`（委托 manage 配额服务），保证与 REST 侧同源。
+
+### 18.5 前端（T63）
+
+- **站点列表页** `views/site/site/index.vue`（seed 菜单「个人网站」首位子项，`site:site:manage`）：列 slug / 标题 / 状态 / 文章数 / 创建时间 / 站点地址（外链 + 复制）；行操作 = 管理（`setCurrent` + 跳站点设置）、编辑、删除（R50 确认）；顶部「新建站点」（配额满则禁用并提示 limit/used）+ 配额展示。
+- **当前站 store** `stores/site.ts`（公共资产）：`listSites` 为唯一数据源（含 `{ limit, used }`）；`currentSiteId` 持久化 localStorage；`resolveCurrent()` 回退链：缓存命中且仍在 list → 否则唯一站点 → 否则第一站 → 0 站空态；站点被他端删除后下次 `load()` 自动回退（验收 6）。
+- **既有 5 页零路由变更**：站点设置/栏目/文章/标签/评论保持原路由，作用于「当前站点」；页顶 `SiteSwitcher`（`v-if="multi"`，单站用户全程无感）；请求统一从 store 取 siteId 注入（list 走 query、create 走 body），并 `watch(currentSiteId)` 重载本页数据（文章页同时重拉栏目/标签，封面与插图上传改用当前站的 `mediaFolderId`）；0 站时不做请求、显示「先去站点列表创建」空态。
+- **用户管理**：追加「站点配额」按钮与弹窗（`site:admin:quota`，照云盘配额按钮先例；下限 = 已有站点数）。
+- seed 增量：菜单「站点列表」（sort 1，原 5 项顺延）+ 权限标识 `site:admin:quota`（挂用户管理下）。common 角色按「个人网站子树 BFS」授权，天然含站点列表、不含 `site:admin:quota`。
+
+### 18.6 sid 日志脱敏（T64，D56）
+
+- 新增 `common/utils/url-mask.util.ts`：`maskSensitiveQuery(url, keys = ['sid','password'])`——解析 query 并对目标键值替换为 `***`，未命中或解析失败原样返回（宁漏勿错，不阻断主流程）。
+- 落点（全仓 `originalUrl | req.url` 排查后的唯一实际落点）：① GlobalExceptionFilter 记录未捕获异常的 `req.originalUrl`（本轮顺带补记 method，便于定位）；② OperationLogInterceptor 落库的 `url`，且 `params` 的敏感键集合加入 `sid`。其余日志（chat/upload 等）不拼接 URL，无需处理。
+- 部署口径：`deploy/nginx.conf` 使用不含 `$args` 的 `log_format iplat_main`（备选：`map $arg_sid $sid_masked` 打码后拼装），README 已补提示。**winston 未接入本仓库**（运行日志走 Nest Logger），后续若接入须沿用 `maskSensitiveQuery`（PROGRESS 遗留 16）。
+
+### 18.7 错误码增量（并入 §5）
+
+| 码    | 语义                                      | 说明                                                                        |
+| ----- | ----------------------------------------- | --------------------------------------------------------------------------- |
+| 40118 | 站点数量已达上限（message 带 limit/used） | PRD-P4E 名义编号 40117，因 40117 已被 P4c `CloudListingDisabled` 占用而顺延 |
+| 40119 | 站点不存在或非属主                        | 同上顺延；不暴露他人站点存在性                                              |
+| 30020 | 站点根目录禁止直接删除（须先删除站点）    | R52                                                                         |
+
+40101 语义收窄为仅「未开通站点」（PRD §4）：多站后「已有站点」场景消失。
+
+### 18.8 缓存与 Redis Key
+
+无新增 Key。删站新增清理动作 R55（`site:resolve:{slug}` / `scanDel site:path|data:{siteId}:*` 三条既有 Key 族的删除时机扩展）。`site:path` / `site:data` 按 siteId 隔离，多站天然不串。
+
+### 18.9 兼容与迁移
+
+- 存量单站用户：limit 默认 1、唯一站点自动成为当前站、AI 三件套省略 slug 直通——**全链路行为与 P4d 零差异**（验收 1/6/7 即回归保护）。
+- `/api/site/mine*` 端点删除（D52 无兼容期）；前端同期切换。
+- 存量站点根目录名「我的站点」不改（D57 仅约束新站：目录名 = slug）；slug 与目录名从此解耦，改 slug 不动目录名（D57 后新站天然如此）。
+
+### 18.10 演进预留（本期不做，架构不堵路）
+
+| 项                          | 触发条件             | 预留设计                                                                                                                                                                                   |
+| --------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 等级/套餐驱动配额           | 用户要按套餐送站点数 | `site_quota` 已具备 per-user 承载力，接套餐引擎改 `quota` 即可                                                                                                                             |
+| AI 删站 / 改站工具          | 用户诉求             | 走同一 `manage` 链，confirm 卡摘要带 slug/title 即可                                                                                                                                       |
+| 站点间内容复制 / 自定义域名 | 用户诉求             | 前者需跨 siteId 写内容（内容表已带 site_id，无结构阻碍）；后者需新增域名映射表                                                                                                             |
+| 模板库读取是否也收进 manage | 命名空间洁癖         | 现 `GET /api/site/templates` 属**平台级**资源（与具体站点无关，读 assets），按规则留顶层；若统一收口可改 `GET /api/site/manage/templates`（需把该静态段声明在 manage 控制器的 `:id` 之前） |

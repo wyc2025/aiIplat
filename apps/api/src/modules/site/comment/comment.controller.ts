@@ -15,7 +15,7 @@ export class SiteCommentController {
 
   @Get()
   @RequirePermission('site:comment:list')
-  @ApiOperation({ summary: '评论分页列表（筛选：审核状态/文章/昵称关键词）' })
+  @ApiOperation({ summary: '评论分页列表（必带 siteId；筛选：审核状态/文章/昵称关键词）' })
   list(@CurrentUser('userId') userId: string, @Query() query: CommentQueryDto) {
     return this.commentService.list(BigInt(userId), query)
   }

@@ -1,5 +1,6 @@
 <template>
   <div class="v-site-comment">
+    <SiteSwitcher />
     <ProTable
       :data="list"
       :loading="loading"
@@ -124,7 +125,7 @@
       <template #empty>
         <el-empty
           v-if="!loadError"
-          description="还没有评论"
+          :description="emptyText"
         />
       </template>
     </ProTable>
@@ -132,19 +133,24 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ProTable from '@/components/ProTable/index.vue'
+import SiteSwitcher from '@/components/SiteSwitcher/index.vue'
 import { formatTime } from '@/utils/format'
 import { listComments, auditComment, removeComment } from '@/api/site/site'
+import { useSiteStore } from '@/stores/site'
 import type { SiteCommentItem } from '@/types/api'
 
+const siteStore = useSiteStore()
 const loading = ref(false)
 const loadError = ref(false)
 const list = ref<SiteCommentItem[]>([])
 const total = ref(0)
 const pageNo = ref(1)
 const pageSize = ref(10)
+/** 无站点时的空态文案（P4E：站点为 0 时不做接口请求） */
+const emptyText = computed(() => (siteStore.empty ? '还没有站点，请先到「站点列表」创建' : '还没有评论'))
 
 const filterAuditStatus = ref<number | undefined>()
 const filterKeyword = ref('')
@@ -157,12 +163,18 @@ function statusTagType(status: number) {
 }
 
 async function reload() {
-  loading.value = true
   loadError.value = false
+  if (!siteStore.currentSiteId) {
+    list.value = []
+    total.value = 0
+    return
+  }
+  loading.value = true
   try {
     const res = await listComments({
       pageNo: pageNo.value,
       pageSize: pageSize.value,
+      siteId: Number(siteStore.currentSiteId),
       auditStatus: filterAuditStatus.value,
       keyword: filterKeyword.value.trim() || undefined,
     })
@@ -210,7 +222,19 @@ async function onRemove(row: SiteCommentItem) {
   }
 }
 
-onMounted(reload)
+onMounted(async () => {
+  await siteStore.ensureLoaded().catch(() => undefined)
+  reload()
+})
+
+// 切换当前站点 → 回到第一页并重新拉取（P4E D54）
+watch(
+  () => siteStore.currentSiteId,
+  () => {
+    pageNo.value = 1
+    reload()
+  },
+)
 </script>
 
 <style scoped>

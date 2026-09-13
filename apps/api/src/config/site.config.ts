@@ -16,4 +16,6 @@ export default registerAs('site', () => ({
   siteOpenApiRateLimit: readPositiveInt('SITE_OPEN_API_RATE_LIMIT', 60),
   /** 评论提交限流（次/分/IP，默认 10） */
   siteCommentRateLimit: readPositiveInt('SITE_COMMENT_RATE_LIMIT', 10),
+  /** 站点数配额默认上限（P4E D51，默认 1 = 与 P4d 单站行为一致） */
+  defaultLimit: readPositiveInt('SITE_DEFAULT_LIMIT', 1),
 }))

@@ -579,3 +579,88 @@ Content-Type: application/json　Accept: text/event-stream
 
 - 前端按 `file.list` 的 `inSite` 切换按钮组：站点子树内 = 「设为私有 / 取消私有」（站点根无按钮），站点外 = 「设为公开 / 复制公开链接 / 取消公开」
 - 旧 `POST /api/cloud/file/set-public` **保留**（站点机制与开放层依赖），前端仅站点子树内调用（语义 = 设为私有，落库 is_public=2）；「取消私有」走 `DELETE /api/cloud/file/:id/public`（is_public 归 0=继承）
+
+## 10. P4e：多站点（配额化）+ 删站 + AI 多站语义 + sid 脱敏
+
+> 决策 D51~~D57 / 规则 R47~~R57，见 PRD-P4E-SITE.md。增补文档 `docs/P4E/API-P4E-增补.md` 已并入（保留为历史参考，冲突以本文为准）。
+> **错误码实际编号**：PRD 名义为 40117（配额满）/40118（不存在或非属主），但 40117 已被 P4c `CloudListingDisabled` 占用，故实际取 **40118（配额满）/ 40119（站点不存在或非属主）**；30020 为 R52 新增。40101 收窄为仅「未开通站点」。
+> **路径口径**：站点 CRUD 收在命名空间 **`/api/site/manage/*`**（非 `/api/site/list` 与 `/api/site/:id`）——顶层参数段会吞掉 `/api/site/article`、`/api/site/comment`、`/api/site/templates` 等同层静态路由，详见 10.2 注。
+
+### 10.1 变更总览
+
+- **废弃**：`GET/POST/PUT /api/site/mine`、`POST /api/site/mine/apply-template`（D52 无兼容期，前端同期切换）
+- **替代**：站点集合端点（10.2）；内容端点全部 siteId 作用域化（10.3）
+- **新增**：删站、admin 配额（10.2 / 10.4）、AI `create_site` 工具（10.7）
+
+### 10.2 站点 CRUD（登录态，`site:site:manage`；写操作挂 `@OperationLog('个人网站', xxx)`）
+
+> **命名空间 `/api/site/manage/*`**：站点级资源（集合与单体）全部收在此前缀下，`/api/site/*` 顶层只保留静态段（templates / column / tag / article / comment / admin）。
+> 这样 `GET/PUT/DELETE /api/site/manage/:id` 三态对称，且不会有参数段吞掉静态段的问题（详见本节末说明）。
+
+| 方法   | 路径                                | 说明                                                                                                                                                                                                                                                                                   |
+| ------ | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | /api/site/manage/list               | 我的站点列表（不分页，上限即配额）：`{ list: [{ id, slug, title, description, status, commentAudit, siteUrl, rootFolderId, mediaFolderId, articleCount, createdAt }], limit, used }`；按创建时间升序（第一站语义稳定）                                                                 |
+| GET    | /api/site/templates                 | 模板列表（既有端点，P4b；读取 `assets/site-templates`，实时不缓存）                                                                                                                                                                                                                    |
+| POST   | /api/site/manage                    | 建站：`{ slug, title, description? }`；slug 规则 `^[a-z0-9][a-z0-9-]{2,31}$` + 保留字黑名单（40103）+ 全局唯一（40102）；**配额满 40118**（R47）；创建链同 §6（cloud 建根目录——**根目录名 = slug**（D57）——+ `media/` 子目录 + 模板四件套 + 落库；任一步失败 `discardSiteDraft` 回滚） |
+| GET    | /api/site/manage/:id                | 站点详情（字段同 list item，含 `articleCount`）；非属主 40119                                                                                                                                                                                                                          |
+| PUT    | /api/site/manage/:id                | 编辑 `{ title?, description?, slug?, status?, commentAudit? }`；改 slug 同规则校验 + `DEL site:resolve:{旧slug}` + `scanDel site:data:{siteId}:*`；status=0 停用即开放层全 40400                                                                                                       |
+| DELETE | /api/site/manage/:id                | **删站**（R50/R53/R55）：site 域六表数据物理删 + 站点根连同子树软删进回收站（used 不动，可还原为普通文件夹）+ 缓存三族清理 + slug 立即释放；响应 `{ deletedArticles, recycledRoot: true }` 供前端结果提示                                                                              |
+| POST   | /api/site/manage/:id/apply-template | 应用模板（body `{ templateId }`；温和覆盖 R20 不变）                                                                                                                                                                                                                                   |
+| GET    | /api/site/admin/quota?userId=       | 见 10.4                                                                                                                                                                                                                                                                                |
+| PUT    | /api/site/admin/quota               | 见 10.4                                                                                                                                                                                                                                                                                |
+
+> **为什么不用 `GET/PUT/DELETE /api/site/:id`**（T65 实测发现、T65 后调整）：Express 按注册顺序匹配，`/site/` 顶层的参数段 `:id` 会命中 `/api/site/article`（文章列表）、`/api/site/comment`（评论列表）、`/api/site/templates`（模板列表）并因 `ParseIntPipe` 直接 400；这些控制器分属不同模块、注册顺序不可控，无法靠调顺序稳定解决。收敛到 `/api/site/manage/*` 后，顶层静态段永久安全，**后续新增 `/api/site/<静态段>` 路由也不会再踩坑**。
+> **顶层已无任何参数段**：应用模板原为 `POST /api/site/:id/apply-template`，已随本次调整收进 `POST /api/site/manage/:id/apply-template`（2026-09-13）。现在 `/api/site/*` 顶层只有：平台级模板库 `templates`、内容子资源 `column|tag|article|comment`、管理员能力 `admin/quota`。
+
+### 10.3 内容端点 siteId 作用域化（T61）
+
+> 通用约定：list/create 类以请求 siteId 为准（属主校验 40119）；update/delete 按实体 id 反查所属站点再校验属主，**不信任**请求里的 siteId。
+
+| 端点                                                    | 变更                                                                                             |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| GET /api/site/column/list                               | 必带 `?siteId=`（缺失 40001，非属主 40119）                                                      |
+| POST /api/site/column                                   | body 加 `siteId`                                                                                 |
+| PUT/DELETE /api/site/column/:id                         | 不变（实体反查属主）                                                                             |
+| GET /api/site/tag/list                                  | 必带 `?siteId=`                                                                                  |
+| POST /api/site/tag                                      | body 加 `siteId`                                                                                 |
+| PUT/DELETE /api/site/tag/:id                            | 不变（实体反查）                                                                                 |
+| GET /api/site/article（分页）                           | 必带 `?siteId=`；筛选 `columnId/tagId/status/keyword` 不变                                       |
+| GET /api/site/article/:id                               | 不变（实体反查）                                                                                 |
+| POST /api/site/article                                  | body 加 `siteId`                                                                                 |
+| PUT /api/site/article/:id、PUT /:id/status、DELETE /:id | 不变（实体反查）                                                                                 |
+| GET /api/site/comment（分页）                           | 必带 `?siteId=`；筛选 `auditStatus/articleId/keyword` 不变                                       |
+| PUT /api/site/comment/:id/audit、DELETE /:id            | 不变（实体反查）                                                                                 |
+| POST /api/site/manage/:id/apply-template                | 路径参数站点化（替代原 `/mine/apply-template`）；模板规则 R20 不变（T65 后收进 manage 命名空间） |
+
+封面上传不变：复用 `POST /api/cloud/file/upload?parentId={mediaFolderId}&overwrite=1`，`mediaFolderId` 取自**当前站点**（前端由 `useSiteStore.currentSite` 提供）。
+
+### 10.4 admin 配额（`site:admin:quota`，超管 `*` 自动覆盖，common 不授）
+
+| 方法 | 路径                          | 说明                                                                                                                      |
+| ---- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| GET  | /api/site/admin/quota?userId= | `{ userId, limit, used }`（used = 当前站点数）                                                                            |
+| PUT  | /api/site/admin/quota         | `{ userId, limit }`；**下限 = used**（R48，低于下限 40001）；懒创建 upsert；挂 `@OperationLog('个人网站','调整站点配额')` |
+
+### 10.5 cloud 域既有端点的行为变化（无新端点）
+
+- `file.list` 响应的 `inSite/isSiteRoot` 扩展为**任一**站点子树/根语义（R51，前端无感）
+- `POST /cloud/file/:id/move`：目标或源为任一站点根 → 30019（既有码，判定范围扩大）
+- `DELETE /cloud/file/:id` 及批量删除/回收站入口：命中任一站点根 → **30020**（R52 新增拦截，提示先到站点列表删站）
+- `POST /cloud/share` 等分享端点：不变（分享语义与站点公开本就解耦，P4d D49）
+
+### 10.6 开放层（无变化）
+
+`/api/open/{slug}/...` 与 `/api/pub/...` 契约不变；多站仅意味着更多合法 slug。`site:resolve` 缓存键天然按 slug 隔离。
+
+### 10.7 AI 工具参数契约（供 ToolRegistry 注册，非 HTTP 端点）
+
+| 工具                                                | parameters                      | 回喂要点                                                                                                                                                                                               |
+| --------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| list_site_files / read_site_file / write_site_files | 加 `slug?: string`              | 省略：0 站 → `{ ok:false, errorCode:40101, message: 引导建站 }`；1 站 → 直通；多站 → `{ needSitePick:true, sites:[{slug,title}], message }`。指定：查无 → `{ ok:false, errorCode:40119, sites:[...] }` |
+| create_site（新，write 确认卡）                     | `{ slug, title, description? }` | 成功 `{ ok:true, site:{ slug, title, siteUrl } }`；失败 `{ ok:false, errorCode:40118\|40102\|40103, message, limit?, used? }` 不抛栈（R57）；`summarize` = 「创建站点 {slug}（{title}）」              |
+
+> `write_site_files` 的确认卡摘要每项携带 `{ site: { slug, title } }`，前端 `ToolConfirmCard` 渲染「目标站点」行（验收 8）。
+
+### 10.8 sid 日志脱敏（D56，非接口变更）
+
+日志中的 URL 统一经 `maskSensitiveQuery`（`sid`/`password` → `***`）：落点为全局异常日志与操作日志落库 `url`；Nginx 侧口径见 `deploy/nginx.conf`（不使用含 `$args` 的 log_format）与 README。

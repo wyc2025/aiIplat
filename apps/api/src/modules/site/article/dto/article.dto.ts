@@ -11,9 +11,10 @@ import {
   Length,
   Min,
 } from 'class-validator'
+import { SiteIdDto } from '../../dto/site-id.dto'
 
-/** 创建文章 */
-export class CreateArticleDto {
+/** 创建文章（P4E T61：body 带 siteId，属主校验 40119） */
+export class CreateArticleDto extends SiteIdDto {
   @ApiProperty({ description: '栏目 ID（须为本站栏目）' })
   @Type(() => Number)
   @IsInt()
@@ -59,7 +60,7 @@ export class CreateArticleDto {
   status!: number
 }
 
-/** 编辑文章（全可选，提供即更新；tagIds 提供即整体重建） */
+/** 编辑文章（全可选，提供即更新；tagIds 提供即整体重建；属主按实体反查，不接受请求 siteId） */
 export class UpdateArticleDto {
   @ApiPropertyOptional({ description: '栏目 ID' })
   @IsOptional()

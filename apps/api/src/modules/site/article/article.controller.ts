@@ -15,7 +15,7 @@ export class SiteArticleController {
 
   @Get()
   @RequirePermission('site:article:list')
-  @ApiOperation({ summary: '文章分页列表（筛选：栏目/标签/状态/标题关键词）' })
+  @ApiOperation({ summary: '文章分页列表（必带 siteId；筛选：栏目/标签/状态/标题关键词）' })
   list(@CurrentUser('userId') userId: string, @Query() query: ArticleQueryDto) {
     return this.articleService.list(BigInt(userId), query)
   }
@@ -30,7 +30,7 @@ export class SiteArticleController {
   @Post()
   @RequirePermission('site:article:create')
   @OperationLog('个人网站', '新增文章')
-  @ApiOperation({ summary: '新建文章（字数 R14 / 摘要自动 / 封面 media/ 校验）' })
+  @ApiOperation({ summary: '新建文章（body 带 siteId；字数 R14 / 摘要自动 / 封面 media/ 校验）' })
   create(@CurrentUser('userId') userId: string, @Body() dto: CreateArticleDto) {
     return this.articleService.create(BigInt(userId), dto)
   }

@@ -1,22 +1,10 @@
 <template>
   <div class="v-site-setting">
+    <SiteSwitcher />
     <div
-      v-loading="loading"
+      v-loading="store.loading"
       class="v-ss-body"
     >
-      <!-- 未开通：引导创建 -->
-      <template v-if="!loadError && site === null">
-        <el-empty description="还没有开通个人网站">
-          <el-button
-            v-permission="'site:site:manage'"
-            type="primary"
-            @click="createVisible = true"
-          >
-            一键创建站点
-          </el-button>
-        </el-empty>
-      </template>
-
       <!-- 加载失败 -->
       <el-result
         v-if="loadError"
@@ -34,8 +22,22 @@
         </template>
       </el-result>
 
-      <!-- 已开通：站点信息 + 编辑 -->
-      <template v-if="site">
+      <!-- 无站点：引导到站点列表创建（P4E：创建入口统一在站点列表页） -->
+      <el-empty
+        v-else-if="store.empty"
+        description="还没有站点"
+      >
+        <el-button
+          v-permission="'site:site:manage'"
+          type="primary"
+          @click="goSiteList"
+        >
+          去创建站点
+        </el-button>
+      </el-empty>
+
+      <!-- 有当前站点：站点信息 + 编辑 + 模板库 -->
+      <template v-else-if="site">
         <el-descriptions
           :column="1"
           border
@@ -61,7 +63,7 @@
           <el-descriptions-item label="站点地址">
             <el-link
               type="primary"
-              :href="site.siteUrl"
+              :href="siteUrl"
               target="_blank"
             >
               {{ site.siteUrl }}
@@ -145,66 +147,6 @@
       </template>
     </div>
 
-    <!-- 创建站点 -->
-    <el-dialog
-      v-model="createVisible"
-      title="创建站点"
-      width="520px"
-      :close-on-click-modal="false"
-    >
-      <el-form
-        ref="createFormRef"
-        :model="createForm"
-        :rules="slugRules"
-        label-width="100px"
-      >
-        <el-form-item
-          label="站点标识"
-          prop="slug"
-        >
-          <el-input
-            v-model="createForm.slug"
-            placeholder="3~32 位小写字母/数字/连字符"
-            maxlength="32"
-          />
-          <div class="v-ss-tip">
-            将成为访问地址 {{ origin }}/api/open/<b>{{ createForm.slug || '你的标识' }}</b>/ ，创建后可修改
-          </div>
-        </el-form-item>
-        <el-form-item
-          label="站点标题"
-          prop="title"
-        >
-          <el-input
-            v-model="createForm.title"
-            maxlength="50"
-            show-word-limit
-          />
-        </el-form-item>
-        <el-form-item label="站点描述">
-          <el-input
-            v-model="createForm.description"
-            type="textarea"
-            :rows="3"
-            maxlength="200"
-            show-word-limit
-          />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="createVisible = false">
-          取消
-        </el-button>
-        <el-button
-          type="primary"
-          :loading="submitting"
-          @click="submitCreate"
-        >
-          创建
-        </el-button>
-      </template>
-    </el-dialog>
-
     <!-- 编辑站点 -->
     <el-dialog
       v-model="editVisible"
@@ -267,28 +209,32 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { formatTime } from '@/utils/format'
-import { getMySite, createMySite, updateMySite, listTemplates, applyTemplate } from '@/api/site/site'
-import type { SiteSiteInfo, SiteTemplateItem } from '@/types/api'
+import SiteSwitcher from '@/components/SiteSwitcher/index.vue'
+import { updateSite, listTemplates, applyTemplate } from '@/api/site/site'
+import { useSiteStore } from '@/stores/site'
+import type { SiteTemplateItem } from '@/types/api'
 
-const loading = ref(false)
+/**
+ * 站点设置页（P4E T63）：作用于「当前站点」（store 提供），单站用户与现状零差异。
+ * 创建入口统一收敛到站点列表页；本页 0 站时给出跳转引导。
+ */
+const router = useRouter()
+const store = useSiteStore()
+
 const loadError = ref(false)
-/** null = 未开通 */
-const site = ref<SiteSiteInfo | null>(null)
 const submitting = ref(false)
 
-const createVisible = ref(false)
 const editVisible = ref(false)
-const createFormRef = ref<FormInstance>()
 const editFormRef = ref<FormInstance>()
-
-const origin = window.location.origin
-
-const createForm = reactive({ slug: '', title: '', description: '' })
 const editForm = reactive({ slug: '', title: '', description: '' })
+
+const site = computed(() => store.currentSite)
+const siteUrl = computed(() => (site.value ? `${window.location.origin}${site.value.siteUrl}` : ''))
 
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{2,31}$/
 const slugValidator = (_rule: unknown, value: string, callback: (err?: Error) => void) => {
@@ -300,44 +246,22 @@ const slugValidator = (_rule: unknown, value: string, callback: (err?: Error) =>
     callback()
   }
 }
-const slugRules: FormRules = {
-  slug: [{ required: true, validator: slugValidator, trigger: 'blur' }],
-  title: [{ required: true, message: '请输入站点标题', trigger: 'blur' }],
-}
 const editRules: FormRules = {
   slug: [{ required: true, validator: slugValidator, trigger: 'blur' }],
   title: [{ required: true, message: '请输入站点标题', trigger: 'blur' }],
 }
 
 async function reload() {
-  loading.value = true
   loadError.value = false
   try {
-    site.value = await getMySite()
+    await store.load()
   } catch {
     loadError.value = true
-  } finally {
-    loading.value = false
   }
 }
 
-async function submitCreate() {
-  const valid = await createFormRef.value?.validate().catch(() => false)
-  if (!valid) return
-  submitting.value = true
-  try {
-    site.value = await createMySite({
-      slug: createForm.slug,
-      title: createForm.title,
-      description: createForm.description || undefined,
-    })
-    ElMessage.success('站点创建成功，已生成默认模板')
-    createVisible.value = false
-  } catch {
-    // 拦截器提示（40102 占用 / 40103 非法 / 40101 已开通）
-  } finally {
-    submitting.value = false
-  }
+function goSiteList() {
+  router.push('/site/site')
 }
 
 function openEdit() {
@@ -349,17 +273,19 @@ function openEdit() {
 }
 
 async function submitEdit() {
+  if (!site.value) return
   const valid = await editFormRef.value?.validate().catch(() => false)
   if (!valid) return
   submitting.value = true
   try {
-    site.value = await updateMySite({
+    await updateSite(site.value.id, {
       slug: editForm.slug,
       title: editForm.title,
       description: editForm.description,
     })
     ElMessage.success('已保存')
     editVisible.value = false
+    await store.load()
   } catch {
     // 拦截器提示
   } finally {
@@ -373,16 +299,16 @@ async function toggleStatus() {
   if (disabling) {
     await ElMessageBox.confirm('停用后站点将对访客全部不可见，确认停用？', '提示', { type: 'warning' })
   }
-  const updated = await updateMySite({ status: disabling ? 0 : 1 })
-  site.value = updated
+  await updateSite(site.value.id, { status: disabling ? 0 : 1 })
+  await store.load()
   ElMessage.success(disabling ? '已停用' : '已启用')
 }
 
 async function toggleCommentAudit() {
   if (!site.value) return
   const next = site.value.commentAudit === 1 ? 0 : 1
-  const updated = await updateMySite({ commentAudit: next })
-  site.value = updated
+  await updateSite(site.value.id, { commentAudit: next })
+  await store.load()
   ElMessage.success(next === 1 ? '已开启评论审核' : '已关闭评论审核（新评论直接展示）')
 }
 
@@ -405,7 +331,7 @@ async function loadTemplates() {
 
 async function onApplyTemplate() {
   const tpl = templates.value.find((t) => t.id === selectedTemplateId.value)
-  if (!tpl) return
+  if (!tpl || !site.value) return
   await ElMessageBox.confirm(
     `确认应用「${tpl.name}」？同名文件将被覆盖，旧版可在回收站还原；media/ 与模板外文件不受影响。`,
     '应用模板',
@@ -413,7 +339,7 @@ async function onApplyTemplate() {
   )
   applying.value = true
   try {
-    const results = await applyTemplate(tpl.id)
+    const results = await applyTemplate(site.value.id, tpl.id)
     const okCount = results.filter((r) => r.ok).length
     const failCount = results.length - okCount
     if (failCount > 0) {
@@ -422,7 +348,7 @@ async function onApplyTemplate() {
       ElMessage.success(`模板应用成功（${okCount} 个文件）`)
     }
   } catch {
-    // 拦截器提示（40101 未开通 / 40116 模板不存在）
+    // 拦截器提示（40119 非属主 / 40116 模板不存在）
   } finally {
     applying.value = false
   }

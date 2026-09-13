@@ -9,6 +9,9 @@ import {
   type RawWriteResult,
   type SubtreeEntry,
 } from '../../cloud/facade/cloud-facade.service'
+import type { CreateSiteDto } from '../manage/dto/site.dto'
+// 注意：SiteManageService 必须为值导入（Nest 需构造函数实参做 DI；type-only 导入会被擦除成 Function）
+import { SiteManageService, type SiteView } from '../manage/manage.service'
 
 /**
  * 站点文本文件扩展名白名单（P4b §15.12：AI 三件套校验用，写死代码不进配置组；
@@ -37,7 +40,7 @@ export const AI_WRITE_MAX_FILES = 10
 /** AI 读文件上限 64KB（§15.12：同时是模型上下文护栏） */
 export const AI_READ_MAX_BYTES = 64 * 1024
 
-/** 当前用户的站点信息（rootFolderId 保持 bigint 供域内机械操作，出域序列化由调用方转字符串） */
+/** 当前用户的某个站点信息（rootFolderId 保持 bigint 供域内机械操作，出域序列化由调用方转字符串） */
 export interface MySiteInfo {
   id: bigint
   slug: string
@@ -46,7 +49,26 @@ export interface MySiteInfo {
   rootFolderId: bigint
 }
 
-/** 站点文件清单结果（listFiles；null = 未开通站点，工具回喂 40101 引导） */
+/** 站点轻量标识（R56 回喂给模型请用户指定站点用） */
+export interface SiteBrief {
+  slug: string
+  title: string
+}
+
+/**
+ * 站点解析结果（P4E R56/D55）：只解析当前用户自己的站点，查无此 slug 不暴露他人站点存在性。
+ * - `none`：0 站 → 工具回喂 40101 引导建站
+ * - `ok`：命中（slug 提供且命中 / 省略且唯一站直通）
+ * - `pick`：多站且省略 slug → 回喂站点列表请用户指定
+ * - `notfound`：slug 提供但查无 → 回喂 40119 + 用户现有站点列表
+ */
+export type SiteResolution =
+  | { status: 'none' }
+  | { status: 'ok'; site: MySiteInfo }
+  | { status: 'pick'; sites: SiteBrief[] }
+  | { status: 'notfound'; sites: SiteBrief[] }
+
+/** 站点文件清单结果（listFiles；null = 站点不存在/非属主） */
 export interface SiteFileListResult {
   site: { slug: string; title: string; status: number }
   files: SubtreeEntry[]
@@ -79,7 +101,10 @@ function extOfName(name: string): string {
  * site 域门面：跨域（system/ai 等）只通过本门面与 site 交互，禁止直接 import 域内实现（域边界纪律）。
  * 封装：
  * - 删用户预检 hasSite（R13 / PRD-P4A D14）
- * - P4b 站点语义校验层（§15.3）：getMySiteInfo / invalidateSitePaths / listFiles / readFile / writeFiles。
+ * - 多站解析（P4E R56）：getSites / resolveSite（0 站引导 / 单站直通 / 多站请用户指定 / 查无不暴露）
+ * - 建站（P4E R57/D55）：createSite 委托 SiteManageService.create —— 与手动建站同一创建链，
+ *   配额（40118）与 slug 校验（40102/40103）单点生效
+ * - P4b 站点语义校验层（§15.3）：listFiles / readFile / writeFiles（均按 siteId 作用域，属主 40119）。
  *   路径规范 / 文本白名单 / 大小与数量上限等站点语义校验全部收敛在本层，抛 site 段码
  *   （40101 / 40113~40115 / 40400）；机械执行（树遍历/读盘/行写入）在 CloudFacade 机械原语，
  *   cloud 段码（30001/30003/30006）在本层捕获转换（read → 40400；write → per-file error）。
@@ -91,6 +116,7 @@ export class SiteFacade {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly cloudFacade: CloudFacade,
+    private readonly manageService: SiteManageService,
   ) {}
 
   /** 用户是否已开通站点（有 site_site 行即 true）；删除用户前预检，与 cloud hasFiles 并列 */
@@ -99,17 +125,49 @@ export class SiteFacade {
     return count > 0
   }
 
-  /** 当前用户的站点信息；未开通返回 null（工具层回喂 40101 引导文案，不抛出） */
-  async getMySiteInfo(userId: bigint): Promise<MySiteInfo | null> {
-    const site = await this.prisma.siteSite.findFirst({ where: { userId } })
-    if (!site) return null
-    return {
-      id: site.id,
-      slug: site.slug,
-      title: site.title,
-      status: site.status,
-      rootFolderId: site.rootFolderId,
+  /** 用户全部站点（P4E：按创建时间升序，保证「第一站」语义稳定；未开通返回空数组） */
+  async getSites(userId: bigint): Promise<MySiteInfo[]> {
+    const sites = await this.prisma.siteSite.findMany({
+      where: { userId },
+      orderBy: [{ createTime: 'asc' }, { id: 'asc' }],
+    })
+    return sites.map((site) => this.toInfo(site))
+  }
+
+  /** 单个站点信息（属主校验；不存在/非属主返回 null） */
+  async getSiteInfo(userId: bigint, siteId: bigint): Promise<MySiteInfo | null> {
+    const site = await this.prisma.siteSite.findFirst({ where: { id: siteId, userId } })
+    return site ? this.toInfo(site) : null
+  }
+
+  /**
+   * 解析目标站点（P4E R56）：AI 三件套 slug 可选参数的统一入口，不抛异常（状态显式回喂模型）。
+   * slug 提供 → 命中即 ok、查无 notfound（带站点列表）；省略 → 0 站 none / 1 站直通 ok / 多站 pick。
+   */
+  async resolveSite(userId: bigint, slug?: string): Promise<SiteResolution> {
+    const sites = await this.getSites(userId)
+    if (sites.length === 0) return { status: 'none' }
+    const briefs: SiteBrief[] = sites.map((s) => ({ slug: s.slug, title: s.title }))
+    if (slug) {
+      const hit = sites.find((s) => s.slug === slug)
+      return hit ? { status: 'ok', site: hit } : { status: 'notfound', sites: briefs }
     }
+    if (sites.length === 1) return { status: 'ok', site: sites[0] }
+    return { status: 'pick', sites: briefs }
+  }
+
+  /**
+   * 建站（P4E R57/D55）：委托 SiteManageService.create —— 与手动建站同一创建链，
+   * 配额（40118）/ slug 冲突（40102）/ 保留字（40103）口径天然一致。
+   * 注意：本方法会把 BusinessException 原样上抛（配额满/slug 冲突），由调用方（工具层）转为回喂对象。
+   */
+  async createSite(userId: bigint, dto: CreateSiteDto): Promise<SiteView> {
+    return this.manageService.create(userId, dto)
+  }
+
+  /** 站点数配额视图（AI create_site 配额满时回喂 limit/used 用，P4E R57） */
+  async getQuota(userId: bigint): Promise<{ limit: number; used: number }> {
+    return this.manageService.getQuota(userId)
   }
 
   /**
@@ -124,10 +182,9 @@ export class SiteFacade {
     }
   }
 
-  /** 站点文件树（管理侧语义，属主视角，不做公开性判定）；null = 未开通站点 */
-  async listFiles(userId: bigint): Promise<SiteFileListResult | null> {
-    const site = await this.getMySiteInfo(userId)
-    if (!site) return null
+  /** 站点文件树（管理侧语义，属主视角，不做公开性判定）；站点不存在/非属主 → 40119 */
+  async listFiles(userId: bigint, siteId: bigint): Promise<SiteFileListResult> {
+    const site = await this.requireOwnedSite(userId, siteId)
     const { files, truncated } = await this.cloudFacade.listSubtreeRaw(site.rootFolderId)
     return {
       site: { slug: site.slug, title: site.title, status: site.status },
@@ -138,10 +195,10 @@ export class SiteFacade {
 
   /**
    * 读站点文本文件（站点语义校验层）：
-   * 未开通 40101 / 路径非法 40113 / 非白名单 40114 / 超过 64KB 40115 / 不存在或目录 40400。
+   * 站点不存在/非属主 40119 / 路径非法 40113 / 非白名单 40114 / 超过 64KB 40115 / 不存在或目录 40400。
    */
-  async readFile(userId: bigint, path: string): Promise<SiteFileReadResult> {
-    const site = await this.requireSite(userId)
+  async readFile(userId: bigint, siteId: bigint, path: string): Promise<SiteFileReadResult> {
+    const site = await this.requireOwnedSite(userId, siteId)
     const normalized = this.normalizeSitePath(path)
     const ext = extOfName(normalized)
     if (!SITE_FILE_TEXT_EXTS.has(ext)) {
@@ -163,6 +220,7 @@ export class SiteFacade {
 
   /**
    * 批量写站点文件（R18：逐文件独立成败，部分成功不整体回滚）：
+   * - 站点不存在/非属主 → 40119
    * - 批量约束：单次 ≤10 个（40115）
    * - 逐文件：路径规范（40113 → per-file error）/ 白名单（40114）/ 单文件 ≤256KB（40115）→
    *   CloudFacade.writeFileRaw 机械写入（30001/30003/30006 捕获为该文件 error）
@@ -171,9 +229,10 @@ export class SiteFacade {
    */
   async writeFiles(
     userId: bigint,
+    siteId: bigint,
     files: Array<{ path: string; content: string }>,
   ): Promise<SiteFileWriteResult[]> {
-    const site = await this.requireSite(userId)
+    const site = await this.requireOwnedSite(userId, siteId)
     if (files.length === 0 || files.length > AI_WRITE_MAX_FILES) {
       throw new BusinessException(
         ErrorCode.SiteContentTooLarge,
@@ -227,16 +286,30 @@ export class SiteFacade {
     return results
   }
 
-  /** 断言站点存在（未开通 40101，文案即引导口径），返回站点信息 */
-  private async requireSite(userId: bigint): Promise<MySiteInfo> {
-    const site = await this.getMySiteInfo(userId)
+  /** 断言站点存在且属主（40119，文案不暴露他人站点存在性），返回站点信息 */
+  private async requireOwnedSite(userId: bigint, siteId: bigint): Promise<MySiteInfo> {
+    const site = await this.getSiteInfo(userId, siteId)
     if (!site) {
-      throw new BusinessException(
-        ErrorCode.SiteNotFound,
-        '用户尚未开通个人网站，请引导其到「个人网站 → 站点设置」创建',
-      )
+      throw new BusinessException(ErrorCode.SiteForbidden, '站点不存在或非属主')
     }
     return site
+  }
+
+  /** site_site 行 → 域内站点信息（保持 bigint，出域序列化由调用方负责） */
+  private toInfo(site: {
+    id: bigint
+    slug: string
+    title: string
+    status: number
+    rootFolderId: bigint
+  }): MySiteInfo {
+    return {
+      id: site.id,
+      slug: site.slug,
+      title: site.title,
+      status: site.status,
+      rootFolderId: site.rootFolderId,
+    }
   }
 
   /** 站点路径规范化（R17）：拒绝对路径 / `..` / 空段 / 反斜杠 / 段超长（64 字符），返回规范相对路径 → 40113 */

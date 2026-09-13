@@ -1,5 +1,6 @@
 <template>
   <div class="v-site-column">
+    <SiteSwitcher />
     <ProTable
       :data="tree"
       :loading="loading"
@@ -78,7 +79,7 @@
       <template #empty>
         <el-empty
           v-if="!loadError"
-          description="还没有栏目"
+          :description="emptyText"
         />
       </template>
     </ProTable>
@@ -149,18 +150,23 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import ProTable from '@/components/ProTable/index.vue'
+import SiteSwitcher from '@/components/SiteSwitcher/index.vue'
 import { formatTime } from '@/utils/format'
 import { listColumns, createColumn, updateColumn, removeColumn } from '@/api/site/site'
+import { useSiteStore } from '@/stores/site'
 import type { SiteColumnItem } from '@/types/api'
 
+const siteStore = useSiteStore()
 const loading = ref(false)
 const loadError = ref(false)
 const list = ref<SiteColumnItem[]>([])
+/** 无站点时的空态文案（P4E：站点为 0 时不做接口请求） */
+const emptyText = computed(() => (siteStore.empty ? '还没有站点，请先到「站点列表」创建' : '还没有栏目'))
 
 const dialogVisible = ref(false)
 const submitting = ref(false)
@@ -202,10 +208,14 @@ const parentOptions = computed(() => {
 })
 
 async function reload() {
-  loading.value = true
   loadError.value = false
+  if (!siteStore.currentSiteId) {
+    list.value = []
+    return
+  }
+  loading.value = true
   try {
-    list.value = await listColumns()
+    list.value = await listColumns(siteStore.currentSiteId)
   } catch {
     list.value = []
     loadError.value = true
@@ -239,7 +249,12 @@ async function submit() {
       await updateColumn(editingId.value, { name: form.name, sort: form.sort })
       ElMessage.success('已保存')
     } else {
-      await createColumn({ parentId: form.parentId, name: form.name, sort: form.sort })
+      await createColumn({
+        siteId: Number(siteStore.currentSiteId),
+        parentId: form.parentId,
+        name: form.name,
+        sort: form.sort,
+      })
       ElMessage.success('已创建')
     }
     dialogVisible.value = false
@@ -262,7 +277,16 @@ async function onRemove(row: SiteColumnItem) {
   }
 }
 
-onMounted(reload)
+onMounted(async () => {
+  await siteStore.ensureLoaded().catch(() => undefined)
+  reload()
+})
+
+// 切换当前站点 → 重新拉取本页数据（P4E D54）
+watch(
+  () => siteStore.currentSiteId,
+  () => reload(),
+)
 </script>
 
 <style scoped>

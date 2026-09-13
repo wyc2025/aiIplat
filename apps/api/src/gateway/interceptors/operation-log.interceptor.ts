@@ -9,6 +9,7 @@ import { Reflector } from '@nestjs/core'
 import type { Request, Response } from 'express'
 import { catchError, tap, throwError, type Observable } from 'rxjs'
 import { PrismaService } from '../../infra/prisma/prisma.service'
+import { maskSensitiveQuery } from '../../common/utils/url-mask.util'
 import { OPERATION_LOG_KEY, type OperationLogMeta } from '../decorators/operation-log.decorator'
 import { SKIP_TRANSFORM_KEY } from '../decorators/skip-transform.decorator'
 import type { AuthUser } from '../guards/jwt.strategy'
@@ -51,7 +52,8 @@ export class OperationLogInterceptor implements NestInterceptor {
             module: meta.module,
             action: meta.action,
             method: request.method,
-            url: request.originalUrl,
+            // P4E D56/T64：URL 与 query 均先脱敏（sid / password 等查询参数打码）
+            url: maskSensitiveQuery(request.originalUrl),
             params: this.safeStringify(this.collectParams(request)),
             ip: this.extractIp(request),
             status,
@@ -76,9 +78,9 @@ export class OperationLogInterceptor implements NestInterceptor {
     )
   }
 
-  /** 收集 query + body（剔除密码等敏感字段） */
+  /** 收集 query + body（剔除密码 / 凭证等敏感字段） */
   private collectParams(request: Request): Record<string, unknown> {
-    const sensitiveKeys = new Set(['password', 'oldPassword', 'newPassword', 'confirmPassword'])
+    const sensitiveKeys = new Set(['password', 'oldPassword', 'newPassword', 'confirmPassword', 'sid'])
     const sanitize = (obj: unknown): unknown => {
       if (obj === null || typeof obj !== 'object') return obj
       if (Array.isArray(obj)) return obj.map(sanitize)

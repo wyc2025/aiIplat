@@ -15,11 +15,12 @@ import { createGetMyCreditsTool } from './tools/get-my-credits.tool'
 import { createListSiteFilesTool } from './tools/list-site-files.tool'
 import { createReadSiteFileTool } from './tools/read-site-file.tool'
 import { createWriteSiteFilesTool } from './tools/write-site-files.tool'
+import { createCreateSiteTool } from './tools/create-site.tool'
 
 /**
- * 工具装配器：注入各域暴露的 Service，在模块启动时把 10 个工具注册到 ToolRegistry。
+ * 工具装配器：注入各域暴露的 Service，在模块启动时把 11 个工具注册到 ToolRegistry。
  * 新增工具 = tools/ 下加一个工厂 + 在此处 register。
- * P4b 站点三件套只注入 site 域门面 SiteFacade（域门面纪律：零跨域 import 内部实现）。
+ * P4b 站点三件套 + P4E create_site 只注入 site 域门面 SiteFacade（域门面纪律：零跨域 import 内部实现）。
  */
 @Injectable()
 export class ToolBootstrap implements OnModuleInit {
@@ -43,5 +44,6 @@ export class ToolBootstrap implements OnModuleInit {
     this.registry.register(createListSiteFilesTool(this.siteFacade))
     this.registry.register(createReadSiteFileTool(this.siteFacade))
     this.registry.register(createWriteSiteFilesTool(this.siteFacade))
+    this.registry.register(createCreateSiteTool(this.siteFacade))
   }
 }

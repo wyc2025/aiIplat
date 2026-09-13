@@ -1,5 +1,6 @@
 <template>
   <div class="v-site-article">
+    <SiteSwitcher />
     <ProTable
       :data="list"
       :loading="loading"
@@ -155,7 +156,7 @@
       <template #empty>
         <el-empty
           v-if="!loadError"
-          description="还没有文章"
+          :description="emptyText"
         />
       </template>
     </ProTable>
@@ -373,12 +374,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import ProTable from '@/components/ProTable/index.vue'
 import MarkdownView from '@/components/MarkdownView/index.vue'
+import SiteSwitcher from '@/components/SiteSwitcher/index.vue'
 import { formatTime } from '@/utils/format'
 import {
   listArticles,
@@ -389,11 +391,12 @@ import {
   removeArticle,
   listColumns,
   listTags,
-  getMySite,
 } from '@/api/site/site'
 import { uploadFile } from '@/api/cloud/file'
-import type { SiteArticleItem, SiteColumnItem, SiteTagItem, SiteSiteInfo } from '@/types/api'
+import { useSiteStore } from '@/stores/site'
+import type { SiteArticleItem, SiteColumnItem, SiteTagItem } from '@/types/api'
 
+const siteStore = useSiteStore()
 const loading = ref(false)
 const loadError = ref(false)
 const list = ref<SiteArticleItem[]>([])
@@ -407,17 +410,20 @@ const filterKeyword = ref('')
 
 const columns = ref<SiteColumnItem[]>([])
 const tags = ref<SiteTagItem[]>([])
-/** 我的站点（封面/插图上传落 media/ 用，D13） */
-const mySite = ref<SiteSiteInfo | null>(null)
+/** 当前站点（封面/插图上传落 media/ 用，D13；P4E 由 store 提供） */
+const currentSite = computed(() => siteStore.currentSite)
 
 const coverInput = ref<HTMLInputElement>()
 const imageInput = ref<HTMLInputElement>()
 const coverUploading = ref(false)
 const imageUploading = ref(false)
 
+/** 无站点时的空态文案（P4E：站点为 0 时不做接口请求） */
+const emptyText = computed(() => (siteStore.empty ? '还没有站点，请先到「站点列表」创建' : '还没有文章'))
+
 /** 封面回显：完整公开 URL（走开放静态链路） */
 const coverPreviewUrl = computed(() =>
-  form.coverPath && mySite.value ? `/api/open/${mySite.value.slug}/${form.coverPath}` : '',
+  form.coverPath && currentSite.value ? `/api/open/${currentSite.value.slug}/${form.coverPath}` : '',
 )
 
 const editorVisible = ref(false)
@@ -470,12 +476,18 @@ function buildTree(items: SiteColumnItem[]): SiteColumnItem[] {
 }
 
 async function reload() {
-  loading.value = true
   loadError.value = false
+  if (!siteStore.currentSiteId) {
+    list.value = []
+    total.value = 0
+    return
+  }
+  loading.value = true
   try {
     const res = await listArticles({
       pageNo: pageNo.value,
       pageSize: pageSize.value,
+      siteId: Number(siteStore.currentSiteId),
       columnId: filterColumnId.value,
       status: filterStatus.value,
       keyword: filterKeyword.value.trim() || undefined,
@@ -502,21 +514,28 @@ function onSizeChange(size: number) {
 }
 
 async function loadMeta() {
-  const [cols, tgs, site] = await Promise.all([listColumns(), listTags(), getMySite().catch(() => null)])
+  if (!siteStore.currentSiteId) {
+    columns.value = []
+    tags.value = []
+    return
+  }
+  const [cols, tgs] = await Promise.all([
+    listColumns(siteStore.currentSiteId),
+    listTags(siteStore.currentSiteId),
+  ])
   columns.value = cols
   tags.value = tgs
-  mySite.value = site
 }
 
-/** 上传封面：落 media/（site 媒体目录），回填相对路径并回显（D13） */
+/** 上传封面：落 media/（站点媒体目录），回填相对路径并回显（D13） */
 async function onCoverPick(event: Event) {
   const target = event.target as HTMLInputElement
   const file = target.files?.[0]
   target.value = ''
-  if (!file || !mySite.value) return
+  if (!file || !currentSite.value) return
   coverUploading.value = true
   try {
-    const created = await uploadFile(Number(mySite.value.mediaFolderId), file)
+    const created = await uploadFile(Number(currentSite.value.mediaFolderId), file)
     form.coverPath = `media/${created.name}`
     ElMessage.success('封面上传完成')
   } catch {
@@ -531,10 +550,10 @@ async function onImagePick(event: Event) {
   const target = event.target as HTMLInputElement
   const file = target.files?.[0]
   target.value = ''
-  if (!file || !mySite.value) return
+  if (!file || !currentSite.value) return
   imageUploading.value = true
   try {
-    const created = await uploadFile(Number(mySite.value.mediaFolderId), file)
+    const created = await uploadFile(Number(currentSite.value.mediaFolderId), file)
     const snippet = `\n![${created.name}](media/${created.name})\n`
     form.contentMd = `${form.contentMd}${snippet}`
     ElMessage.success('图片已插入')
@@ -593,7 +612,8 @@ async function submit() {
       await updateArticle(editingId.value, payload)
       ElMessage.success(form.status === 1 ? '已保存并发布' : '已保存草稿')
     } else {
-      await createArticle(payload)
+      // P4E：新建以请求 siteId 为准（更新按实体反查属主，不带 siteId）
+      await createArticle({ ...payload, siteId: Number(siteStore.currentSiteId) })
       ElMessage.success(form.status === 1 ? '已发布' : '已存草稿')
     }
     editorVisible.value = false
@@ -650,9 +670,20 @@ async function openPreview(row: SiteArticleItem) {
 }
 
 onMounted(async () => {
+  await siteStore.ensureLoaded().catch(() => undefined)
   reload()
   await loadMeta().catch(() => undefined)
 })
+
+// 切换当前站点 → 回到第一页、重拉列表与栏目/标签元数据（P4E D54）
+watch(
+  () => siteStore.currentSiteId,
+  () => {
+    pageNo.value = 1
+    reload()
+    loadMeta().catch(() => undefined)
+  },
+)
 </script>
 
 <style scoped>

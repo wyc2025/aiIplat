@@ -36,6 +36,8 @@ export interface ToolSummaryItem {
   action?: 'created' | 'overwritten'
   /** 预估大小（字节）：created = 新内容大小，overwritten = 旧文件大小 */
   size?: number
+  /** P4E T62：目标站点标识（多站对话时确认卡需明示写入哪个站点） */
+  site?: { slug: string; title: string }
 }
 
 /** 工具调用记录（消息内嵌，用于恢复卡片/标签） */

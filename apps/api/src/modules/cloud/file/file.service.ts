@@ -88,13 +88,13 @@ export class FileService {
       }
     }
 
-    // R46（P4d T52）：inSite 标记——沿 parentId 上溯是否经过站点根锚点（site_site.root_folder_id）。
-    // 站点根由 site 域经 SiteRootService 提供（域边界纪律），上溯在 cloud 域内完成（有界 ≤10，与公开判定链同口径）。
-    const siteRootId = await this.siteRoot.getRootFolderId(userId)
-    let dirInSite = false
-    if (siteRootId !== null && parentId !== BigInt(0)) {
-      dirInSite = parentId === siteRootId || (await this.isWithinSubtree(userId, parentId, siteRootId))
-    }
+    // R46（P4d T52）/ R51（P4E T59）：inSite 标记——沿 parentId 上溯是否经过「任一」站点根锚点
+    // （site_site.root_folder_id）。站点根由 site 域经 SiteRootService 提供（域边界纪律），
+    // 上溯在 cloud 域内完成（有界 ≤10，与公开判定链同口径）；多站下根系集合仍很小。
+    const siteRootIds = await this.siteRoot.getRootFolderIds(userId)
+    const siteRootSet = new Set(siteRootIds)
+    const dirInSite =
+      parentId !== BigInt(0) && (await this.isWithinAnySubtree(userId, parentId, siteRootSet))
 
     const list = [...dirs, ...files].map((f) => ({
       id: f.id,
@@ -110,10 +110,10 @@ export class FileService {
       // P4c F1：公开链接 token（仅显式公开行有值，供「复制公开链接」）；allowListing 仅文件夹有意义（D32）
       publicToken: f.isPublic === 1 ? f.publicToken : null,
       allowListing: f.allowListing,
-      // P4d R46/D49：位于站点子树内（含站点根本身）→ 前端按钮组改「设为私有/取消私有」；站点外走 token 公开
-      inSite: dirInSite || (siteRootId !== null && f.id === siteRootId),
+      // P4d R46/D49 + P4E R51：位于任一站点子树内（含站点根本身）→ 前端按钮组改「设为私有/取消私有」；站点外走 token 公开
+      inSite: dirInSite || siteRootSet.has(f.id),
       // P4d R45：站点根目录行无「设为私有」（恒公开锚点，整站关闭走站点 status）
-      isSiteRoot: siteRootId !== null && f.id === siteRootId,
+      isSiteRoot: siteRootSet.has(f.id),
     }))
 
     const { quota, used } = await this.getQuota(userId)
@@ -269,9 +269,19 @@ export class FileService {
     return { id: source.id.toString(), name: source.name, finalName, targetPublic }
   }
 
-  /** 删除：软删入回收站（R2：只标记自身，后代不变）；公开行同步置空 token（P4c D30 轮换，还原后旧链接仍 40400） */
+  /**
+   * 删除：软删入回收站（R2：只标记自身，后代不变）；公开行同步置空 token（P4c D30 轮换，还原后旧链接仍 40400）。
+   * P4E R52（补 P4a 遗留口子）：命中任一站点根 → 30020，须先在站点侧删除站点（删站走
+   * CloudFacade.removeSiteRoot 内部通道，绕过本用户面保护，见 P4E R53）。
+   */
   async remove(userId: bigint, id: bigint) {
     const target = await this.assertOwned(id, userId, false)
+    if (await this.siteRoot.isSiteRoot(userId, target.id)) {
+      throw new BusinessException(
+        ErrorCode.CloudSiteRootProtected,
+        '站点根目录不能直接删除，请先到「个人网站 → 站点列表」删除站点',
+      )
+    }
     await this.prisma.cloudFile.update({
       where: { id },
       data: { deletedAt: new Date(), ...(target.publicToken ? { publicToken: null } : {}) },
@@ -528,14 +538,28 @@ export class FileService {
 
   /** candidateId 是否为 ancestorId 自身或其后代（有界上溯 ≤10 层防环；0=根目录恒 false） */
   private async isWithinSubtree(userId: bigint, candidateId: bigint, ancestorId: bigint): Promise<boolean> {
+    return this.isWithinAnySubtree(userId, candidateId, new Set([ancestorId]))
+  }
+
+  /**
+   * candidateId 是否处于「任一给定祖先集合」的子树内（含等于集合成员本身）；
+   * 一次上溯 + 集合判定（P4E R51 多站口径），避免多根逐一上溯的 N 倍查询。
+   * 有界上溯 ≤ MAX_DEPTH 层防环；0=根目录恒 false（根不在祖先集合中）。
+   */
+  private async isWithinAnySubtree(
+    userId: bigint,
+    candidateId: bigint,
+    ancestors: Set<bigint>,
+  ): Promise<boolean> {
+    if (candidateId === BigInt(0)) return false
     let cursor = candidateId
-    for (let i = 0; i <= MAX_DEPTH && cursor !== BigInt(0); i++) {
-      if (cursor === ancestorId) return true
+    for (let i = 0; i <= MAX_DEPTH; i++) {
+      if (ancestors.has(cursor)) return true
       const row = await this.prisma.cloudFile.findFirst({
         where: { id: cursor, userId },
         select: { parentId: true },
       })
-      if (!row) return false
+      if (!row || row.parentId === BigInt(0)) return false
       cursor = row.parentId
     }
     return false
