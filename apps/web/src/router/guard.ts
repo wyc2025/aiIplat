@@ -69,9 +69,7 @@ export function setupRouterGuard(router: Router): void {
     // 其 name/matched 等字段会劫持重定向目标。
     const permissionStore = usePermissionStore()
     if (!permissionStore.routesLoaded) {
-      console.warn('[guard] loading perms for', to.path)
       const result = await ensurePermissionLoaded()
-      console.warn('[guard] routes after:', JSON.stringify(router.getRoutes().map((r) => r.path)))
       if (result !== true) return result
       return { path: to.path, query: to.query, replace: true }
     }

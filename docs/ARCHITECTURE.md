@@ -26,22 +26,22 @@
 
 ### 1.2 后端（apps/api）
 
-| 类别       | 选型                                   | 约束                                                                    |
-| ---------- | -------------------------------------- | ----------------------------------------------------------------------- |
-| 框架       | NestJS 11 + TypeScript                 | 严格分层 Controller → Service → Prisma                                  |
-| ORM        | Prisma 6                               | model 用 PascalCase，数据库字段用 `@map` 映射 snake_case                |
-| 数据库     | MySQL 8（utf8mb4）                     | docker-compose 启动                                                     |
-| 缓存       | Redis 7（ioredis）                     | token 黑名单、登录失败计数、热点缓存                                    |
-| 认证       | @nestjs/jwt + @nestjs/passport         | access + refresh 双 token                                               |
-| 密码       | bcrypt（salt 10）                      | 任何接口不得返回 password 字段                                          |
-| 校验       | class-validator + class-transformer    | 所有入参走 DTO，禁止在 Controller 里裸取 body                           |
-| 接口文档   | @nestjs/swagger                        | 路径 `/api/docs`，带 JWT 调试按钮                                       |
-| 安全       | @nestjs/throttler、helmet、CORS 白名单 | 全局限流 300 次/分/IP；登录接口 10 次/分                                |
-| 文件       | Multer + 本地磁盘                      | 通过 StorageService 抽象访问，预留二期切换 MinIO/OSS                    |
-| 日志       | winston（运行日志）+ 操作日志落库      |                                                                         |
-| 配置       | @nestjs/config + .env 多环境           | 配置项集中定义在 `src/config/`                                          |
-| 定时任务   | @nestjs/schedule                       | P2a 起启用（月度额度重置），新增 cron 统一放各域 `*.task.ts`            |
-| 大模型接入 | openai（官方 SDK）                     | 用 `baseURL` 指向各家 OpenAI 兼容端点，**禁止**为单一厂商引入其专属 SDK |
+| 类别       | 选型                                           | 约束                                                                                |
+| ---------- | ---------------------------------------------- | ----------------------------------------------------------------------------------- |
+| 框架       | NestJS 11 + TypeScript                         | 严格分层 Controller → Service → Prisma                                              |
+| ORM        | Prisma 6                                       | model 用 PascalCase，数据库字段用 `@map` 映射 snake_case                            |
+| 数据库     | MySQL 8（utf8mb4）                             | docker-compose 启动                                                                 |
+| 缓存       | Redis 7（ioredis）                             | token 黑名单、登录失败计数、热点缓存                                                |
+| 认证       | @nestjs/jwt + @nestjs/passport                 | access + refresh 双 token                                                           |
+| 密码       | bcrypt（salt 10）                              | 任何接口不得返回 password 字段                                                      |
+| 校验       | class-validator + class-transformer            | 所有入参走 DTO，禁止在 Controller 里裸取 body                                       |
+| 接口文档   | @nestjs/swagger                                | 路径 `/api/docs`，带 JWT 调试按钮                                                   |
+| 安全       | @nestjs/throttler、helmet、CORS 白名单         | 全局限流 300 次/分/IP；登录接口 10 次/分                                            |
+| 文件       | Multer + 本地磁盘                              | 通过 StorageService 抽象访问，预留二期切换 MinIO/OSS                                |
+| 日志       | Nest Logger（console，运行日志）+ 操作日志落库 | winston 依赖在库但零使用未接入；接入时 URL 字段统一过 `maskSensitiveQuery`（§18.6） |
+| 配置       | @nestjs/config + .env 多环境                   | 配置项集中定义在 `src/config/`                                                      |
+| 定时任务   | @nestjs/schedule                               | P2a 起启用（月度额度重置），新增 cron 统一放各域 `*.task.ts`                        |
+| 大模型接入 | openai（官方 SDK）                             | 用 `baseURL` 指向各家 OpenAI 兼容端点，**禁止**为单一厂商引入其专属 SDK             |
 
 **P2a 新依赖白名单（仅此 3 个，已在 PRD-P2A D3 批准）**：`@nestjs/schedule`、`openai`、`markdown-it`。
 
@@ -352,6 +352,7 @@ apps/api/src/
 | 30017 | 该分享需要提取码（未验证或凭证过期，P4d）              | 跳密码门禁页             |
 | 30018 | 提取码错误（含连续 5 次锁 10 分钟，P4d）               | 门禁页提示剩余次数       |
 | 30019 | 非法移动目标（自身子树 / 站点根 / 回收站，P4d）        | 提示                     |
+| 30020 | 站点根目录禁止直接删除（须先删除站点，P4e R52）        | 提示先到站点列表删站     |
 
 ### 4.8 个人网站（site 域）架构约定（P4a）
 
@@ -365,7 +366,7 @@ apps/api/src/
 - **覆盖上传（R5）**：`overwrite=1` 且同名未删文件 → 物理替换 + used 差额记账（`GREATEST(used+delta,0)` 兜底）+ URL（file id）不变
 - **文章模块**：栏目树 ≤3 级（防环+40107 保护）；字数 R14（去 markdown 标记与空白计字符，仅展示）；摘要留空自动取正文纯文本前 100 字；发布状态机（首次发布写 published_at，下架再上架不刷新）；物理删除连带标签关联与评论（R7）
 - **评论（R9）**：昵称制；站点级审核开关（关=直过审）；开放层仅返回已过审；限流 10 次/分/IP + 同文章同 IP 60s 一条（40111）；查看数 R8（`site:view:{articleId}:{ip}` SET NX EX 300 去重，IP 取 XFF 首段）
-- **错误码**：site 域 40101~40116（表见 §14.11）；开放层对外统一 40400 防探测
+- **错误码**：site 域 40101~40119（表见 §14.11；**40117 为 P4c 开放层码，见 §16.2**；40118/40119 为 P4e 配额满 / 站点不存在或非属主）；开放层对外统一 40400 防探测
 
 ---
 
@@ -734,6 +735,11 @@ P4c 增补（upload 配置组续）：
 - `CLOUD_UNZIP_MAX_ENTRIES`：在线解压单包条目数上限（默认 5000）
 - `CLOUD_UNZIP_MAX_TOTAL_SIZE`：在线解压单包累计总大小上限字节（默认 500MB）；单条目大小复用 `CLOUD_MAX_FILE_SIZE`
 
+P4F 增补（upload 配置组续，T67，见 §19.1）：
+
+- `CLOUD_RECYCLE_RETENTION_DAYS`：回收站保留天数（默认 30）；`deleted_at` 早于 now−N 天的行由每日 03:30 的 cron 物理清除
+- `CLOUD_RECYCLE_CLEAN_ENABLED`：回收站自动清理总开关（默认开；仅显式 `false`/`0` 关闭，关闭时空跑只记一条日志）
+
 P4a 增补（site 配置组，见 `apps/api/src/config/site.config.ts`，均有默认值）：
 
 - `SITE_OPEN_STATIC_RATE_LIMIT`：开放静态限流（次/分/IP，默认 120）
@@ -822,6 +828,10 @@ main.ts 增补：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 函数�
 | SiteSwitcher | web/src/components/SiteSwitcher | 站点切换器（仅多站显示，单站用户无感；切换即改 store，页面 watch 重载） | 已建（T63） |
 | maskSensitiveQuery | api/src/common/utils/url-mask.util.ts | 日志 URL 查询参数脱敏（sid/password → \*\*\*，零依赖；异常/未命中原样返回） | 已建（T64） |
 | fetchAvatarBlob + useUserStore.avatarUrl | web/src/api/cloud/file.ts、web/src/stores/user.ts | 头像展示链（Blob → objectURL）：头像端点为登录态流式接口，`<img>` 直连带不了 Authorization 必然 401，故由 user store 统一取图（幂等 + 竞态丢弃 + revoke 回收），组件只消费 `avatarUrl`（空则回退昵称首字母）。**接 MinIO/OSS 改预签名 URL 时只需替换本实现** | 已建（P3 遗留 18 收口，2026-09-13） |
+| saveBlob | web/src/utils/download.ts | **全仓 Blob 下载唯一口径**（P4F T69）：createObjectURL → a.click → 延时 10s revokeObjectURL（紧接 revoke 在部分浏览器会取消下载）。单文件下载 / 打包下载 / 访客整包下载统一复用，禁止再写第二份 createObjectURL + a.click 实现 | 已建（T69，收敛自 cloud/file/index.vue 与 public-view/FolderView.vue 两处私有实现） |
+| RecycleCleanTask + RecycleService.cleanExpired | api/src/modules/cloud/recycle | 回收站超期自动清理（P4F T67/D58/R58/R59）：cron 每日 03:30，分批 ≤500 行、以「超期行中的最顶层项」为执行单元（子树去重）、单行失败续扫、幂等可重入；复用既有彻底删除链，头像旧行只删行/物理文件不二次回退 used | 已建（T67） |
+| 配额对账两端点（GET/PUT usage-reconcile） | api/src/modules/cloud/admin | 诊断（R60 三段 groupBy 聚合 + 公式差额，userId 缺省 = 全用户）/ 修正（R61 used = 公式重算值，@OperationLog('云盘','配额对账修正')）；前端入口 = 用户管理「调整云盘配额」弹窗内嵌对账行 + diff≠0 才出现的修正按钮（D59） | 已建（T68） |
+| 全局中文语言包 | web/src/App.vue | ElConfigProvider + `element-plus/es/locale/lang/zh-cn` 在最外层注入：组件走 unplugin 按需自动引入，没有 `app.use(ElementPlus,{locale})` 这一步，函数式弹窗（ElMessageBox/ElMessage）读全局配置后按钮即中文（P4F T69 根因级修复） | 已建（T69） |
 
 ### Redis Key 增补约定（写入 RedisKey 常量）
 
@@ -933,8 +943,8 @@ api/src/modules/site/
 ├── facade/
 │   ├── site-facade.service.ts # SiteFacade：hasSite（R13 删用户预检）+ P4b 站点语义校验层（§15.3）
 │   └── site-facade.module.ts  # SiteFacade 独立模块（P4b T44：子模块同域直注，零循环）
-├── manage/                   # 站点设置（GET/POST/PUT /api/site/mine）
-├── template/                 # P4b 模板库（GET /api/site/templates、POST /api/site/mine/apply-template，§15.7）
+├── manage/                   # 站点 CRUD（§10.2，`/api/site/manage/*`；P4e 起承接原 /api/site/mine）
+├── template/                 # P4b 模板库（GET /api/site/templates、POST /api/site/manage/:id/apply-template，§15.7）
 ├── column/                   # 栏目树（≤3 级）
 ├── tag/                      # 标签
 ├── article/                  # 文章（封面/字数/发布状态）
@@ -1057,6 +1067,11 @@ CSP sandbox 固定值 `sandbox allow-scripts allow-forms allow-popups allow-down
 | 40114 | 文件类型不允许（非文本白名单扩展名，P4b R17）                       | AI 工具回喂 / 编辑器按钮不显示           |
 | 40115 | 内容超限（AI 写 >256KB / 单次 >10 个 / 读 >64KB，P4b R17）          | AI 工具回喂，模型拆分或精简              |
 | 40116 | 模板不存在（P4b T44 apply-template）                                | 刷新模板列表                             |
+| 40118 | 站点数量已达上限（P4e R47，message 带 limit/used）                  | 提示联系管理员调配额                     |
+| 40119 | 站点不存在或非属主（P4e）                                           | 刷新站点列表 / 切当前站                  |
+
+> 40117（该文件夹未开放列表浏览）为 **P4c 开放层码**（挂在 cloud 段常量尾部，语义见 §16.2），不属 site 域段，故本表不连续。
+> 40118/40119 编号顺延说明见 §18.7（PRD-P4E 名义编号为 40117/40118）。
 
 > 注：标签不存在（tag PUT/DELETE、文章 tagIds 含不存在项）复用通用 40400，不设细分码（T37 偏差登记，T40 备案）。
 
@@ -1088,7 +1103,7 @@ P4b"AI 编写站点文件"按既有 AiTool 框架加工具：write 类必走确�
 
 ```
 api/src/modules/site/template/      # 模板库子模块
-├── template.controller.ts # GET /api/site/templates、POST /api/site/mine/apply-template
+├── template.controller.ts # GET /api/site/templates、POST /api/site/manage/:id/apply-template
 ├── template.service.ts    # 模板清单实时读 + 温和覆盖应用（写入经 SiteFacade.writeFiles）
 └── template.module.ts     # imports SiteFacadeModule（同域直注；见下方"模块形态"说明）
 
@@ -1175,7 +1190,7 @@ summarize?: (params: any, ctx: { user: AuthUser }) => any
 
 - 资产：`apps/api/assets/site-templates/{id}/`（四件套 + template.json `{ name, description, version, preview? }`；preview 本期恒 null）
 - `GET /api/site/templates`（site:site:manage）：readdir → 逐目录读 template.json → `[{ id, name, description }]`；缺失/解析失败跳过并记运行日志；**实时读不缓存**
-- `POST /api/site/mine/apply-template`（site:site:manage，@OperationLog）：未开通 40101（先于模板校验）→ templateId 由 DTO 正则 `^[A-Za-z0-9_-]{1,64}$` 挡穿越（40001）→ 目录不存在 40116 → 遍历模板文件（排除 template.json）→ 经 `SiteFacade.writeFiles` 温和覆盖（R20/D23：同名软删 + 新建，media/ 与模板外文件不动，失效由 writeFiles 内建）→ 返回逐文件清单
+- `POST /api/site/manage/:id/apply-template`（site:site:manage，@OperationLog）：站点 `:id` 非属主 40119（先于模板校验）→ templateId 由 DTO 正则 `^[A-Za-z0-9_-]{1,64}$` 挡穿越（40001）→ 目录不存在 40116 → 遍历模板文件（排除 template.json）→ 经 `SiteFacade.writeFiles` 温和覆盖（R20/D23：同名软删 + 新建，media/ 与模板外文件不动，失效由 writeFiles 内建）→ 返回逐文件清单（P4e 起路径参数站点化，原 `/api/site/mine/apply-template` 废弃）
 - 建站（manage.create）模板源读 `site-templates/default/`；discardSiteDraft 回滚不变；已建站用户不受迁移影响
 - 模板纪律（R22）：README.txt 为字段级契约，三套主体逐字一致；开放 API 变更必须同步三套 README
 
@@ -1517,3 +1532,74 @@ site/
 | AI 删站 / 改站工具          | 用户诉求             | 走同一 `manage` 链，confirm 卡摘要带 slug/title 即可                                                                                                                                       |
 | 站点间内容复制 / 自定义域名 | 用户诉求             | 前者需跨 siteId 写内容（内容表已带 site_id，无结构阻碍）；后者需新增域名映射表                                                                                                             |
 | 模板库读取是否也收进 manage | 命名空间洁癖         | 现 `GET /api/site/templates` 属**平台级**资源（与具体站点无关，读 assets），按规则留顶层；若统一收口可改 `GET /api/site/manage/templates`（需把该静态段声明在 manage 控制器的 `:id` 之前） |
+
+---
+
+## 19. 云盘收尾清账（P4F）：回收站自动清理 + 配额对账 + 历史小瑕疵（自 ARCHITECTURE-P4F-增补.md 并入；增补文档保留为历史细节参考）
+
+> 零新依赖（`@nestjs/schedule` 自 P2a 已启用）、零新错误码。决策 D58~~D61 / 规则 R58~~R62 / 任务 T66~T70，见 PRD-P4F-CLOUD.md。
+
+### 19.1 配置增量（upload 配置组，T67）
+
+| 配置                         | env                            | 默认 | 说明                               |
+| ---------------------------- | ------------------------------ | ---- | ---------------------------------- |
+| `cloud.recycleRetentionDays` | `CLOUD_RECYCLE_RETENTION_DAYS` | 30   | 回收站保留天数（D58）              |
+| `cloud.recycleCleanEnabled`  | `CLOUD_RECYCLE_CLEAN_ENABLED`  | true | 自动清理总开关（false 时任务空跑） |
+
+> 布尔读取口径：仅显式 `false`/`0` 关闭（缺省即开），与 `CLOUD_AUDIT_ENABLED === 'true'`（缺省关）相反——**默认值由配置语义决定，不套用同一写法**。
+
+### 19.2 回收站自动清理（T67）
+
+```
+modules/cloud/recycle/
+├── recycle.controller.ts / recycle.service.ts   # 既有
+├── recycle-clean.task.ts                        # 本期新增：@Cron('0 30 3 * * *') 每日 03:30
+└── dto/
+```
+
+- **分层**：`RecycleCleanTask` 只做「读开关/天数 → 调 `RecycleService.cleanExpired(days)` → 记汇总日志」；编排链落在 Service（与 P2a `PlanTask → CreditService.resetExpiredCycles` 同款，cron 文件不与 Prisma 直接耦合）
+- **执行链**：查 `deleted_at < now − N 天` 的行（按 id 升序分批，每批 ≤500）→ 以「超期行中的最顶层项」为执行单元（`hasDeletedAncestor` 上溯判定，与回收站 R2 顶层归集**共用同一私有判定**）→ 复用既有 `purgeSubtree` 彻底删除链（子树物理删 + 删分享 + used 回退）
+- **子树去重**：父行与子行可能同批命中，父行清理即级联子行；若整批均为「已删子树成员」（其顶层项尚未超期），本轮无进展即退出，等其顶层项超期时随父行一并清除
+- **头像旧行（`parent_id = -1` 且已软删）**：R58 要求同样清理。其 used 在换头像时已被 `CloudFacade.saveAvatar` 回退（R60 公式据此扣除 `revertedAvatars`），故清理时**只删物理文件与行、不回退 used**——为此 `purgeSubtree` 增加 `options.refundUsed`（默认 `true`；仅头像旧行传 `false`）。删除逻辑仍 100% 复用，未另写第二条删除链
+- **幂等/容错**：单行失败只记 error 日志并继续；下轮自然续扫；不加分布式锁（个人平台单实例，R59 口径）；物理文件缺失静默（沿用彻底删除链既有口径）
+- **日志**：每轮 `扫描行数 / 清除项数 / 文件数与字节 / 失败项数` 一条 INFO；开关关闭时只记一条跳过日志
+
+### 19.3 配额对账（T68）
+
+```
+modules/cloud/admin/
+├── admin.controller.ts   # GET/PUT usage-reconcile（cloud:admin:quota）
+├── admin.service.ts      # reconcileUsage(userId?) / reconcileFix(dto) / buildReconcile([])
+└── dto/quota.dto.ts      # ReconcileUsageDto
+```
+
+- **诊断**：按 R60 公式三段聚合（`groupBy(userId)` + `_sum.size` + `_count` 三条 SQL，不拉行）；`userId` 缺省 = `cloud_usage` 行 ∪ 文件行 的属主集合逐条返回。接口契约见 API.md §11.2
+- **修正**：先重算再 `cloud_usage.used = expected`（行不存在懒创建）；响应带 `{ oldUsed, newUsed, diff }`；`@OperationLog('云盘','配额对账修正')`；只写 used 一个字段
+- **前端**：用户管理「调整云盘配额」弹窗打开时并行拉诊断（失败不阻塞配额调整）→ 展示「公式值 / 当前值 / 差额」；`diff ≠ 0` 出「按公式值修正」+ 二次确认，`diff = 0` 显示「一致」不出按钮
+- **22,751 字节历史差额归因结论（本轮实测，回填 PROGRESS）**：admin（user 1）`stored = 64,428,657`、`expected = 64,451,408`、`diff = +22,751`；三段明细 `active = 71 行/64,451,408 字节`、`recycled = 0`、`revertedAvatars = 0`。差额 **100% 落在「未删除行」段**（used 比现存未删除行字节之和少 22,751），且与 `recycled`/`revertedAvatars` 无关，可排除「回收站软删未扣」与「已回退头像行口径」两类解释；指向 P3/T49 时期的一次性 used 回退/漂移（P4c 走查记载 T49 做过「两用户 used 漂移校正」，同源）。属**一次性历史漂移、非持续泄漏**；是否写回由管理员在弹窗内显式点「按公式值修正」决定（本期不自动修）
+- **引擎侧观察（非本期引入）**：`GET /api/cloud/admin/usage-reconcile` 与 `GET /api/cloud/admin/quota` 均要求 `cloud:admin:quota`；修正入口对 admin 自身开放（R62 同款放开的自然延伸）
+
+### 19.4 历史小瑕疵打包（T69）
+
+1. **`saveBlob`（`web/src/utils/download.ts`）**：Blob 下载全仓唯一口径（`createObjectURL` → `a.click()` → **延时 10s `revokeObjectURL`**）。原 `cloud/file/index.vue#download(row)` 为「点击后立即 revoke」写法（P4d 已确认在部分浏览器会取消下载），本轮删除该内联实现与 `FolderView.vue` 的私有 `saveBlob`，三处（单文件下载 / 管理侧打包下载 / 分享页整包下载）统一复用
+2. **Element Plus 全局中文**（`web/src/App.vue`）：最外层 `ElConfigProvider + zh-cn`。根因——组件经 unplugin 按需自动引入，项目从未 `app.use(ElementPlus)`，函数式弹窗（ElMessageBox/ElMessage）读全局配置，故只能由 ConfigProvider 注入；修后所有确认框按钮为「取消/确定」
+3. **`router/guard.ts`**：移除两条 debug `console.warn`（含整张路由表 JSON dump），正常导航不再刷 console
+4. **`ElMessageBox.confirm` 取消语义**：取消以 Promise reject 结束，新代码必须 `try/catch` 吞掉，否则 Vue 报「Unhandled error during execution of component event handler」（本轮新增的对账修正按钮已按此写；既有页面（用户删除等）同名写法未动，登记 PROGRESS 遗留）
+
+### 19.5 P4e 走查补丁 W1~W4（T66，纯文档）
+
+| 编号 | 目标（按 P4e 走查报告 §6.3 更新后的最终态）                                                           | 结果                                                                                                |
+| ---- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| W1   | API.md §6.2 删 mine 三行 + mediaFolderId 来源改站点详情 + `mine/apply-template` 行删除 + 段首迁址注   | 已套（§6.2 段首注迁 §10.2；§7.2 保留静态 templates 行并加迁址注）                                   |
+| W2   | ARCHITECTURE 四处 mine 残留改 `/api/site/manage/*`（§14.1 目录注释、§15.1 controller 注、§15.7 流程） | 已套（另把 §15.7 的 40101 语义同步为 40119，与 T61 实现一致）                                       |
+| W3   | 三处错误码总表收齐 30020 / 40118 / 40119（ARCHITECTURE §4.7、§14.11 + §4.8 范围表述、API.md 总表）    | 已套（§14.11 补 40118/40119 并注明 40117 属 P4c 开放层码故不连续；API.md site 段改为 40113~~40119） |
+| W4   | §1 技术表 winston 行失实修正                                                                          | 已套（改 Nest Logger + winston 未接入说明）                                                         |
+| R62  | 用户管理「配额」（云盘）按钮去掉 admin 行守卫（保留 v-permission）                                    | 已套（与 P4e「站点配额」同款修法；浏览器实测 admin 行出现该按钮）                                   |
+
+### 19.6 演进预留（本期不做，架构不堵路）
+
+| 项                       | 触发条件   | 预留设计                                                                                            |
+| ------------------------ | ---------- | --------------------------------------------------------------------------------------------------- |
+| 回收站保留天数分用户配置 | 用户诉求   | 现为全局配置（D58）；如需 per-user，可照 `cloud_usage` 先例加列/加表，`cleanExpired(days)` 已参数化 |
+| 对账自动修正             | 运维诉求   | 现为显式管理动作（R61）；如需自动化，把 `reconcileFix` 的写入段挂到 cron 即可，但会失去人工确认     |
+| 清理并发锁               | 多实例部署 | 现按单实例不加锁（R59）；多实例时需加分布式锁或改用 DB 抢占式扫描                                   |

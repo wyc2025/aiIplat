@@ -21,3 +21,10 @@ export class UpdateQuotaDto {
   @Transform(({ value }) => Number(value))
   quotaUsed?: number
 }
+
+/** 配额对账修正（P4F T68/R61）：目标用户 ID（字符串，避免 bigint 精度问题） */
+export class ReconcileUsageDto {
+  @IsString()
+  @IsNotEmpty()
+  userId!: string
+}

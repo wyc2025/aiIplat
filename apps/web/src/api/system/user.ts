@@ -50,3 +50,36 @@ export const updateUserQuota = (data: UpdateQuotaPayload) => put('/cloud/admin/q
 
 /** 查询用户配额（含已用容量，作为调整下限参考） */
 export const getUserQuota = (userId: string) => get<{ userId: string; quotaLimit: string; quotaUsed: string }>('/cloud/admin/quota', { userId })
+
+export interface UsageReconcilePart {
+  count: number
+  bytes: string
+}
+
+export interface UsageReconcileResult {
+  userId: string
+  /** 当前存储值（cloud_usage.used） */
+  stored: string
+  /** 公式应然值 = active + recycled − revertedAvatars */
+  expected: string
+  /** expected − stored（>0 = used 偏低） */
+  diff: string
+  parts: {
+    /** 未删除行 */
+    active: UsageReconcilePart
+    /** 回收站行 */
+    recycled: UsageReconcilePart
+    /** 已回退头像行（parent_id=-1 且已软删，换头像时已回退 used） */
+    revertedAvatars: UsageReconcilePart
+  }
+}
+
+/** 配额对账诊断（P4F T68/R60，只读；diff ≠ 0 才建议修正） */
+export const getUsageReconcile = (userId: string) =>
+  get<UsageReconcileResult>('/cloud/admin/usage-reconcile', { userId })
+
+/** 配额对账修正（P4F T68/R61）：used = 公式重算值（只写 used，不动文件行） */
+export const fixUsageReconcile = (userId: string) =>
+  put<{ userId: string; oldUsed: string; newUsed: string; diff: string }>('/cloud/admin/usage-reconcile', {
+    userId,
+  })

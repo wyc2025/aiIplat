@@ -114,6 +114,7 @@ import { ElMessage } from 'element-plus'
 import { Document, Folder, Download } from '@element-plus/icons-vue'
 import { PubApiError } from '@/api/cloud/public'
 import type { PubListItem } from '@/types/api'
+import { saveBlob } from '@/utils/download'
 import { createPublicSource, type PublicSource } from './usePublicSource'
 
 /** 需提取码（P4d 30017） */
@@ -163,18 +164,6 @@ function onRowClick(row: PubListItem): void {
     return
   }
   router.push({ path: `${route.path}/file`, query: { path: next } })
-}
-
-/** Blob 落盘（延后回收 URL：下载启动是异步的，紧接 revoke 有取消下载的风险） */
-function saveBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
 
 /**

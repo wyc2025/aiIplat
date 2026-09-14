@@ -3,10 +3,29 @@ import { ErrorCode } from '../../../common/constants/error-code'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { StorageService } from '../../../infra/storage/storage.service'
-import { FileService, MAX_CHILDREN } from '../file/file.service'
+import { AVATAR_PARENT_ID, FileService, MAX_CHILDREN } from '../file/file.service'
 import type { RecycleListQueryDto } from './dto/recycle.dto'
 
-/** 回收站：顶层被删项查询（R2 算法）/ 只读浏览 / 还原（R5）/ 彻底删除（递归子树 + 连带删分享 + used 回扣 R3）/ 清空 */
+/** 回收站自动清理每批扫描行数上限（R59：分批执行，单批失败记录并继续下批） */
+const CLEAN_BATCH_SIZE = 500
+/** 每日毫秒数（保留天数换算） */
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/** 回收站自动清理统计（P4F R59 运行日志口径） */
+export interface RecycleCleanStats {
+  /** 本轮扫描到的超期行数（含随父行级联的子行） */
+  scanned: number
+  /** 实际执行的清理单元数（顶层项） */
+  purged: number
+  /** 清理失败项数（只记日志，不影响其他项） */
+  failed: number
+  /** 物理删除的文件数 */
+  files: number
+  /** 回退的 used 字节数（不含已回退过的头像旧行） */
+  bytes: bigint
+}
+
+/** 回收站：顶层被删项查询（R2 算法）/ 只读浏览 / 还原（R5）/ 彻底删除（递归子树 + 连带删分享 + used 回扣 R3）/ 清空 / 超期自动清理（P4F T67） */
 @Injectable()
 export class RecycleService {
   private readonly logger = new Logger(RecycleService.name)
@@ -163,31 +182,94 @@ export class RecycleService {
     const deletedSet = new Set(deleted.map((f) => f.id.toString()))
     const result: typeof deleted = []
     for (const item of deleted) {
-      let hasDeletedAncestor = false
-      let cursor = item.parentId
-      // 上溯最多 MAX_DEPTH 层防环（目录深度上限即 10 层）
-      for (let depth = 0; depth < MAX_CHILDREN && cursor !== BigInt(0); depth++) {
-        if (deletedSet.has(cursor.toString())) {
-          hasDeletedAncestor = true
-          break
-        }
-        // 祖先不在 deleted 集合：补查父行确认是否 deleted
-        const parent = await this.prisma.cloudFile.findFirst({
-          where: { id: cursor, userId },
-          select: { id: true, parentId: true, deletedAt: true },
-        })
-        if (!parent) break
-        if (parent.deletedAt !== null) {
-          hasDeletedAncestor = true
-          break
-        }
-        cursor = parent.parentId
-      }
-      if (!hasDeletedAncestor) result.push(item)
+      if (!(await this.hasDeletedAncestor(userId, item.parentId, deletedSet))) result.push(item)
     }
     // 按删除时间倒序（回收站列表展示）
     result.sort((a, b) => (b.deletedAt!.getTime() - a.deletedAt!.getTime()))
     return result
+  }
+
+  /**
+   * 上溯判断「是否存在已删祖先」（回收站顶层归集与自动清理子树去重的共用判定）：
+   * 先查集合快路径（deletedSet），未命中再补查父行 deleted_at；
+   * 上溯最多 MAX_CHILDREN 层防环（目录深度上限即 10 层）。
+   */
+  private async hasDeletedAncestor(
+    userId: bigint,
+    parentId: bigint,
+    deletedSet?: Set<string>,
+  ): Promise<boolean> {
+    let cursor = parentId
+    for (let depth = 0; depth < MAX_CHILDREN && cursor !== BigInt(0); depth++) {
+      if (deletedSet?.has(cursor.toString())) return true
+      // 祖先不在集合：补查父行确认是否 deleted
+      const parent = await this.prisma.cloudFile.findFirst({
+        where: { id: cursor, userId },
+        select: { id: true, parentId: true, deletedAt: true },
+      })
+      if (!parent) break
+      if (parent.deletedAt !== null) return true
+      cursor = parent.parentId
+    }
+    return false
+  }
+
+  /**
+   * 回收站超期自动清理（P4F T67 / R58 / R59 / D58）：
+   * 凡 `deleted_at` 早于 now - retentionDays 的行一律清除（含普通文件/文件夹、删站后进回收站的
+   * 原站点根、以及头像旧行 parent_id=-1 且已软删）。
+   *
+   * - **执行单元 = 超期行中的「最顶层项」**：父行清理会级联子行，避免重复删除 / 重复回退 used
+   * - **头像旧行特殊处理**：换头像时 used 已回退（CloudFacade.saveAvatar），故清理只删物理文件与行、
+   *   不再回退 used（否则 used 会二次下探，与 R60 对账公式给出的应然值不再一致）
+   * - 分批 ≤ CLEAN_BATCH_SIZE 行；单行失败只记日志、继续处理其他行；整体幂等可重入（下轮自然续扫）
+   */
+  async cleanExpired(retentionDays: number, batchSize = CLEAN_BATCH_SIZE): Promise<RecycleCleanStats> {
+    const cutoff = new Date(Date.now() - retentionDays * DAY_MS)
+    const stats: RecycleCleanStats = {
+      scanned: 0,
+      purged: 0,
+      failed: 0,
+      files: 0,
+      bytes: BigInt(0),
+    }
+
+    for (;;) {
+      const batch = await this.prisma.cloudFile.findMany({
+        where: { deletedAt: { lt: cutoff } },
+        orderBy: { id: 'asc' },
+        take: batchSize,
+      })
+      if (batch.length === 0) break
+      stats.scanned += batch.length
+
+      const expiredSet = new Set(batch.map((f) => f.id.toString()))
+      let progressed = 0
+      for (const row of batch) {
+        // 非顶层：其顶层祖先同在本批（或本身已删但尚未超期）→ 留给父行级联，本轮跳过
+        if (await this.hasDeletedAncestor(row.userId, row.parentId, expiredSet)) continue
+        try {
+          const isRevertedAvatar = row.parentId === AVATAR_PARENT_ID
+          const result = await this.purgeSubtree(row.userId, [row], {
+            refundUsed: !isRevertedAvatar,
+          })
+          stats.purged++
+          stats.files += result.files
+          stats.bytes += result.bytes
+          progressed++
+        } catch (error) {
+          stats.failed++
+          this.logger.error(
+            `回收站自动清理失败（行 id=${row.id}，继续）：${(error as Error).message}`,
+          )
+        }
+      }
+
+      // 整批均为「已删子树的成员」（其顶层项尚未超期）→ 本轮无进展，等父行超期时一并清除
+      if (progressed === 0) break
+    }
+
+    return stats
   }
 
   /** 判断目标是否处于"已删子树"内：自身 deleted 或任一祖先 deleted */
@@ -209,11 +291,13 @@ export class RecycleService {
   /**
    * BFS 收集整棵子树并彻底删除：收集所有 storage_name（文件）+ 所有 id（含目录）→
    * 删分享 → 删物理文件 → 删 DB 行 → 回扣 used。
-   * 传入 roots 为待删除的顶层被删项（自身 + 后代）。
+   * 传入 roots 为待删除的顶层被删项（自身 + 后代）；`options.refundUsed=false` 时只删行与物理文件、
+   * 不动 used（P4F T67 头像旧行专用，见 cleanExpired 注释）。
    */
   private async purgeSubtree(
     userId: bigint,
     roots: Array<{ id: bigint; parentId: bigint }>,
+    options: { refundUsed?: boolean } = {},
   ): Promise<{ files: number; bytes: bigint }> {
     const ids: bigint[] = []
     const storageNames: string[] = []
@@ -257,8 +341,9 @@ export class RecycleService {
     // 删 DB 行（整棵子树）
     await this.prisma.cloudFile.deleteMany({ where: { userId, id: { in: ids } } })
 
-    // used 回扣（R3：不小于 0 兜底）
-    if (bytes > BigInt(0)) {
+    // used 回扣（R3：不小于 0 兜底）；refundUsed=false 仅用于「换头像时已回退过」的头像旧行
+    // （P4F T67/R58：二次回退会让 used 低于 R60 对账公式的应然值）
+    if (bytes > BigInt(0) && options.refundUsed !== false) {
       await this.prisma.cloudUsage.updateMany({
         where: { userId },
         data: { used: { decrement: bytes } },

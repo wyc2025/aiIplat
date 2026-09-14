@@ -2,7 +2,7 @@
 
 > 本文档是前后端接口的唯一事实来源。与代码冲突时以本文档为准并修正代码。
 > 通用约定（统一响应、错误码、分页、bigint→string、时间格式）见 ARCHITECTURE.md 4.3 节，此处不再重复。
-> 当前覆盖：P2a（ai 域 + system 域在线用户增量）、P2b（AI 工具调用）、P3（cloud 域 + 头像上传）、P4a（site 域 + 开放层 + cloud 公开机制增量）、P4b（AI 站点工具 + 在线编辑 + 模板库）、P4c（云盘公开链接 + /api/pub/ 公开访问端点 + 在线解压，T46~~T49，见 §8；批量上传为纯前端，后端零改动）、**P4d（移动/打包下载/分享升级/公开语义分流，T52~~T56，见 §9；剪切粘贴、多选批量与语义分流为前端能力，后端仅 §9 所列增量）**。system 域既有接口以代码与 Swagger 为准。
+> 当前覆盖：P2a（ai 域 + system 域在线用户增量）、P2b（AI 工具调用）、P3（cloud 域 + 头像上传）、P4a（site 域 + 开放层 + cloud 公开机制增量）、P4b（AI 站点工具 + 在线编辑 + 模板库）、P4c（云盘公开链接 + /api/pub/ 公开访问端点 + 在线解压，T46~~T49，见 §8；批量上传为纯前端，后端零改动）、**P4d（移动/打包下载/分享升级/公开语义分流，T52~~T56，见 §9；剪切粘贴、多选批量与语义分流为前端能力，后端仅 §9 所列增量）**、**P4e（多站点/删站/AI 多站语义/sid 脱敏，T59~~T65，见 §10）**、**P4F（配额对账两端点，T68，见 §11；回收站自动清理为纯 cron 行为，无 HTTP 端点）**。system 域既有接口以代码与 Swagger 为准。
 
 ## ai 域错误码（20xxx）
 
@@ -308,13 +308,7 @@ Content-Type: application/json　Accept: text/event-stream
 
 ### 6.2 管理侧接口（/api/site，登录 + @RequirePermission，数据按当前用户隔离）
 
-**站点设置（site:site:manage）**
-
-| 方法 | 路径           | 说明                                                                                                                                                                                                                                                                  |
-| ---- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET  | /api/site/mine | 我的站点：`null`（未开通）或 `{ id, slug, title, description, status, commentAudit, siteUrl, rootFolderId, mediaFolderId, createdAt }`；siteUrl = `/api/open/{slug}/`                                                                                                 |
-| POST | /api/site/mine | 创建站点。入参 `{ slug, title, description? }`；slug 规则 `^[a-z0-9][a-z0-9-]{2,31}$` + 保留字黑名单（40103）+ 全局唯一（40102）；创建动作含：云盘根建「我的站点」目录（重名自动"(1)"）并设公开、建 media/ 子目录、复制默认模板四文件、落 site_site。挂 @OperationLog |
-| PUT  | /api/site/mine | 编辑。入参 `{ title?, description?, slug?, status?, commentAudit? }`；改 slug 同规则校验并使旧 slug 缓存失效；status 0 停用即开放层全 404。挂 @OperationLog                                                                                                           |
+> 站点 CRUD 自 P4e 起迁至 §10.2（`/api/site/manage/*`）；本节仅保留栏目 / 标签 / 文章 / 评论等站点内容接口（内容端点自 P4e 起按 `siteId` 作用域化，见 §10.3）。
 
 **栏目（site:column:\*）**
 
@@ -345,7 +339,7 @@ Content-Type: application/json　Accept: text/event-stream
 | PUT    | /api/site/article/:id/status | site:article:publish | `{ status }`（0 下架 / 1 发布）；首次发布写 published_at。挂 @OperationLog                                                                                                                                            |
 | DELETE | /api/site/article/:id        | site:article:delete  | **物理删除**，连带标签关联与全部评论（R7）。挂 @OperationLog                                                                                                                                                          |
 
-封面/正文配图上传：**复用** `POST /api/cloud/file/upload?parentId={mediaFolderId}&overwrite=1`（mediaFolderId 取自 GET /api/site/mine），无新接口；上传成功后公开 URL = `/api/open/{slug}/media/{文件名}`。
+封面/正文配图上传：**复用** `POST /api/cloud/file/upload?parentId={mediaFolderId}&overwrite=1`（mediaFolderId 取自站点详情，见 §10.2 `GET /api/site/manage/:id`），无新接口；上传成功后公开 URL = `/api/open/{slug}/media/{文件名}`。
 
 **评论（site:comment:\*）**
 
@@ -391,7 +385,7 @@ Content-Type: application/json　Accept: text/event-stream
 
 ### 7.1 错误码新增
 
-**site 段（续 40113~40116）**
+**site 段（续 40113~40119；40117 为 P4c 开放层码，见 §8.1）**
 
 | code  | 含义                                                       | 前端处理                  |
 | ----- | ---------------------------------------------------------- | ------------------------- |
@@ -399,6 +393,10 @@ Content-Type: application/json　Accept: text/event-stream
 | 40114 | 文件类型不允许（非文本白名单扩展名）                       | AI 工具回喂               |
 | 40115 | 内容超限（AI 写单文件 >256KB / 单次 >10 个 / 读 >64KB）    | AI 工具回喂               |
 | 40116 | 模板不存在                                                 | 刷新模板列表              |
+| 40118 | 站点数量已达上限（P4e R47，message 带 limit/used）         | 提示联系管理员调配额      |
+| 40119 | 站点不存在或非属主（P4e）                                  | 刷新站点列表 / 切当前站   |
+
+> 40118/40119 编号顺延说明见 §10.1（PRD 名义 40117/40118，40117 已被 P4c `CloudListingDisabled` 占用）。
 
 **cloud 段（续 30012~30013）**
 
@@ -411,10 +409,11 @@ Content-Type: application/json　Accept: text/event-stream
 
 ### 7.2 site 域新增：模板库（site:site:manage）
 
-| 方法 | 路径                          | 说明                                                                                                                                                                                                        |
-| ---- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET  | /api/site/templates           | 模板列表 `[{ id, name, description }]`（id = 模板目录名，读 assets/site-templates/*/template.json，实时不缓存）                                                                                             |
-| POST | /api/site/mine/apply-template | 应用模板。入参 `{ templateId }`；站点未开通 40101、模板不存在 40116；温和覆盖（R20：同名软删进回收站 + 写入新版，media/ 与模板外文件不动）；返回应用的文件清单 `[{ path, action, size }]`。挂 @OperationLog |
+| 方法 | 路径                | 说明                                                                                                            |
+| ---- | ------------------- | --------------------------------------------------------------------------------------------------------------- |
+| GET  | /api/site/templates | 模板列表 `[{ id, name, description }]`（id = 模板目录名，读 assets/site-templates/*/template.json，实时不缓存） |
+
+> 应用模板已随 P4e 命名空间收敛迁至 **`POST /api/site/manage/:id/apply-template`**（路径参数站点化，契约见 §10.3；原 `/api/site/mine/apply-template` 已废弃，见 §10.1）。
 
 ### 7.3 cloud 域增量（在线编辑 + 走查 W2 口径修订）
 
@@ -488,13 +487,14 @@ Content-Type: application/json　Accept: text/event-stream
 > 移动的剪切/粘贴/拖拽、多选批量（批量删除/批量移动）、公开语义分流（按钮组按 `inSite`）均为**前端能力**，后端只提供本节所列接口与字段。
 > 章节号接 §8；增补文档 `docs/P4D/API-P4D-增补.md` 已并入（保留为历史参考，冲突以本文为准）。
 
-### 9.1 错误码新增（30xxx 段，续接 30016 之后）
+### 9.1 错误码新增（30xxx 段，续接 30016 之后；30020 为 P4e R52 追加）
 
 | code  | 含义                                                         | 前端处理     |
 | ----- | ------------------------------------------------------------ | ------------ |
 | 30017 | 该分享需要提取码（未验证或凭证过期）                         | 跳密码门禁页 |
 | 30018 | 提取码错误（含连续 5 次锁 10 分钟，message 带剩余次数/秒数） | 门禁页提示   |
 | 30019 | 非法移动目标（移入自身子树 / 站点根 / 回收站）               | 提示         |
+| 30020 | 站点根目录禁止直接删除（须先删除站点，P4e R52）              | 提示先删站   |
 
 ### 9.2 移动（登录态，`cloud:file:upload` + @OperationLog('云盘','移动')）
 
@@ -664,3 +664,33 @@ Content-Type: application/json　Accept: text/event-stream
 ### 10.8 sid 日志脱敏（D56，非接口变更）
 
 日志中的 URL 统一经 `maskSensitiveQuery`（`sid`/`password` → `***`）：落点为全局异常日志与操作日志落库 `url`；Nginx 侧口径见 `deploy/nginx.conf`（不使用含 `$args` 的 log_format）与 README。
+
+## 11. P4F：配额对账 + 回收站自动清理
+
+> 决策 D58~~D61 / 规则 R58~~R62，见 PRD-P4F-CLOUD.md。增补文档 `docs/P4F/API-P4F-增补.md` 已并入（保留为历史参考，冲突以本文为准）。**本期零新错误码**（参数错误复用 40001 / 不存在复用 40400，权限复用 `cloud:admin:quota`）。
+
+### 11.1 变更总览
+
+- **新增**：配额对账诊断 + 修正两端点（管理侧，11.2）
+- **行为变化（无接口变更）**：回收站超 N 天行每日 03:30 自动物理清除（默认 30 天；`CLOUD_RECYCLE_RETENTION_DAYS` / `CLOUD_RECYCLE_CLEAN_ENABLED`，见 11.3）
+- **前端行为修复（无接口变更）**：ElMessageBox 中文化（全局 locale）、`download(row)` Blob 回收口径统一走 `saveBlob`、guard.ts 调试日志收敛、云盘「配额」按钮对 admin 行放开（R62）
+
+### 11.2 配额对账（登录态，`cloud:admin:quota`）
+
+| 方法 | 路径                                     | 说明                                                                                                                                                                                                                                                                                                                                                      |
+| ---- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET  | /api/cloud/admin/usage-reconcile?userId= | 诊断（只读）。`userId` 缺省 = 全用户。单用户响应：`{ userId, stored, expected, diff, parts: { active: {count,bytes}, recycled: {count,bytes}, revertedAvatars: {count,bytes} } }`；全用户 = 上述对象的数组。`expected = active.bytes + recycled.bytes − revertedAvatars.bytes`（R60），`diff = expected − stored`；三段均为 SQL 聚合（COUNT/SUM），不拉行 |
+| PUT  | /api/cloud/admin/usage-reconcile         | 修正。body `{ userId }`；服务端重算后写 `cloud_usage.used = expected`（行不存在懒创建，quota 取默认配额）；响应 `{ userId, oldUsed, newUsed, diff }`；挂 @OperationLog('云盘','配额对账修正')（R61）；只写 used 一个字段，不动任何文件行                                                                                                                  |
+
+口径要点：
+
+- **「已回退头像行」识别口径**（R60，以实现为准）：`parent_id = -1` 且 `deleted_at` 非空——换头像时 `CloudFacade.saveAvatar` 已回退其 used，故这些字节不在 used 内，须从公式中扣除
+- `userId` 不存在 → 40400（「目标用户不存在」）；全用户模式返回 `cloud_usage` 行 ∪ 文件行 的属主集合（含"无 usage 行但留了文件"的历史用户）
+- 前端入口：用户管理「调整配额」弹窗内嵌一行（打开弹窗并行拉诊断；`diff ≠ 0` 出「按公式值修正」按钮 + 二次确认，`diff = 0` 显示「一致」），不新开页面（D59）
+
+### 11.3 回收站自动清理（无 HTTP 端点）
+
+- 纯 cron 行为（每日 03:30，`modules/cloud/recycle/recycle-clean.task.ts`），规则 R58/R59
+- 保留天数 `CLOUD_RECYCLE_RETENTION_DAYS`（默认 30）；总开关 `CLOUD_RECYCLE_CLEAN_ENABLED`（默认开，关闭时空跑只记一条日志）
+- 用户可感知口径进 PLATFORM-GUIDE：「回收站内容删除满 30 天自动彻底清除」
+- 验收复现路径：DB 改 `deleted_at` 构造超期行 + 手动触发 task 方法（或临时调短 N），勿等真实隔天

@@ -2,7 +2,7 @@
 
 > 本文件由 AI 在每完成一个任务后更新。开工前先读本文件，从"进行中 / 下一个待办"继续。
 
-## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32），P4a 个人网站模块全部完成（T33~~T40），P4b（AI 编写站点 + 在线编辑器 + 模板库）全部完成（T41~~T45），P4c（云盘公开机制 + 批量拖拽上传 + 在线解压）全部完成（T46~~T50），**P4c 走查补丁 W1~~W4 已套（纯文档）**，**P4d（云盘操作增强 + 分享升级 + 公开语义分流）全部完成（T52~~T58）\**，\**P4e（多站点配额化 + 删站 + AI 多站语义 + sid 日志脱敏）全部完成（T59~~T65）**
+## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32），P4a 个人网站模块全部完成（T33~~T40），P4b（AI 编写站点 + 在线编辑器 + 模板库）全部完成（T41~~T45），P4c（云盘公开机制 + 批量拖拽上传 + 在线解压）全部完成（T46~~T50），**P4c 走查补丁 W1~~W4 已套（纯文档）**，**P4d（云盘操作增强 + 分享升级 + 公开语义分流）全部完成（T52~~T58）\**，\**P4e（多站点配额化 + 删站 + AI 多站语义 + sid 日志脱敏）全部完成（T59~~T65）**，**P4F（云盘清账：回收站自动清理 + 配额对账 + 历史小瑕疵 + P4e 走查补丁 W1~~W4）全部完成（T66~~T70）**
 
 ## 里程碑总览
 
@@ -16,7 +16,8 @@
 | P4b  | 个人网站：AI 编写站点 + 在线编辑器 + 模板库        | 已完成 |
 | P4c  | 云盘：公开机制 + 批量拖拽上传 + 在线解压           | 已完成 |
 | P4d  | 云盘：移动/批量/打包下载 + 分享升级 + 公开语义分流 | 已完成 |
-| P4e  | 多站点（配额化 + AI 工具单数语义改造 + 删站并入）  | 未开始 |
+| P4e  | 多站点（配额化 + AI 工具单数语义改造 + 删站并入）  | 已完成 |
+| P4F  | 云盘清账：回收站自动清理 + 配额对账 + 小瑕疵打包   | 已完成 |
 
 ## P4a 任务拆解（个人网站·site 域）
 
@@ -77,6 +78,19 @@
 | T63  | 前端：站点列表页（新建/编辑/删除/管理/复制 URL + 配额提示）+ 当前站 store（localStorage + 失效回退）+ SiteSwitcher 切换器（仅多站显示）+ 5 页 siteId 注入 + 用户管理「站点配额」按钮 + seed 菜单/权限增量                                                                          | 已完成 | 2026-09-12 |
 | T64  | sid 日志脱敏：common/utils/url-mask.util.ts（maskSensitiveQuery）+ GlobalExceptionFilter 异常日志过一遍（并补记 method/URL）+ OperationLog url 与 params 同口径 + deploy/nginx.conf 自定义 log_format（不含 $args）+ README 部署提示                                               | 已完成 | 2026-09-12 |
 | T65  | 收口：接口冒烟（站点 CRUD/配额/删站级联/云盘 30020/AI 11 工具/脱敏）+ 双端类型与 Lint 零错 + seed 执行 + 文档回写（ARCHITECTURE §18 / API §10 / 公共资产表 / PLATFORM-GUIDE 字数核查 / README）                                                                                    | 已完成 | 2026-09-12 |
+
+## P4F 任务拆解（云盘清账：回收站自动清理 + 配额对账 + 历史小瑕疵打包）
+
+> PRD-P4F-CLOUD / API-P4F-增补 / ARCHITECTURE-P4F-增补（已并入主文档 §19 / API §11，增补文档保留为历史参考）。
+> 决策 D58~~D61、规则 R58~~R62；**本期零新错误码、零新依赖**。
+
+| 编号 | 任务                                                                                                                                                                                                                                      | 状态   | 完成日期   |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ---------- |
+| T66  | P4e 走查补丁 W1~~W4 套用（纯文档，按 P4e 走查报告 §6.3「命名空间调整后」目标）+ R62 云盘「配额」按钮对 admin 行放开                                                                                                                       | 已完成 | 2026-09-14 |
+| T67  | 回收站自动清理：配置双项（CLOUD_RECYCLE_RETENTION_DAYS=30 / CLOUD_RECYCLE_CLEAN_ENABLED=true）+ `recycle-clean.task.ts`（每日 03:30，分批 ≤500、顶层归集去重、幂等续扫、汇总日志，R58/R59）                                               | 已完成 | 2026-09-14 |
+| T68  | 配额对账：诊断 GET + 修正 PUT `/api/cloud/admin/usage-reconcile`（R60/R61）+ 用户管理「调整云盘配额」弹窗对账行与修正按钮                                                                                                                 | 已完成 | 2026-09-14 |
+| T69  | 三小瑕疵打包（D60）：`saveBlob` 唯一口径收敛 + ElConfigProvider 全局中文 + guard.ts 调试日志收敛                                                                                                                                          | 已完成 | 2026-09-14 |
+| T70  | 收口：接口冒烟 25/25（清理边界/开关空跑/幂等续扫/对账诊断与修正/40400）+ 浏览器复验（弹窗中文/下载延时回收/导航零 console/admin 配额按钮）+ 文档回写（ARCHITECTURE §19 / API §11 / PLATFORM-GUIDE 1959 字 / 资产表）+ 22,751 差额归因回填 | 已完成 | 2026-09-14 |
 
 ## P2a 任务拆解（AI 模块）
 
@@ -221,7 +235,7 @@
 
 ## 进行中
 
-（空；P4e 全部完成（T59~~T65），等待用户验收；下一阶段未定（PRD 路线图剩余：P5 个人网站进阶 / P6 自定义域名等））
+（空；P4F 全部完成（T66~~T70），等待用户验收；下一阶段未定（PRD 路线图剩余：P5 个人网站进阶 / P6 自定义域名等））
 
 ## 遗留问题
 
@@ -245,6 +259,11 @@
 17. （环境）`pnpm -C apps/api build`（nest build）会因 safe-delete shim 拦截 `dist` 批量清空而失败（同遗留 2）；本轮验证改用 `tsc -p tsconfig.build.json` 增量输出 + `node dist/main.js`。另：**用 tsx 直接跑 Nest 应用不可行**（esbuild 不产出 `design:paramtypes` 元数据 → DI 全解析成 undefined），需要脚本化验证时应针对 `dist` 产物写普通 JS/CJS 脚本
 18. ~~（2026-09-13 浏览器走查观察到）顶栏头像图片请求 401：`GET /api/cloud/file/avatar/:id` 挂 `cloud:file:list` 需登录态，而页面用 `<img src>` 加载无法携带 `Authorization` 头 → 控制台稳定报 401，顶栏实际落回昵称首字母兜底~~ **已处理（2026-09-13，方案 C：前端 Blob + objectURL）**：新增 `api/cloud/file.ts#fetchAvatarBlob`（走 axios 带 token，剥 `/api` 前缀避免双前缀）+ `useUserStore` 增 `avatarUrl`（`syncAvatar()` 幂等取图、竞态丢弃、换头像/登出 `revokeObjectURL` 回收、失败静默回退首字母），`Navbar.vue` / `profile/index.vue` 改消费 `avatarUrl`，上传成功走 `userStore.setAvatar()`。实测：登录后顶栏与个人中心头像均为 `blob:` 且控制台 **零错误**（原 401 消失）；端点侧带 token 200 / 匿名 401（`image/png`，69B）。**升级触发条件**：接 MinIO/OSS 后改预签名 URL（可 `<img>` 直连 + 浏览器缓存 + 列表内展示他人头像），只需替换 `fetchAvatarBlob` 实现，组件与 store 契约不变。
     **旁证（候选方案「把头像当公开资源走 public_token」已实测否决）**：头像行 `parent_id = -1`（`AVATAR_PARENT_ID` 虚拟父目录，避免污染根目录列表），而 `PubService.assertAncestorsNotBlocked`（pub.service.ts:186）从 `row.parentId` 上溯、**祖先行缺失即 40400** → `-1` 查不到行必然阻断。A/B 实测（对照组 = 根目录 t.txt）：对照建链后 `GET /api/pub/f/{token}/info` → code 0；头像 `POST /api/cloud/file/86/public` **建链成功**（`assertOwned` 不校验 parentId）但 `info`/`download` 全 **40400**（「能生成、永远打不开」的静默失败）；DB 直查确认 `id=86 parent_id=-1`。若将来要走公开 URL，需改判定链（把 -1 视作根）或给头像真实隐藏目录。测试后两个文件均已恢复（is_public=0 / token=null），临时脚本已删
+
+19. （P4F 发现）**既有 `ElMessageBox.confirm` 取消未捕获**：取消以 Promise reject 结束，`await ElMessageBox.confirm(...)` 若不在 try/catch 内，Vue 会往 console 报「Unhandled error during execution of component event handler」。P4F 新写的对账修正按钮已按 try/catch 写；**既有页面（用户删除等）保留原写法未动**（铁律 4），如需统一收敛另起小任务
+20. （P4F 观察）**回收站列表可能包含头像旧行**：`RecycleService.findTopLevelDeleted` 只按 `deletedAt` 过滤、未排除 `parent_id = -1` 的头像行，换过头像的用户在回收站会看到一条 `avatar-*.png`（P3 起既有）。影响小（可彻底删除，且 30 天后自动清理）；如要收敛，在顶层归集处排除 `AVATAR_PARENT_ID` 即可
+21. （P4F 归因）**22,751 字节 used 历史差额已定位**：诊断显示差额全部落在「未删除行」段（`active = 71 行/64,451,408`、`recycled = 0`、`revertedAvatars = 0`，`diff = +22,751`），属 P3/T49 时期一次性漂移、非持续泄漏（详见 T66~~T70 记录与 ARCHITECTURE §19.3）。**是否写回由用户决定**：管理侧「调整云盘配额」弹窗内点「按公式值修正」即可（写入前有二次确认，本期未自动改数据）
+22. （环境，本机）① `tsc`/`vue-tsc` 带上增量缓存（`*.tsbuildinfo`）时偶发崩溃/OOM，**本轮验证统一加 `--incremental false`**；② IDE 注入的 `NODE_OPTIONS`（safe-delete shim）会让 `tsc` 在 30MB 堆即崩，**跑构建/类型检查前先 `$env:NODE_OPTIONS=''`**，该 shim 清空后 `nest build` 可直接成功（遗留 2 的「需先手工清 dist」不再复现）；③ 实测**不要额外加大堆**（`--max-old-space-size=6144` 反而更易触发 `Fatal process out of memory: Zone`），本机稳定组合 = `NODE_OPTIONS=''` + `--incremental false`：`pnpm --filter @iplat/api exec tsc --noEmit --incremental false -p tsconfig.build.json` / `pnpm --filter @iplat/web exec vue-tsc --noEmit --incremental false`（双端均 0 错）；④ 长期运行（>2 天）的 vite dev server 的 esbuild 服务会失效（`The service is no longer running`），表现为**页面白屏且 console 无任何报错**——重启 dev server 即恢复（P4F 浏览器复验时遇到并已重启）
 
 ## 完成记录
 
@@ -1112,6 +1131,29 @@
 2. **已知瑕疵**：① 工具名称/描述/JSON Schema 为静态编码，模型选错工具的概率靠 description 措辞缓解，未做意图澄清兜底；② 确认单过期态前端未精确计时（`isConfirmExpired` 恒返回 false，靠后端 20016 兜底，点过期卡片才提示"已过期"）；③ `buildConfirmContext` 用 ai_tool_call.id 自造 tool_call_id 回喂（上游原始 call_xxx id 未持久化，见 ARCHITECTURE §12.2 第 4 条"tool 消息不持久化"），各家兼容端点不校验该 id 具体值、实测 DeepSeek 可用；④ 工具调用轮次上限 3 与上下文截取预算（输出预留 25%）未随工具 schema 占用动态下调，工具多时可能超限；⑤ 前端工具交互（卡片/标签/确认后新气泡）的浏览器联调由用户手动完成，AI 已做 vue-tsc/eslint/vite build + 后端 SSE 实测覆盖。
 3. **P3 注意**：P3 做云盘（cloud 域），与 AI 域无直接耦合，但需沿用 P2b 沉淀的域门面纪律（跨域只经对方模块 exports 的 Service，`ToolBootstrap` 是范例）；若 P3 要为 AI 增加"文件/云盘"类工具，按 `tool.types.ts` 的 AiTool 接口在 `modules/ai/tool/tools/` 下加一个文件并在 `tool.bootstrap.ts` 注册即可，注意 handler 只注入 cloud 域 exports 的 Service；系统依赖 `@nestjs/schedule`/`openai`/`markdown-it` 已就位，P3 无需再引入。
 
+### T66~T70 完成记录（2026-09-14）：P4F 云盘清账（回收站自动清理 + 配额对账 + P4e 走查补丁，P4F 收官）
+
+**T66 文档补丁 W1~W4 + R62（纯文档 + 1 处前端守卫）**：
+
+1. **W1（API.md）**：§6.2 删 `GET/POST/PUT /api/site/mine` 三行 + 段首注「站点 CRUD 自 P4e 起迁至 §10.2（`/api/site/manage/*`）」；348 行 mediaFolderId 来源改「站点详情（§10.2 `GET /api/site/manage/:id`）」；§7.2 `POST /api/site/mine/apply-template` 行删除并加迁址注（现行路径 §10.3）
+2. **W2（ARCHITECTURE）**：§14.1 manage/template 目录注释、§15.1 template.controller 注释、§15.7 apply-template 流程端点全部改 `/api/site/manage/:id/apply-template`；§15.7 的「未开通 40101」同步为「非属主 40119」（与 T61 实现一致）
+3. **W3**：§4.7 补 30020；§14.11 补 40118/40119（注明 40117 属 P4c 开放层码、故本表不连续）；§4.8 范围表述改「40101~~40119（40117 为 P4c 开放层码）」；API.md site 段标题改「续 40113~~40119」并补 40118/40119 两行、§9.1 补 30020
+4. **W4**：§1 技术表 winston 行改「Nest Logger（console，运行日志）+ 操作日志落库；winston 依赖在库未接入」
+5. **R62**：用户管理页云盘「配额」按钮去掉 `v-if="row.username !== 'admin'"`（保留 `v-permission`），与 P4e「站点配额」同款修法（浏览器实测 admin 行出现该按钮）
+
+**T67 回收站自动清理**：`config/upload.config.ts` 增 `readCloudRecycleRetentionDays`（默认 30）/`readCloudRecycleCleanEnabled`（默认开，仅显式 false/0 关）→ `cloud.recycleRetentionDays` / `cloud.recycleCleanEnabled`；新增 `RecycleService.cleanExpired(retentionDays, batchSize=500)`（按 id 升序分批 → `hasDeletedAncestor` 顶层归集去重 → 复用 `purgeSubtree` 彻底删除链 → 统计 scanned/purged/failed/files/bytes）+ `recycle-clean.task.ts`（`@Cron('0 30 3 * * *')`，只做「读开关 → 调 Service → 记汇总日志」）；`hasDeletedAncestor` 自 `findTopLevelDeleted` 内联逻辑抽出共用（R2 顶层归集与清理同一判定）；`purgeSubtree` 增 `options.refundUsed`（默认 true）。**实现偏差（有意，已落档 §19.2）**：头像旧行（`parent_id=-1` 且已软删）的 used 在换头像时已回退（R60 公式据此扣除 `revertedAvatars`），故清理时传 `refundUsed:false`（只删物理文件与行、不回退 used），删除逻辑仍 100% 复用、未另写第二条链。`.env.example` 补两配置项
+
+**T68 配额对账**：`AdminService.reconcileUsage(userId?)`（三段 `groupBy` 聚合不拉行；`expected = active + recycled − revertedAvatars`；userId 缺省 = `cloud_usage` ∪ 文件属主集合逐条）+ `reconcileFix(dto)`（重算 → `cloud_usage.used = expected`，行不存在经 `FileService.getQuota` 懒创建）+ `ReconcileUsageDto`；控制器 `GET/PUT /api/cloud/admin/usage-reconcile`（`cloud:admin:quota`；修正挂 `@OperationLog('云盘','配额对账修正')`）；前端 `api/system/user.ts` 增 `getUsageReconcile/fixUsageReconcile`，用户管理「调整云盘配额」弹窗内嵌对账行（公式值 / 当前值 / 差额；diff≠0 出「按公式值修正」+ 二次确认，diff=0 显示「一致」），修正后原地重载弹窗数据
+
+**T69 三小瑕疵**：① 新增 `web/src/utils/download.ts#saveBlob` 为**全仓 Blob 下载唯一口径**（延时 10s revoke），`cloud/file/index.vue#download(row)` 与 `public-view/FolderView.vue` 的私有实现全部收敛复用（全仓仅此一份 createObjectURL + a.click）；② `App.vue` 最外层改 `ElConfigProvider + element-plus/es/locale/lang/zh-cn`（组件按需自动引入、项目从未 `app.use(ElementPlus)`，函数式弹窗读全局配置）→ ElMessageBox/ElMessage 按钮中文化；③ `router/guard.ts` 删两条 debug `console.warn`（含路由表 JSON dump）；④ 新写的修正按钮对 `ElMessageBox.confirm` 取消做 try/catch（见遗留 19）
+
+**T70 收口验证**：
+
+- **接口冒烟 25/25 通过**（脚本化，针对 dist 产物 + 真实 HTTP + 真 MySQL，跑完即删）：31 天前的文件夹（含子文件）整树物理清除、29 天边界行不动、删站后进回收站的原站点根 31 天后被清、头像旧行清除且 used **不二次回退**（实测回退 20,372 = A 文件 19 + 站点子树 20,353，与期望逐字节一致）、开关 false 时空跑、重新开启后幂等续扫命中；对账诊断三项明细齐全且公式自洽、全用户模式返回数组、临时用户人为污染 used（999,999 vs 期望 1,000）诊断 `diff=-998,999` → 修正响应带 `{oldUsed,newUsed,diff}` → 复诊 `diff=0` → `sys_operation_log` 有「配额对账修正」记录；不存在用户 → 40400。**测试数据零残留（含临时用户硬清），admin used 收尾精确回到 64,428,657**
+- **浏览器复验（agent-browser + 真实 Chromium，对 dev server + API）**：admin 行出现「配额」按钮（R62）；「调整云盘配额」弹窗对账行显示「公式值 61.47 MB / 当前值 61.44 MB / 差额 +22.22 KB」+「按公式值修正」；点击修正弹出二次确认且**按钮为「取消/确定」中文**，点取消后 console 零告警（修复后）；云盘下载实测 `createObjectURL` 1 次、`revokeObjectURL` 1 次且**延时 10,014ms**（原立即 revoke 写法已根治，下载不再有取消风险）；登录后多次导航 console 无 guard 调试刷屏
+- **22,751 字节差额归因（回填）**：admin `stored = 64,428,657` vs `expected = 64,451,408`，`diff = +22,751`；三段明细 `active = 71 行 / 64,451,408`、`recycled = 0`、`revertedAvatars = 0` → 差额**全部落在「未删除行」段**（used 比现存未删除行字节之和少 22,751），与回收站段、头像回退段均无关，可排除「软删未扣」「头像口径」两类解释；指向 P3/T49 时期一次性 used 回退/漂移（P4c 走查记载 T49 做过「两用户 used 漂移校正」，同源），**属历史一次性漂移、非持续泄漏**。是否写回由管理员在弹窗内显式点「按公式值修正」（本期不自动改数据）
+- **文档回写**：ARCHITECTURE **§19 全节并入**（19.1 配置 / 19.2 清理 / 19.3 对账含归因结论 / 19.4 三小瑕疵 / 19.5 W1~W4 与 R62 / 19.6 演进预留）+ §4.7 配置表补两项 + §9 资产表补 4 行（saveBlob / RecycleCleanTask+cleanExpired / 对账两端点 / 全局中文语言包）；API.md **§11 并入** + 头部覆盖行补 P4F；PLATFORM-GUIDE 回收站口径补「删除满 30 天会被系统自动彻底清除」（**1959 ≤ 2000 字**，UTF-8 口径）；两份 P4F 增补头部标注「已并入」；`apps/web/components.d.ts` 由 unplugin 自动补 `ElConfigProvider` 声明
+
 ---
 
 ## 更新规则（AI 必读）
@@ -1125,3 +1167,4 @@
 
 > 2026-08-30：P4b 走查补丁 B1~~B6 已套用（纯文档修订，ARCHITECTURE.md §4.8/§9/§15.4/§15.5a/§15.8 + API.md §6.4/§7.4）。
 > 2026-09-12：P4c 走查补丁 W1~~W4 已套用（纯文档，无代码改动、无回归）：W1 API.md §8 去阶段标注改「## 8. P4c：云盘公开链接 + 公开访问端点 + 在线解压」并删头部过渡注/各小节 (T46)/(T49) 标注；W2 术语统一（30009 文案与 API §5.5 章节名改「分享链接」+ P3/P4c 双含义口径注、ARCHITECTURE §4.7 配置表 `CLOUD_PUBLIC_SHARE_RATE_LIMIT` 注释改「分享（cloud_share）限流」并注明未实现保留占位）；W3 ARCHITECTURE §16.2 MIME 行末补三份白名单分置对照（transfer 预览 / site open/mime.ts / pub-mime.ts，域边界优先）；W4 §16.2 限流补硬编码 120/60 决议（瘦版定值，演进升配置组）。观察 1 处置（双「取消公开」语义）已并入 PLATFORM-GUIDE 字数核查流程，随 T58 手册更新落档。
+> 2026-09-14：**P4e 走查补丁 W1~~W4 已套用**（纯文档，无回归）+ R62：W1 API.md §6.2 删 mine 三行并加迁址注（348/417 行同步指向 §10.2/§10.3）；W2 ARCHITECTURE 四处 mine 路径注释改 `/api/site/manage/:id/apply-template`（§15.7 的未开通 40101 同步为 40119）；W3 三处错误码总表收齐 30020/40118/40119（§14.11 注明 40117 属 P4c 开放层码故不连续）；W4 §1 winston 行改 Nest Logger 实况；R62 用户管理云盘「配额」按钮对 admin 行放开（浏览器实测可见可开）。补丁按 P4e 走查报告 §6.3「命名空间调整后」的最终目标执行。

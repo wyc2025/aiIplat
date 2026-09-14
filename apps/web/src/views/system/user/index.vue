@@ -150,8 +150,9 @@
           >
             分配角色
           </el-button>
+          <!-- 云盘配额：admin 自己这一行也给入口（P4F R62，与「站点配额」同根因同一修法）；
+               后端只校验 cloud:admin:quota 权限 + 「下限 = 当前已用」，调整自身同样安全 -->
           <el-button
-            v-if="row.username !== 'admin'"
             v-permission="'cloud:admin:quota'"
             link
             type="primary"
@@ -375,6 +376,32 @@
           />
           <span class="v-quota-unit">MB</span>
         </el-form-item>
+        <!-- 配额对账（P4F T68/D59/R60）：公式值 / 当前值 / 差额；差额存在才出修正按钮 -->
+        <el-form-item label="配额对账">
+          <template v-if="quotaReconcile">
+            <span class="v-quota-reconcile">
+              公式值 {{ formatBytes(Number(quotaReconcile.expected)) }} / 当前值
+              {{ formatBytes(Number(quotaReconcile.stored)) }} / 差额 {{ quotaDiffText }}
+            </span>
+            <el-button
+              v-if="quotaDiffBytes !== 0"
+              link
+              type="primary"
+              :loading="quotaFixing"
+              @click="handleReconcileFix"
+            >
+              按公式值修正
+            </el-button>
+            <span
+              v-else
+              class="v-quota-hint"
+            >一致</span>
+          </template>
+          <span
+            v-else
+            class="v-quota-hint"
+          >对账数据加载失败</span>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="quotaVisible = false">
@@ -445,12 +472,15 @@ import {
   assignUserRoles,
   createUser,
   deleteUser,
+  fixUsageReconcile,
   getUserPage,
   getUserQuota,
+  getUsageReconcile,
   resetUserPassword,
   updateUser,
   updateUserStatus,
   updateUserQuota,
+  type UsageReconcileResult,
 } from '@/api/system/user'
 import { getAllRoles } from '@/api/system/role'
 import { getDeptList } from '@/api/system/dept'
@@ -688,28 +718,72 @@ async function handleDelete(row: UserRow) {
 const quotaVisible = ref(false)
 const quotaLoading = ref(false)
 const quotaSubmitting = ref(false)
+const quotaFixing = ref(false)
 const quotaRow = ref<UserRow | null>(null)
 const quotaUsedBytes = ref(0)
 const quotaLimitMb = ref(0)
+// 配额对账诊断（P4F T68/D59/R60）：公式值 / 当前值 / 差额；差额 ≠ 0 才出现修正按钮
+const quotaReconcile = ref<UsageReconcileResult | null>(null)
 
 const quotaUsedMb = computed(() => quotaUsedBytes.value / MB)
 const quotaUsedText = computed(() => formatBytes(quotaUsedBytes.value))
+const quotaDiffBytes = computed(() => Number(quotaReconcile.value?.diff ?? 0))
+const quotaDiffText = computed(() => {
+  if (quotaDiffBytes.value === 0) return '0'
+  const abs = Math.abs(quotaDiffBytes.value)
+  return `${quotaDiffBytes.value > 0 ? '+' : '-'}${formatBytes(abs)}`
+})
+
+/** 配额与对账并行拉取（对账失败不阻塞配额调整，仅对账行退化为提示） */
+async function loadQuotaData(row: UserRow) {
+  const [res, reconcile] = await Promise.all([
+    getUserQuota(row.id),
+    getUsageReconcile(row.id).catch(() => null),
+  ])
+  quotaUsedBytes.value = Number(res.quotaUsed)
+  quotaReconcile.value = reconcile
+  // 配额上限初值：不低于已用，缺省取已用向上取整到 100MB
+  const ceil = Math.ceil(quotaUsedBytes.value / MB)
+  const def = Math.max(ceil, Math.ceil(res.quotaLimit ? Number(res.quotaLimit) / MB : ceil))
+  quotaLimitMb.value = def
+}
 
 async function openQuota(row: UserRow) {
   quotaRow.value = row
+  quotaReconcile.value = null
   quotaVisible.value = true
   quotaLoading.value = true
   try {
-    const res = await getUserQuota(row.id)
-    quotaUsedBytes.value = Number(res.quotaUsed)
-    // 配额上限初值：不低于已用，缺省取已用向上取整到 100MB
-    const ceil = Math.ceil(quotaUsedBytes.value / MB)
-    const def = Math.max(ceil, Math.ceil(res.quotaLimit ? Number(res.quotaLimit) / MB : ceil))
-    quotaLimitMb.value = def
+    await loadQuotaData(row)
   } catch {
     // 错误已由拦截器提示
   } finally {
     quotaLoading.value = false
+  }
+}
+
+/** 按公式值修正（P4F R61）：显式二次确认 → 只写 used → 重载弹窗数据 */
+async function handleReconcileFix() {
+  if (!quotaRow.value || !quotaReconcile.value) return
+  try {
+    await ElMessageBox.confirm(
+      `确认按公式值修正配额？当前值 ${formatBytes(Number(quotaReconcile.value.stored))} → 公式值 ${formatBytes(Number(quotaReconcile.value.expected))}（差额 ${quotaDiffText.value}）`,
+      '配额对账修正',
+      { type: 'warning' },
+    )
+  } catch {
+    // 用户取消：ElMessageBox 以 reject 表示取消，必须吞掉否则 Vue 报未处理的事件处理错误
+    return
+  }
+  quotaFixing.value = true
+  try {
+    await fixUsageReconcile(quotaRow.value.id)
+    ElMessage.success('已按公式值修正')
+    await loadQuotaData(quotaRow.value)
+  } catch {
+    // 错误已由拦截器提示
+  } finally {
+    quotaFixing.value = false
   }
 }
 
@@ -785,6 +859,11 @@ async function handleSiteQuotaSubmit() {
   margin-left: 4px;
   font-size: 12px;
   color: #909399;
+}
+.v-quota-reconcile {
+  margin-right: 8px;
+  font-size: 13px;
+  color: #606266;
 }
 .v-quota-unit {
   margin-left: 8px;

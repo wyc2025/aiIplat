@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 import { StorageModule } from '../../../infra/storage/storage.module'
 import { FileModule } from '../file/file.module'
+import { RecycleCleanTask } from './recycle-clean.task'
 import { RecycleController } from './recycle.controller'
 import { RecycleService } from './recycle.service'
 
@@ -8,7 +9,8 @@ import { RecycleService } from './recycle.service'
   // FileService（同名判定 resolveNameConflict）+ StorageService（物理文件删除）复用
   imports: [FileModule, StorageModule],
   controllers: [RecycleController],
-  providers: [RecycleService],
+  // RecycleCleanTask：回收站超期自动清理 cron（P4F T67，编排链在 RecycleService.cleanExpired）
+  providers: [RecycleService, RecycleCleanTask],
   exports: [RecycleService],
 })
 export class RecycleModule {}

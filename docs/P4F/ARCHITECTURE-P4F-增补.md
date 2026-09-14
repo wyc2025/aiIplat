@@ -1,6 +1,7 @@
 # ARCHITECTURE-P4F 增补 —— 回收站自动清理 + 配额对账 + 历史小瑕疵
 
-> 验收后并入主文档为 §19。编号与 PRD-P4F-CLOUD 对齐（D58~~D61 / R58~~R62 / T66~T70）。零新依赖（@nestjs/schedule 自 P2a 已启用）。
+> **已并入 ARCHITECTURE.md §19（T70，2026-09-14）**，本文件保留为历史细节参考，冲突以主文档为准。
+> 编号与 PRD-P4F-CLOUD 对齐（D58~~D61 / R58~~R62 / T66~T70）。零新依赖（@nestjs/schedule 自 P2a 已启用）。
 
 ## 19.1 配置增量（cloud 配置组）
 

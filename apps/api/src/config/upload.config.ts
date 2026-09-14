@@ -23,6 +23,19 @@ export function readCloudUnzipMaxTotalSize(): number {
   return Number.isFinite(value) && value > 0 ? value : 500 * 1024 * 1024
 }
 
+/** 回收站保留天数读取（P4F D58，默认 30 天） */
+export function readCloudRecycleRetentionDays(): number {
+  const value = Number(process.env.CLOUD_RECYCLE_RETENTION_DAYS)
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 30
+}
+
+/** 回收站自动清理总开关读取（P4F D58，默认开；仅显式 false/0 时关闭） */
+export function readCloudRecycleCleanEnabled(): boolean {
+  const value = process.env.CLOUD_RECYCLE_CLEAN_ENABLED
+  if (value === undefined) return true
+  return value !== 'false' && value !== '0'
+}
+
 /** 文件上传配置：本地磁盘，单文件上限 10MB；云盘相关配置（P3 扩展） */
 export default registerAs('upload', () => ({
   dir: readUploadDir(),
@@ -37,4 +50,8 @@ export default registerAs('upload', () => ({
   cloudDefaultQuota: Number(process.env.CLOUD_DEFAULT_QUOTA ?? 1024 * 1024 * 1024),
   /** 云盘内容审核门禁开关（默认关闭，D13 预留） */
   cloudAuditEnabled: process.env.CLOUD_AUDIT_ENABLED === 'true',
+  /** 回收站保留天数（默认 30，P4F D58） */
+  cloudRecycleRetentionDays: readCloudRecycleRetentionDays(),
+  /** 回收站自动清理总开关（默认开，P4F D58） */
+  cloudRecycleCleanEnabled: readCloudRecycleCleanEnabled(),
 }))

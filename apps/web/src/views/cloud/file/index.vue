@@ -734,6 +734,7 @@ import UploadQueue from './UploadQueue.vue'
 import { useUploadQueue } from './useUploadQueue'
 import { useMoveClipboard } from './useMoveClipboard'
 import { formatSize, formatTime } from '@/utils/format'
+import { saveBlob } from '@/utils/download'
 import {
   listFiles,
   filePath,
@@ -987,14 +988,8 @@ function closePreview() {
 async function download(row: CloudFile) {
   try {
     const blob = await downloadFileBlob(Number(row.id))
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = row.name
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(url)
+    // 统一走 saveBlob（P4F T69：延后回收 URL，避免立即 revoke 取消下载）
+    saveBlob(blob, row.name)
   } catch {
     // 错误已由拦截器提示
   }
@@ -1515,18 +1510,6 @@ async function runWithConcurrency<T>(
     }
   })
   await Promise.all(runners)
-}
-
-function saveBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  // 延后回收：下载启动是异步的，紧接 revoke 有取消下载的风险（浏览器差异）
-  window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
 
 /** 包名与后端同格式：iplat-pack-yyyyMMdd-HHmm.zip */
