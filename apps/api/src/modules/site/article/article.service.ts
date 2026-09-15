@@ -164,6 +164,15 @@ export class SiteArticleService {
     return { id: created.id.toString() }
   }
 
+  /**
+   * 文章所属站点 id（P5 T71：SiteFacade CMS 层写路径需要站点作用域时复用同一属主链——
+   * 文章不存在 40109 / 站点非属主 40119，不信任请求里的 siteId）。
+   */
+  async getOwnedSiteId(userId: bigint, id: bigint): Promise<bigint> {
+    const { site } = await this.findOwnedArticle(userId, id)
+    return site.id
+  }
+
   /** 编辑文章：提供即更新；tagIds 提供即整体重建；发布状态机同 status 接口 */
   async update(userId: bigint, id: bigint, dto: UpdateArticleDto) {
     const { article, site } = await this.findOwnedArticle(userId, id)

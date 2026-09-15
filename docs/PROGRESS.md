@@ -2,22 +2,37 @@
 
 > 本文件由 AI 在每完成一个任务后更新。开工前先读本文件，从"进行中 / 下一个待办"继续。
 
-## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32），P4a 个人网站模块全部完成（T33~~T40），P4b（AI 编写站点 + 在线编辑器 + 模板库）全部完成（T41~~T45），P4c（云盘公开机制 + 批量拖拽上传 + 在线解压）全部完成（T46~~T50），**P4c 走查补丁 W1~~W4 已套（纯文档）**，**P4d（云盘操作增强 + 分享升级 + 公开语义分流）全部完成（T52~~T58）\**，\**P4e（多站点配额化 + 删站 + AI 多站语义 + sid 日志脱敏）全部完成（T59~~T65）**，**P4F（云盘清账：回收站自动清理 + 配额对账 + 历史小瑕疵 + P4e 走查补丁 W1~~W4）全部完成（T66~~T70）**
+## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32），P4a 个人网站模块全部完成（T33~~T40），P4b（AI 编写站点 + 在线编辑器 + 模板库）全部完成（T41~~T45），P4c（云盘公开机制 + 批量拖拽上传 + 在线解压）全部完成（T46~~T50），**P4c 走查补丁 W1~~W4 已套（纯文档）**，**P4d（云盘操作增强 + 分享升级 + 公开语义分流）全部完成（T52~~T58）\**，\**P4e（多站点配额化 + 删站 + AI 多站语义 + sid 日志脱敏）全部完成（T59~~T65）**，**P4F（云盘清账：回收站自动清理 + 配额对账 + 历史小瑕疵 + P4e 走查补丁 W1~~W4）全部完成（T66~~T70）**，**P5（AI 能力扩展：云盘 5 + 站点 CMS 7 + 站点生命周期 2 工具，工具总数 11→25 + 预算动态化）全部完成（T71~~T76）**
 
 ## 里程碑总览
 
-| 阶段 | 目标                                               | 状态   |
-| ---- | -------------------------------------------------- | ------ |
-| P1   | 后台管理底座                                       | 已完成 |
-| P2a  | AI 模块：对话 + 套餐积分（ai 域）                  | 已完成 |
-| P2b  | AI 模块：工具调用 Agent 化                         | 已完成 |
-| P3   | 云盘模块（cloud 域）                               | 已完成 |
-| P4a  | 个人网站：开放站点 + 文章模块（site 域）           | 已完成 |
-| P4b  | 个人网站：AI 编写站点 + 在线编辑器 + 模板库        | 已完成 |
-| P4c  | 云盘：公开机制 + 批量拖拽上传 + 在线解压           | 已完成 |
-| P4d  | 云盘：移动/批量/打包下载 + 分享升级 + 公开语义分流 | 已完成 |
-| P4e  | 多站点（配额化 + AI 工具单数语义改造 + 删站并入）  | 已完成 |
-| P4F  | 云盘清账：回收站自动清理 + 配额对账 + 小瑕疵打包   | 已完成 |
+| 阶段 | 目标                                                       | 状态   |
+| ---- | ---------------------------------------------------------- | ------ |
+| P1   | 后台管理底座                                               | 已完成 |
+| P2a  | AI 模块：对话 + 套餐积分（ai 域）                          | 已完成 |
+| P2b  | AI 模块：工具调用 Agent 化                                 | 已完成 |
+| P3   | 云盘模块（cloud 域）                                       | 已完成 |
+| P4a  | 个人网站：开放站点 + 文章模块（site 域）                   | 已完成 |
+| P4b  | 个人网站：AI 编写站点 + 在线编辑器 + 模板库                | 已完成 |
+| P4c  | 云盘：公开机制 + 批量拖拽上传 + 在线解压                   | 已完成 |
+| P4d  | 云盘：移动/批量/打包下载 + 分享升级 + 公开语义分流         | 已完成 |
+| P4e  | 多站点（配额化 + AI 工具单数语义改造 + 删站并入）          | 已完成 |
+| P4F  | 云盘清账：回收站自动清理 + 配额对账 + 小瑕疵打包           | 已完成 |
+| P5   | AI 能力扩展：云盘/CMS/生命周期工具 + 预算动态化（25 工具） | 已完成 |
+
+## P5 任务拆解（AI 能力扩展：云盘工具 + 代发内容 + 站点生命周期 + 预算动态化）
+
+> PRD-P5-AI / API-P5-增补 / ARCHITECTURE-P5-增补（已并入主文档 §20 / API §12，增补文档保留为历史参考）。
+> 决策 D62~~D66、规则 R63~~R68；**本期零新 HTTP 端点、零新错误码、零新依赖**。
+
+| 编号 | 任务                                                                                                                                                                                                                                                     | 状态   | 完成日期   |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ---------- |
+| T71  | 门面扩展：SiteFacade CMS 层（文章/栏目/标签读写 + ensure 语义 + listColumns/listTags/生命周期 updateSite/getSiteDeleteImpact/deleteSite，同域直注三模块）+ CloudFacade 云盘根基点原语（list/read/write/move/delete + isUserDirPublic，基点 parent_id=0） | 已完成 | 2026-09-15 |
+| T72  | AI 云盘工具 5 个（list/read/write/move/delete）+ tool-params 入参整形 + description 边界纪律（与站点工具互写排除式描述）                                                                                                                                 | 已完成 | 2026-09-15 |
+| T73  | AI CMS 工具 7 个（list/read/create/update/publish 文章 + ensure 栏目/标签；默认草稿、明示才发布、不提供删除文章）                                                                                                                                        | 已完成 | 2026-09-15 |
+| T74  | AI 站点生命周期工具 2 个（update_site / delete_site，删站确认卡 = R66 三段影响 + 文章数统计）                                                                                                                                                            | 已完成 | 2026-09-15 |
+| T75  | 预算动态化（D65/R67/R68）：`ai.maxToolRounds` 配置化（env AI_MAX_TOOL_ROUNDS，默认 3 上限 10）+ 历史截取预算按 system/tools 实测扣减（下限保护 2000 + debug 日志）+ usage 兜底估算覆盖 tools schema 与 tool 往返                                         | 已完成 | 2026-09-15 |
+| T76  | 收口：工具级冒烟 48/48（注册/契约/描述边界/预算实算/模块装配/手册字数）+ 双端静态检查 + 文档回写（ARCHITECTURE §20 并入 + §8/§12 修订 + 资产表 10 行 / API §12 并入 / PLATFORM-GUIDE 压缩改写 1976 字 / 三份 P5 文档标注已并入 / PROGRESS）              | 已完成 | 2026-09-15 |
 
 ## P4a 任务拆解（个人网站·site 域）
 
@@ -1154,6 +1169,55 @@
 - **22,751 字节差额归因（回填）**：admin `stored = 64,428,657` vs `expected = 64,451,408`，`diff = +22,751`；三段明细 `active = 71 行 / 64,451,408`、`recycled = 0`、`revertedAvatars = 0` → 差额**全部落在「未删除行」段**（used 比现存未删除行字节之和少 22,751），与回收站段、头像回退段均无关，可排除「软删未扣」「头像口径」两类解释；指向 P3/T49 时期一次性 used 回退/漂移（P4c 走查记载 T49 做过「两用户 used 漂移校正」，同源），**属历史一次性漂移、非持续泄漏**。是否写回由管理员在弹窗内显式点「按公式值修正」（本期不自动改数据）
 - **文档回写**：ARCHITECTURE **§19 全节并入**（19.1 配置 / 19.2 清理 / 19.3 对账含归因结论 / 19.4 三小瑕疵 / 19.5 W1~W4 与 R62 / 19.6 演进预留）+ §4.7 配置表补两项 + §9 资产表补 4 行（saveBlob / RecycleCleanTask+cleanExpired / 对账两端点 / 全局中文语言包）；API.md **§11 并入** + 头部覆盖行补 P4F；PLATFORM-GUIDE 回收站口径补「删除满 30 天会被系统自动彻底清除」（**1959 ≤ 2000 字**，UTF-8 口径）；两份 P4F 增补头部标注「已并入」；`apps/web/components.d.ts` 由 unplugin 自动补 `ElConfigProvider` 声明
 
+### T71~T76 完成记录（2026-09-15）：P5 AI 能力扩展（云盘/CMS/生命周期工具 + 预算动态化，P5 收官）
+
+**落地内容**：
+
+1. **T71 门面扩展（工具零业务逻辑）**：
+   - SiteFacade 新增 CMS 层：`listArticles`（分页摘要，pageSize ≤20）/ `readArticle`（全文，**超 64KB 截断 truncated=true**）/ `createArticle`（默认草稿；`tagNames` 走 ensure；`columnId` 缺省策略见偏差 5）/ `updateArticle`（部分更新，tagNames 提供即整体替换）/ `publishArticle` / `ensureColumn`（同名同父命中即复用）/ `ensureTags`（批量幂等 → [{id,name,created}]）/ `listColumns` / `listTags`（确认卡摘要与 columnId 引导清单）；生命周期 `updateSite`（委托 manage.update）/ `getSiteDeleteImpact`（R66 只读计数）/ `deleteSite`（委托 manage.remove）。SiteFacadeModule 增 imports 文章/栏目/标签三模块（三模块随之 `exports` 自身 Service，同域直注）。
+   - SiteArticleService 新增 `getOwnedSiteId`（复用同一属主链 40109/40119，供门面 CMS 写路径定位站点作用域）。
+   - CloudFacade 新增云盘根基点原语（基点 = 用户云盘根 `parent_id=0` 虚拟根）：`listUserFiles`（单层/有界子树，条目带相对 `path` 与 `inSite`，附配额）/ `readUserFile`（文本白名单 ≤64KB）/ `writeUserFile`（复用 writeFileRaw 全链：mkdir -p / R6 / 温和覆盖 / used 记账 / 配额 30003）/ `moveUserFiles`（`to` = 目标目录路径，自动 mkdir -p，逐条部分成功）/ `deleteUserFiles`（仅软删）/ `isUserDirPublic`（R39 三态上溯，供 move 摘要预判）。机械原语最小改造：抽出 `walkSubtree` / `findEntryByBase` / `readFileByBase` 并支持 `rootFolderId=0`（站点侧行为逐字不变）；`EDITABLE_TEXT_EXTS` 加 export 复用同一白名单（单一来源）；CloudFacadeModule 增 imports SiteRootModule（inSite 标注，零跨域 import 不成环）。
+2. **T72~T74 十四个新工具（11 → 25）**：云盘 5（list/read/write/move/delete）+ CMS 7（list/read/create/update/publish 文章 + ensure 栏目/标签）+ 生命周期 2（update_site / delete_site）。全部 handler 只注入域门面（站点系列 → SiteFacade、云盘系列 → CloudFacade），perms 复用既有管理端点标识（零新增权限、seed 零改动）；`tool-params.ts` 提供入参整形三件套；`tool.bootstrap` 注册 25 个、`tool.module` 增 imports CloudModule。**description 边界纪律（R63）**：`write_site_files` ↔ `write_cloud_file`、`read_site_file` ↔ `read_cloud_file` 互写对方名字做排除式描述，`list_cloud_files` 注明站点目录也在云盘内（inSite）优先用 site 系列。
+3. **代发语义（D63）**：文章默认草稿，仅显式 `status=1` 才发布且摘要带「发布即公开可见」警示行；可更新已有文章；**不提供删除文章工具**（R7 物理删除不可恢复，工具清单中确实不存在）。
+4. **删站确认卡（D64/R66）**：摘要三段影响 + 文章/栏目/标签/评论数（`getSiteDeleteImpact`）；执行走既有删站级联（回收站/缓存三族/slug 释放全对）。
+5. **T75 预算动态化（D65/R67/R68）**：新增 ai 配置组 `ai.maxToolRounds`（env `AI_MAX_TOOL_ROUNDS`，默认 3、上限 10，替代硬编码）；`buildContext` 改为**先定过滤后工具子集 → 预算 = maxContext − 输出预留 25% − system 实测 − tools schema 实测 − 当前消息**，低于 2000 字符保底并 `logger.warn`，每轮 `logger.debug` 记实算值；`pickHistory` 抽为 chat 与确认回填共用（从最早丢弃、system/tools 恒完整）；usage 兜底估算基数扩展为 messages + tools schema + tool 往返消息。
+
+**验证（三层，全部真跑）**：
+
+1. **静态结构层 48/48 通过**（一次性脚本，tsx 直跑 TS 源码，跑完即删）：① 25 工具注册、名称逐一对应、14 个新工具 risk/perms 与清单完全一致、parameters 全为合法 object schema、新增 write 工具全部实现 summarize；② description 边界双向排除（write/read 两对互指）+ 草稿语义/不删文章/R66 三段/回收站可还原文案核查；③ 预算实算（`64000−16000−2000−10000−100=35900`）、下限保护（不足时返回 2000 并告警）、tools 占用越大历史预算越小、历史从最早丢弃且顺序正序、tools 字符口径 = JSON 长度、`ai.maxToolRounds` 默认/读取/上限截断/非法回退四处行为；④ 模块装配（SiteFacadeModule imports CMS 三模块、三模块 exports、ToolModule imports CloudModule、CloudFacadeModule imports SiteRootModule、工具文件零跨域内部 import）；⑤ PLATFORM-GUIDE 字数与能力覆盖。
+2. **工具×真库层 53/53 通过**（Docker 起 MySQL/Redis 后，跑编译产物 + Nest 应用上下文，直接调 25 个工具的 handler；测试数据全部清理、used 精确回基线）：
+   - 云盘五件套：根目录 inSite 标注（站点目录 true / 普通目录 false）+ 配额用量；write 新建（mkdir -p 两级 + `used` 逐字节记账）与温和覆盖（旧版进回收站、used 不扣）；read 正文一致 + 非白名单 30012 + `..` 穿越 30001；list 单层/递归（相对 path）；move 目标目录自动创建 + finalPath + used 不变 + 站点根 30019 + 移入自身子树 30019（批量内其余条目独立成败）；delete 软删可还原 + 站点根 30020 + 批量 >20 → 40001；配额不足 30003 不抛栈。
+   - CMS 七件套：ensure_column / ensure_tags 幂等（二次 created=false 且 id 不变、同名去重）；create_article 默认草稿（status=0 / published_at 空 / R14 字数落库 / 摘要自动生成 / 标签关联）；多栏目且 columnId 缺省 → 40001 + 栏目清单；read 全文 + slug 与文章站点不符 40109；update 标题生效 + tagNames 整体替换 + 显式空数组清空标签；publish 上架写 published_at、下架不刷新；list 按状态筛选且摘要无 contentMd；`registry` 中确认**不存在删除文章工具**。
+   - 生命周期两件套：update_site 改标题/改 slug + 停用（旧 slug 查无、新 slug 命中）；delete_site 摘要含「N 篇文章/栏目/标签/评论 + 不可恢复 + 回收站 + slug 释放」四段 → 级联物理删内容 + 站点根进回收站 + slug 可立即再注册。
+   - 权限过滤：admin 25 工具全下发；无角色用户仅下发 3 个无 perms 的登录级工具、P5 十四个工具全部不下发（逐工具 perms 判定复核）。
+   - 预算：真 system prompt（2181 字符）+ 真 25 工具 schema（14114 字符）+ maxContext 128000 → historyBudget **79661**；预算收紧到 3000 时只保留最近 5 条（从最早丢弃）。
+3. **真实模型端到端 16/16 通过**（deepseek-v4-flash，走 `/api/ai/chat` + `/api/ai/tool/confirm` 真 SSE）：回合 1 读工具自动执行（模型正确识别 3 个站点目录）；回合 2 `write_cloud_file` 确认卡（文件清单形态，预估 size 与实际落库一致）+ 确认后落库与 used 记账；回合 3 **模型自主先 `ensure_site_column` 建「技术」栏目再 `create_site_article`**（两张确认卡，摘要含标题/栏目/标签/字数/状态，草稿语义无公开警示行）→ 落库为草稿且归到「技术」栏目（PRD 验收 4 原样复现）；回合 4 `update_site` 改描述落库且其余字段未动。**清理后**：cloud_file 行数回到测试前、`used` 精确回 64,428,657、临时栏目/文章/会话（含 usage/toolCall/message）全部删除、wyc 描述还原。
+   - **真机发现并修复 1 个缺陷**（详见 ARCHITECTURE §20.6 第 9 条）：第二次写工具确认卡之后的总结流稳定 400（DeepSeek 思考模式，错误文案误导为 reasoning_content 问题）。受控实验定位根因 = 确认链路重建上下文出现**两条连续 assistant**（上一次确认的总结 + 原始带 tool_calls 的消息），修复为合并为单条；**修复前每轮 1 次 400，修复后 0 次**。
+   - `nest build` 因本机 safe-delete 钩子拦截 dist 批量删除（既知环境问题，见遗留 2），故验证均基于 `tsc` 编译到独立目录 `dist-p5verify` 的产物（跑完即删），`tsc --noEmit` / `eslint` 双端 0 错误。
+
+- **手册**：PLATFORM-GUIDE 压缩改写后 **1976 字 ≤ 2000**（UTF-8 字符口径 `[...text].length`，含标题与维护说明行；脚本机械核查）——增补「AI 云盘/文章/站点生命周期能力 + 文章默认草稿 + 删除边界」，压缩系统管理与站点/云盘罗列措辞。
+
+**踩坑/偏差（登记，同步 ARCHITECTURE §20.1/§20.6）**：
+
+1. **facade 收 siteId 而非 slug**（增补 §20.1 草图为 facade 内 resolveSite）：R56 四分支的产出是「回喂对象」，属工具层语义，不应漏进域门面；故工具层统一经 `resolveSiteForTool` 解析后传 siteId（与增补 §20.2 表述一致）。
+2. **云盘 list 条目补 `path`**：增补只列 name/isDir/size/ext/updatedAt/inSite；补相对路径便于模型直接引用做 read/move/delete，避免自行拼接出错。
+3. **`listUserFiles` 自实现 BFS**（增补写"复用 listSubtreeRaw"）：`SubtreeEntry` 不含 id/inSite，无法承载 inSite 逐层继承，故在门面内按同规则（maxDepth 10 / limit 500 / truncated）自实现。
+4. **文章正文 64KB 截断**：contentMd 上限 20 万字符，直喂必爆上下文；按站点文件读口径截断并置 `truncated=true`。
+5. **columnId 缺省策略**：本站唯一栏目自动使用；多栏目回喂 40001 + 「名称(id=xx)」清单；无栏目提示先 `ensure_site_column`（不自动造栏目、不默认取第一个，避免写错栏目）。
+6. **coverPath 未进工具参数**（PRD §4 工具清单未列）：AI 亦无法上传图片，故文章工具不含封面字段；R65 的 media/ 前缀校验仍在域内既有实现。
+7. **确认卡摘要取「字符串摘要」**：现 `ToolConfirmCard` 对数组摘要走固定三列表格（path/action/size）、对字符串走文本渲染——新工具一律返回中文标签多行字符串（增补 §20.4 描述的"通用 key-value"与代码不一致，以代码为准）；例外：`write_cloud_file` 复用同一表格形态（单文件），与 `write_site_files` 视觉一致。**前端零改动**。
+8. **批量上限 20**（增补未定义）：`AI_CLOUD_MAX_BATCH=20`，防模型一次性下发超大数组。
+9. **确认回填上下文同步截取**：增补只谈 chat 路径；确认链路（`/ai/tool/confirm`）同样按实测预算截取历史并取消"全量历史"读法（take 50 + 预算截取），避免第二轮上游超限。
+10. **写白名单口径**：AI 写云盘文件仅允许文本白名单扩展名（R64「≤256KB 文本」+ 非目标"AI 上传二进制文件"不做）。
+
+**遗留（非阻塞）**：
+
+1. **真机验证的算力消耗不可回收**：三轮真机链路 + 受控实验共消耗 admin 套餐积分 599 → 910（311 分），会话与用量明细已随测试会话删除（保留 `ai_user_plan.used_credits` 真实消耗计数）。如需完全归零，由管理员在「套餐/用量」侧处理（本期不做）。
+2. `nest build` 受 safe-delete 钩子拦截（既知环境问题，见 P1 最终状态总结）；如需重建 dist，需在**用户自有 PowerShell 窗口**手工清 dist 或调整钩子策略（AI 侧 Remove-Item 与 nest 内部删除均被拦截）。本期验证用 `tsc --outDir dist-p5verify` 绕开（独立目录无需删除旧文件），产物已清理。
+3. **DeepSeek 思考模式的兼容性仍建议观察**：本次修复的是「连续 assistant → 带 tool_calls 的 assistant」这一确定触发路径（受控实验可复现）；上游对思考模式的消息顺序可能还有别的隐性约束，后续真机若再现 400 请先看该次请求的消息序列（§20.6 第 9 条已记录排查手法：`ProviderService.streamChat` 直调 + 4 组对照）。
+4. 文章工具不支持封面（见偏差 6）；若后续开放封面，需先解决 AI 无图片上传通道的问题。
+5. 评论代审/代管、AI 删文章（需先给文章加回收站语义）、工具按场景分包下发——均已登记 §20.7 演进预留。
+
 ---
 
 ## 更新规则（AI 必读）
@@ -1168,3 +1232,4 @@
 > 2026-08-30：P4b 走查补丁 B1~~B6 已套用（纯文档修订，ARCHITECTURE.md §4.8/§9/§15.4/§15.5a/§15.8 + API.md §6.4/§7.4）。
 > 2026-09-12：P4c 走查补丁 W1~~W4 已套用（纯文档，无代码改动、无回归）：W1 API.md §8 去阶段标注改「## 8. P4c：云盘公开链接 + 公开访问端点 + 在线解压」并删头部过渡注/各小节 (T46)/(T49) 标注；W2 术语统一（30009 文案与 API §5.5 章节名改「分享链接」+ P3/P4c 双含义口径注、ARCHITECTURE §4.7 配置表 `CLOUD_PUBLIC_SHARE_RATE_LIMIT` 注释改「分享（cloud_share）限流」并注明未实现保留占位）；W3 ARCHITECTURE §16.2 MIME 行末补三份白名单分置对照（transfer 预览 / site open/mime.ts / pub-mime.ts，域边界优先）；W4 §16.2 限流补硬编码 120/60 决议（瘦版定值，演进升配置组）。观察 1 处置（双「取消公开」语义）已并入 PLATFORM-GUIDE 字数核查流程，随 T58 手册更新落档。
 > 2026-09-14：**P4e 走查补丁 W1~~W4 已套用**（纯文档，无回归）+ R62：W1 API.md §6.2 删 mine 三行并加迁址注（348/417 行同步指向 §10.2/§10.3）；W2 ARCHITECTURE 四处 mine 路径注释改 `/api/site/manage/:id/apply-template`（§15.7 的未开通 40101 同步为 40119）；W3 三处错误码总表收齐 30020/40118/40119（§14.11 注明 40117 属 P4c 开放层码故不连续）；W4 §1 winston 行改 Nest Logger 实况；R62 用户管理云盘「配额」按钮对 admin 行放开（浏览器实测可见可开）。补丁按 P4e 走查报告 §6.3「命名空间调整后」的最终目标执行。
+> 2026-09-15：\**P5 收官（T71~~T76）**：AI 工具 11 → 25（云盘 5 / 站点 CMS 7 / 站点生命周期 2），零新 HTTP 端点、零新错误码、零新依赖；门面扩展（SiteFacade CMS 层 + 生命周期、CloudFacade 云盘根基点原语）；预算动态化（`ai.maxToolRounds` 配置化 + system/tools 实测扣减 + usage 口径扩展）；文档并入 ARCHITECTURE §20 / API §12，PLATFORM-GUIDE 压缩改写 1976 字。**三层验证全绿**：静态结构 48/48 + 工具×真库 53/53 + 真实模型端到端 16/16（deepseek-v4-flash 真 SSE，含 25 工具下的工具选择、连续确认卡、草稿语义与删站级联），双端静态检查 0 错误，测试数据零残留（used 精确回基线）。**真机发现并修复 1 个缺陷**：确认链路「连续 assistant 消息」触发 DeepSeek 思考模式 400（§20.6 第 9 条，受控实验定位 + 合并修复，修复前每轮 1 次、修复后 0 次）。

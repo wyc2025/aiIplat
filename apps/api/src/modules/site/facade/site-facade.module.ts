@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common'
 import { CloudModule } from '../../cloud/cloud.module'
+import { SiteArticleModule } from '../article/article.module'
+import { SiteColumnModule } from '../column/column.module'
 import { SiteManageModule } from '../manage/manage.module'
+import { SiteTagModule } from '../tag/tag.module'
 import { SiteFacade } from './site-facade.service'
 
 /**
@@ -11,9 +14,12 @@ import { SiteFacade } from './site-facade.service'
  *
  * P4E T60/T62：imports SiteManageModule 以获得 SiteManageService（createSite 委托同一创建链 R57）；
  * SiteManageModule 不依赖 SiteFacadeModule，故无循环（SiteFacadeModule → SiteManageModule → CloudModule）。
+ *
+ * P5 T71：imports SiteArticleModule / SiteColumnModule / SiteTagModule 以获得 CMS 三服务
+ * （同域直注，照 template 先例）；三者均零 imports，无循环风险。
  */
 @Module({
-  imports: [CloudModule, SiteManageModule],
+  imports: [CloudModule, SiteManageModule, SiteArticleModule, SiteColumnModule, SiteTagModule],
   providers: [SiteFacade],
   exports: [SiteFacade],
 })

@@ -2,7 +2,7 @@
 
 > 本文档是前后端接口的唯一事实来源。与代码冲突时以本文档为准并修正代码。
 > 通用约定（统一响应、错误码、分页、bigint→string、时间格式）见 ARCHITECTURE.md 4.3 节，此处不再重复。
-> 当前覆盖：P2a（ai 域 + system 域在线用户增量）、P2b（AI 工具调用）、P3（cloud 域 + 头像上传）、P4a（site 域 + 开放层 + cloud 公开机制增量）、P4b（AI 站点工具 + 在线编辑 + 模板库）、P4c（云盘公开链接 + /api/pub/ 公开访问端点 + 在线解压，T46~~T49，见 §8；批量上传为纯前端，后端零改动）、**P4d（移动/打包下载/分享升级/公开语义分流，T52~~T56，见 §9；剪切粘贴、多选批量与语义分流为前端能力，后端仅 §9 所列增量）**、**P4e（多站点/删站/AI 多站语义/sid 脱敏，T59~~T65，见 §10）**、**P4F（配额对账两端点，T68，见 §11；回收站自动清理为纯 cron 行为，无 HTTP 端点）**。system 域既有接口以代码与 Swagger 为准。
+> 当前覆盖：P2a（ai 域 + system 域在线用户增量）、P2b（AI 工具调用）、P3（cloud 域 + 头像上传）、P4a（site 域 + 开放层 + cloud 公开机制增量）、P4b（AI 站点工具 + 在线编辑 + 模板库）、P4c（云盘公开链接 + /api/pub/ 公开访问端点 + 在线解压，T46~~T49，见 §8；批量上传为纯前端，后端零改动）、**P4d（移动/打包下载/分享升级/公开语义分流，T52~~T56，见 §9；剪切粘贴、多选批量与语义分流为前端能力，后端仅 §9 所列增量）**、**P4e（多站点/删站/AI 多站语义/sid 脱敏，T59~~T65，见 §10）\**、**P4F（配额对账两端点，T68，见 §11；回收站自动清理为纯 cron 行为，无 HTTP 端点）**、\**P5（AI 工具 11→25 + 预算动态化，T71~~T75，见 §12；零新 HTTP 端点、零新错误码、零新依赖——工具契约与配置增量）**。system 域既有接口以代码与 Swagger 为准。
 
 ## ai 域错误码（20xxx）
 
@@ -694,3 +694,59 @@ Content-Type: application/json　Accept: text/event-stream
 - 保留天数 `CLOUD_RECYCLE_RETENTION_DAYS`（默认 30）；总开关 `CLOUD_RECYCLE_CLEAN_ENABLED`（默认开，关闭时空跑只记一条日志）
 - 用户可感知口径进 PLATFORM-GUIDE：「回收站内容删除满 30 天自动彻底清除」
 - 验收复现路径：DB 改 `deleted_at` 构造超期行 + 手动触发 task 方法（或临时调短 N），勿等真实隔天
+
+## 12. P5：AI 能力扩展（工具 11→25 + 预算动态化）
+
+> 决策 D62~~D66 / 规则 R63~~R68，见 `docs/P5/PRD-P5-AI.md`。增补文档 `docs/P5/API-P5-增补.md` 已并入（保留为历史参考，冲突以本文为准）。
+> **本期零新 HTTP 端点、零新错误码**：AI 工具经既有 SSE 通道（`/api/ai/chat` + `/api/ai/tool/confirm`，机制见 §4）交互，回喂复用各域既有码（30001/30003/30006/30012/30013/30019/30020/40001/40101/40102/40103/40106/40109/40119/20014~20016 等）。
+
+### 12.1 配置增量（ai 配置组，`apps/api/src/config/ai.config.ts`）
+
+| 配置               | env                  | 默认         | 说明                                                                                                 |
+| ------------------ | -------------------- | ------------ | ---------------------------------------------------------------------------------------------------- |
+| `ai.maxToolRounds` | `AI_MAX_TOOL_ROUNDS` | 3（上限 10） | 单轮用户消息的工具调用轮次上限（D65，替代 chat.service 原硬编码常量）；越界/非法回退默认值，每次现读 |
+
+### 12.2 工具参数契约（供 ToolRegistry 注册，非 HTTP 端点）
+
+通用约定：write 类全走确认卡（`summarize` 结构化摘要，中文标签）；失败回喂 `{ ok:false, errorCode, message }` 不抛栈；
+带 `slug?` 的站点工具经 `resolveSiteForTool` 四分支解析（0 站 40101 引导 / 1 站直通 / 多站 needSitePick / 查无 40119+站点列表，R56）。
+
+**云盘（perms 复用对应管理端点标识；基点 = 用户云盘根）**
+
+| 工具               | risk / perms              | parameters                         | 成功返回要点                                                                                                                        |
+| ------------------ | ------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| list_cloud_files   | read / cloud:file:list    | `{ path?, recursive? }`            | `{ path, items:[{ name, path, isDir, size, ext, updatedAt, inSite }], truncated, quota:{ used, limit } }`                           |
+| read_cloud_file    | read / cloud:file:list    | `{ path }`                         | `{ path, size, content }`（文本白名单 ≤64KB）                                                                                       |
+| write_cloud_file   | write / cloud:file:upload | `{ path, content }`                | `{ path, action: created\|overwritten, size }`；摘要复用「文件清单」表格（path/action/size）                                        |
+| move_cloud_files   | write / cloud:file:upload | `{ moves:[{ from, to }] }`（1~20） | 逐条 `{ from, to, finalPath, ok, error?, targetPublic? }`（部分成功语义，照 write_site_files 先例；`to` = 目标目录，自动 mkdir -p） |
+| delete_cloud_files | write / cloud:file:delete | `{ paths:[] }`（1~20）             | 逐条 `{ path, ok, error? }`；摘要明示「进回收站，可还原」                                                                           |
+
+**站点 CMS**
+
+| 工具                 | risk / perms                 | parameters                                                             | 要点                                                                                                                                                                                                                                   |
+| -------------------- | ---------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| list_site_articles   | read / site:article:list     | `{ slug?, columnId?, status?, keyword?, page? }`                       | `{ site, total, pageNo, pageSize, articles:[...] }`（摘要不含 contentMd，pageSize ≤20）                                                                                                                                                |
+| read_site_article    | read / site:article:list     | `{ slug?, id }`                                                        | `{ site, article }`（含 contentMd；超 64KB → truncated=true；slug 与文章实际站点不符 → 40109）                                                                                                                                         |
+| create_site_article  | write / site:article:create  | `{ slug?, columnId?, title, contentMd, summary?, tagNames?, status? }` | status 缺省 0 草稿（D63）；status=1 摘要带「发布即公开可见」警示行；columnId 缺省时本站唯一栏目直达、多栏目回喂 40001+栏目清单、无栏目提示先 ensure；返回 `{ ok, site, id, title, columnId, columnName, tagNames, status, wordCount }` |
+| update_site_article  | write / site:article:update  | `{ slug?, id, title?, contentMd?, columnId?, tagNames?, summary? }`    | 部分更新；`tagNames` 提供即整体替换（**显式空数组 = 清空全部标签**）；无字段 → 40001                                                                                                                                                   |
+| publish_site_article | write / site:article:publish | `{ slug?, id, status }`                                                | 上下架；上架摘要带公开警示；published_at 口径沿用（首次发布写）                                                                                                                                                                        |
+| ensure_site_column   | write / site:column:create   | `{ slug?, name, parentId? }`                                           | 幂等：同名同父命中即返回现有 `{ ok, site, id, name, created:false }`                                                                                                                                                                   |
+| ensure_site_tags     | write / site:tag:create      | `{ slug?, names:[] }`                                                  | 批量幂等 → `{ ok, site, tags:[{ id, name, created }] }`                                                                                                                                                                                |
+
+**站点生命周期**
+
+| 工具        | risk / perms             | parameters                                                         | 要点                                                                                                                                              |
+| ----------- | ------------------------ | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| update_site | write / site:site:manage | `{ slug, title?, description?, newSlug?, status?, commentAudit? }` | slug 必传；newSlug 校验同建站（40102/40103 回喂）；无字段 → 40001；摘要明示改 slug/停用的影响                                                     |
+| delete_site | write / site:site:manage | `{ slug }`                                                         | 摘要 = R66 三段影响 + 文章/栏目/标签/评论数；执行返回 `{ ok, slug, deletedArticles, deletedColumns, deletedTags, deletedComments, recycledRoot }` |
+
+### 12.3 引擎行为变化（无契约变更）
+
+- 上下文预算（R67）：`toolsBudget` 与 `systemBudget` 实测扣减，`historyBudget = max_context − 输出预留 25% − system 实测 − tools 实测 − 当前消息`，
+  低于 2000 字符保底并告警；历史从最早丢弃，system 与 tools 恒完整；每轮记 debug 日志（实算值）
+- usage 兜底估算（R68）：结算基数扩展覆盖 messages + tools schema + tool 往返消息（1 token ≈ 1 字符）
+- 轮次上限：`ai.maxToolRounds` 生效，超限截断提示（口径不变，仅阈值可配）
+
+### 12.4 手册（PLATFORM-GUIDE）
+
+压缩改写 ≤2000 字（UTF-8 字符口径），覆盖：AI 可管云盘（读/写文本/移动/删到回收站）、可发文章（默认草稿、明示才发布、不可删文章）、可改/删站点（删站确认卡列影响）。README.txt（站点模板契约）不动。

@@ -28,6 +28,7 @@ export function createWriteSiteFilesTool(siteFacade: SiteFacade): AiTool {
     title: '写入我的站点文件',
     description:
       '批量写入当前用户自己的某个个人站点文件（站点根 = 云盘站点同名目录）。' +
+      '**本工具只作用于站点目录内、会直接影响线上站点**；若要写站点之外的云盘普通文件（不影响站点），请改用 write_cloud_file。' +
       '多站点用户建议先询问用户目标站点 slug 或先 list_site_files，再传 slug 精确指定；单站点用户可省略 slug 直通。' +
       '改写站点前先 read_site_file("README.txt") 了解开放 API 契约；' +
       '若 README.txt 不存在（P4a 旧站点），按 PLATFORM-GUIDE 摘要保守操作。' +

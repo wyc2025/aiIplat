@@ -12,7 +12,8 @@ export function createReadSiteFileTool(siteFacade: SiteFacade): AiTool {
     name: 'read_site_file',
     title: '读取我的站点文件',
     description:
-      '读取当前用户自己的某个个人站点内的文本文件（站点根 = 云盘站点同名目录）。' +
+      '读取当前用户自己的某个个人站点内的文本文件（站点根 = 云盘站点同名目录，path 为站点根相对路径）。' +
+      '**只用于站点目录内的文件**；若要读站点之外的云盘普通文件，请改用 read_cloud_file。' +
       '多站点用户建议先询问用户目标站点 slug 或先 list_site_files，再传 slug 精确指定；单站点用户可省略 slug 直通。' +
       '改写站点前建议先 read_site_file("README.txt") 获取开放 API 契约；' +
       '若 README.txt 不存在（P4a 旧站点），按 PLATFORM-GUIDE 摘要保守操作。' +

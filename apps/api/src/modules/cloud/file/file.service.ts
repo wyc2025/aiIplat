@@ -24,8 +24,9 @@ export const AVATAR_PARENT_ID = BigInt(-1)
 /** 单目录直接子项上限（R6；TransferService 上传计数复用，故导出） */
 export const MAX_CHILDREN = 500
 
-/** 在线编辑文本扩展名白名单（P4b §15.12：与 site 域 SITE_FILE_TEXT_EXTS 同集，写死代码，两边以架构增补为准对齐） */
-const EDITABLE_TEXT_EXTS: ReadonlySet<string> = new Set([
+/** 在线编辑文本扩展名白名单（P4b §15.12：与 site 域 SITE_FILE_TEXT_EXTS 同集，写死代码，两边以架构增补为准对齐）。
+ * P5 §20.1：CloudFacade 云盘根基点原语的读写白名单复用本集（导出供门面引用，单一来源）。 */
+export const EDITABLE_TEXT_EXTS: ReadonlySet<string> = new Set([
   'html',
   'htm',
   'css',

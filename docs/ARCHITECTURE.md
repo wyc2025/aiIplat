@@ -746,6 +746,10 @@ P4a 增补（site 配置组，见 `apps/api/src/config/site.config.ts`，均有�
 - `SITE_OPEN_API_RATE_LIMIT`：开放数据限流（次/分/IP，默认 60）
 - `SITE_COMMENT_RATE_LIMIT`：评论提交限流（次/分/IP，默认 10）
 
+P5 增补（ai 配置组，见 `apps/api/src/config/ai.config.ts`，D65）：
+
+- `AI_MAX_TOOL_ROUNDS`：单轮用户消息的工具调用轮次上限（默认 3，**上限 10** 防失控；越界/非法一律回退默认值）。此前为 chat.service 硬编码常量 `MAX_TOOL_ROUNDS`，P5 起改为配置组读取（每次现读，改配置无需重启）
+
 main.ts 增补：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 函数式（/api/open 反射 `*` + 放行 Content-Type/Range，其余维持 CORS_ORIGINS 白名单）。
 
 ---
@@ -832,6 +836,16 @@ main.ts 增补：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 函数�
 | RecycleCleanTask + RecycleService.cleanExpired | api/src/modules/cloud/recycle | 回收站超期自动清理（P4F T67/D58/R58/R59）：cron 每日 03:30，分批 ≤500 行、以「超期行中的最顶层项」为执行单元（子树去重）、单行失败续扫、幂等可重入；复用既有彻底删除链，头像旧行只删行/物理文件不二次回退 used | 已建（T67） |
 | 配额对账两端点（GET/PUT usage-reconcile） | api/src/modules/cloud/admin | 诊断（R60 三段 groupBy 聚合 + 公式差额，userId 缺省 = 全用户）/ 修正（R61 used = 公式重算值，@OperationLog('云盘','配额对账修正')）；前端入口 = 用户管理「调整云盘配额」弹窗内嵌对账行 + diff≠0 才出现的修正按钮（D59） | 已建（T68） |
 | 全局中文语言包 | web/src/App.vue | ElConfigProvider + `element-plus/es/locale/lang/zh-cn` 在最外层注入：组件走 unplugin 按需自动引入，没有 `app.use(ElementPlus,{locale})` 这一步，函数式弹窗（ElMessageBox/ElMessage）读全局配置后按钮即中文（P4F T69 根因级修复） | 已建（T69） |
+| SiteFacade CMS 层扩展（P5） | api/src/modules/site/facade | listArticles / readArticle / createArticle / updateArticle / publishArticle / ensureColumn / ensureTags / listColumns / listTags（全部收 siteId，slug 解析在工具层经 resolveSiteForTool，§20.1）；SiteFacadeModule 增 imports 文章/栏目/标签三模块（同域直注） | 已建（T71） |
+| SiteFacade 生命周期扩展（P5） | api/src/modules/site/facade | updateSite（委托 manage.update）/ getSiteDeleteImpact（R66 计数预检）/ deleteSite（委托 manage.remove） | 已建（T71） |
+| SiteArticleService.getOwnedSiteId | api/src/modules/site/article | 文章 → 所属站点 id（复用同一属主链：40109/40119），供门面 CMS 写路径定位站点作用域 | 已建（T71） |
+| CloudFacade 云盘根基点原语（P5） | api/src/modules/cloud/facade | listUserFiles / readUserFile / writeUserFile / moveUserFiles / deleteUserFiles / isUserDirPublic（基点 = 用户云盘根 parent_id=0，路径防穿越 + 文本白名单 + 64KB/256KB 上限 + 批量上限 20，§20.1）；CloudFacadeModule 增 imports SiteRootModule（inSite 标注） | 已建（T71） |
+| AI 云盘五件套 | api/src/modules/ai/tool/tools | list_cloud_files / read_cloud_file / write_cloud_file / move_cloud_files / delete_cloud_files（handler 只注入 CloudFacade，§20.2） | 已建（T72） |
+| AI 站点 CMS 七件套 | api/src/modules/ai/tool/tools | list/read/create/update/publish_site_article + ensure_site_column / ensure_site_tags（D63 代发语义：默认草稿、明示才发布、不提供删除文章） | 已建（T73） |
+| AI 站点生命周期两件套 | api/src/modules/ai/tool/tools | update_site / delete_site（R66 确认卡三段影响 + 文章数统计） | 已建（T74） |
+| tool-params.ts | api/src/modules/ai/tool/tools | 工具入参整形三件套 readStrParam / readStrArrayParam / readNumParam（云盘/CMS/生命周期 14 个工具共用；模型参数不可信，统一整形后再透传门面） | 已建（T72） |
+| ai 配置组 + 预算动态化 | api/src/config/ai.config.ts、api/src/modules/ai/chat/chat.service.ts | `ai.maxToolRounds`（env `AI_MAX_TOOL_ROUNDS`，默认 3 上限 10）替代硬编码；历史截取预算 = maxContext − 输出预留 25% − system 实测 − tools schema 实测 − 当前消息，低于 2000 字符保底并告警；每轮 debug 日志记实算值（§20.3/R67） | 已建（T75） |
+| R14 字数口径转出 | api/src/modules/site/facade/site-facade.service.ts | `export { countWordsR14 }`（口径单一来源仍在 article.service.ts）：AI 工具确认卡需在**执行前**展示字数，经门面模块转出而非跨域直插站点域内部文件（铁律 6） | 已建（T73） |
 
 ### Redis Key 增补约定（写入 RedisKey 常量）
 
@@ -896,19 +910,21 @@ export interface AiTool {
 
 ### 12.2 调用流程（chat.service 编排）
 
-1. 引擎层扩展：ProviderService.streamChat 当前仅传 messages，本期扩展 `tools` 参数透传与上游 `tool_calls` 事件解析（EngineStreamEvent 新增事件类型）。模型 `support_tool=1` 且存在可用工具时携带 `tools`（**按当前用户权限过滤后的子集**，无权限工具不下发；**过滤后为空则不携带 tools 字段**，空数组会触发部分厂商 400）；工具 schema 本身占用上下文，与历史消息共用 max_context 预算（必要时下调历史截取比例）。注意：**tool_calls 在流式 delta 中分片下发**（function.arguments 逐段追加），引擎层需累积分片、聚合至 finish_reason=tool_calls 后再解析执行，禁止读到就解析
+1. 引擎层扩展：ProviderService.streamChat 当前仅传 messages，本期扩展 `tools` 参数透传与上游 `tool_calls` 事件解析（EngineStreamEvent 新增事件类型）。模型 `support_tool=1` 且存在可用工具时携带 `tools`（**按当前用户权限过滤后的子集**，无权限工具不下发；**过滤后为空则不携带 tools 字段**，空数组会触发部分厂商 400）；工具 schema 本身占用上下文，与历史消息共用 max_context 预算（**P5 起改为实测扣减，见 §20.3**）。注意：**tool_calls 在流式 delta 中分片下发**（function.arguments 逐段追加），引擎层需累积分片、聚合至 finish_reason=tool_calls 后再解析执行，禁止读到就解析
 2. 上游返回 tool_calls → 逐个处理：
    - 执行前再次校验 perms（防缓存间隙），无权限 → 20015 结果回喂模型告知。权限判定逻辑不得复制：从 PermissionGuard 抽出共用的 PermissionService（gateway 层），守卫与工具层都调它
-   - read：执行 handler → 结果作为 `role: "tool"` 消息追加 → 再次调用上游（**最多 3 轮**，超限截断并提示）
+   - read：执行 handler → 结果作为 `role: "tool"` 消息追加 → 再次调用上游（**轮次上限取 `ai.maxToolRounds`，P5 起配置化、默认 3、上限 10**，超限截断并提示）
    - write：写 ai_tool_call（status=pending）+ Redis 确认单 → SSE 下发 `tool_confirm` 事件 → 本轮流结束（done 照常下发并结算本轮；该 assistant 消息 content 允许为空，仅承载卡片）
 3. 确认链路：`POST /api/ai/tool/confirm` → 前置校验（套餐/积分预检 20001/20002、并发流锁与 /ai/chat 共用 ai:chatting 冲突 20007、确认单归属与有效期 20016、工具权限二次校验 20015）→ approved=true 执行 handler（status=executed/failed）→ 结果回喂上游 → **本接口同样以 SSE 流式返回**模型的后续自然语言总结（含 15s 心跳），**总结落库为新的 assistant 消息并独立结算**——避免与首轮共用 message_id 撞 ai_usage_log 的 unique 幂等键
-4. 一次用户消息引发的所有上游调用，tokens 累加进同一条 assistant 消息，统一结算一次；**role=tool 的工具消息不持久化**（只在本轮调用链内存中传递），上下文重建仍只用 ai_message 的 user/assistant 消息，工具结果由 assistant 的最终自然语言回答承载
+4. 一次用户消息引发的所有上游调用，tokens 累加进同一条 assistant 消息，统一结算一次；**role=tool 的工具消息不持久化**（只在本轮调用链内存中传递），上下文重建仍只用 ai_message 的 user/assistant 消息，工具结果由 assistant 的最终自然语言回答承载。
+   **P5 真机修复（§20.6 第 9 条）**：确认链路重建上下文时，**禁止出现「文本 assistant」直接紧跟「带 tool_calls 的 assistant」**——确认总结落库为独立 assistant 消息，与上一轮答复形成连续 assistant，DeepSeek 思考模式会以 400 拒绝；故 `buildConfirmContext` 会把紧邻的历史 assistant 文本并入原消息，合并为单条 assistant（content + tool_calls）
 5. 工具参数校验：handler 入口按 parameters schema 校验（模型可能生成非法参数），失败结果回喂让模型自我修正（计入轮次）
 
 ### 12.3 域门面约定（域边界纪律的落地方式）
 
 - ai 域工具需要 system 域能力时，**只允许注入 system 域模块 export 出来的 Service**（如 UserService、OnlineService、RoleService）
-- ai 域工具操作个人网站时，**只注入 site 域门面 SiteFacade**（P4b 站点三件套，§15.2；ToolModule imports SiteModule）
+- ai 域工具操作个人网站时，**只注入 site 域门面 SiteFacade**（P4b 站点三件套 §15.2 + P5 CMS/生命周期七件套 §20.1；ToolModule imports SiteModule）
+- ai 域工具操作云盘时，**只注入 cloud 域门面 CloudFacade**（P5 云盘五件套 §20.1；ToolModule imports CloudModule）
 - system 域各模块需在 module 的 `exports` 中显式声明可被外部使用的 Service；未导出 = 私有
 - handler 禁止直接操作其他域的表、禁止绕过 Service 写旁路逻辑
 
@@ -1603,3 +1619,146 @@ modules/cloud/admin/
 | 回收站保留天数分用户配置 | 用户诉求   | 现为全局配置（D58）；如需 per-user，可照 `cloud_usage` 先例加列/加表，`cleanExpired(days)` 已参数化 |
 | 对账自动修正             | 运维诉求   | 现为显式管理动作（R61）；如需自动化，把 `reconcileFix` 的写入段挂到 cron 即可，但会失去人工确认     |
 | 清理并发锁               | 多实例部署 | 现按单实例不加锁（R59）；多实例时需加分布式锁或改用 DB 抢占式扫描                                   |
+
+---
+
+## 20. AI 能力扩展（P5）：云盘/CMS/生命周期工具 + 预算动态化（自 docs/P5/ARCHITECTURE-P5-增补.md 并入；增补文档保留为历史细节参考）
+
+> 编号与 `docs/P5/PRD-P5-AI.md` 对齐（D62~~D66 / R63~~R68 / T71~T76）。**零新 HTTP 端点、零新错误码、零新依赖**：
+> 工具经既有 SSE 通道（`/api/ai/chat` + `/api/ai/tool/confirm`）交互，回喂复用各域既有码；预算走配置项。
+> 工具总数 **11 → 25**。
+
+### 20.1 门面扩展（T71，全部既有服务委托，工具零业务逻辑）
+
+**SiteFacade 新增 CMS 层 + 生命周期**（同域直注 article/column/tag 三服务，照 T44 模板先例；SiteFacadeModule 增 imports SiteArticleModule / SiteColumnModule / SiteTagModule，三模块随之 `exports` 自身 Service）：
+
+```
+listArticles(userId, siteId, { columnId?, status?, keyword?, pageNo?, pageSize≤20 })  → { list, total, pageNo, pageSize }
+readArticle(userId, id)                → 全文（含 contentMd；超 64KB 截断 truncated=true）
+createArticle(userId, siteId, input)   → 行（默认草稿；tagNames 走 ensure）
+updateArticle(userId, id, input)       → 行（部分更新）
+publishArticle(userId, id, status)     → 行（published_at 口径沿用）
+ensureColumn(userId, siteId, {name, parentId?}) → { id, created }（幂等：同名同父命中即复用）
+ensureTags(userId, siteId, names[])    → [{ id, name, created }]（批量幂等）
+listColumns / listTags(userId, siteId)  → 确认卡摘要与 columnId 引导清单
+updateSite(userId, siteId, input)      → 委托 manage.update
+getSiteDeleteImpact(userId, siteId)    → { slug, articles, columns, tags, comments }（R66 计数预检，只读）
+deleteSite(userId, siteId)             → 委托 manage.remove（{ deletedArticles, recycledRoot }）
+```
+
+> **与增补文档的偏差（以代码为准）**：增补 §20.1 草图画的是「facade 收 `slug?` 并内部 resolveSite」。
+> 落地改为**工具层经 `resolveSiteForTool` 解析 slug → facade 一律收 siteId**：R56 四分支的结果是
+> 「回喂对象」（0 站引导 / 多站 needSitePick / 查无 40119+列表），属工具层语义，不应漏进域门面（§20.2 亦称
+> 三件套与 CMS/生命周期工具全走 resolveSiteForTool）。这样门面保持纯域操作、可被其他模块直接复用。
+
+**CloudFacade 新增云盘根基点原语**（基点 = 用户云盘根 `parent_id=0`，虚拟根无实体行；校验纪律与站点原语相同）：
+
+```
+listUserFiles(userId, { path?, recursive? })  → { path, items[{name,path,isDir,size,ext,updatedAt,inSite}], truncated?, quota{used,limit} }
+readUserFile(userId, path)                    → 文本白名单 + ≤64KB
+writeUserFile(userId, path, content)          → 复用 writeFileRaw 全链（mkdir -p / R6 / 温和覆盖 / used 记账 / 配额 30003）
+moveUserFiles(userId, moves[{from,to}])       → 逐条 { from, to, finalPath, ok, error?, targetPublic? }
+deleteUserFiles(userId, paths[])              → 逐条 { path, ok, error? }
+isUserDirPublic(userId, path)                 → 供 move 确认卡预判「目标在公开目录」（R39 三态上溯同口径）
+```
+
+- 机械原语最小改造：`listSubtreeRaw` / `readFileRaw` / `writeFileRaw` 抽出共用的 `walkSubtree` /
+  `findEntryByBase` / `readFileByBase`，并支持 `rootFolderId=0`（用户云盘虚拟根）；站点侧行为逐字不变
+- `EDITABLE_TEXT_EXTS`（原 file.service 私有常量）加 `export`，云盘原语读写白名单复用同一集，单一来源
+- CloudFacadeModule 增 `imports: [SiteRootModule]`（inSite 标注需要站点根集合；SiteRootModule 零跨域 import，不成环）
+- **R64 路径口径**：空段 / `.` / `..` / 绝对路径 / 反斜杠 / 单段 >64 / 深度 >10 一律拒绝（30001；深度超限 30006）；
+  文本白名单外 30012；读 >64KB、写 >256KB 30013；`move` 的 `to` 为**目标目录路径**（保留原文件名移入、自动 mkdir -p，
+  空串 = 云盘根）；批量上限 20（`AI_CLOUD_MAX_BATCH`）
+- **move 的 R39 偏差**：管理端 move 有「移入公开目录二次确认」交互，AI 工具无此交互位——确认卡即用户确认动作，
+  故 `moveUserFiles` 直接带 `confirmPublic: true` 执行并在结果中标注 `targetPublic=true`，不阻断
+- **write 白名单口径**：AI 写只允许文本白名单扩展名（R64「单文件 ≤256KB 文本」；非目标明确「AI 上传二进制文件」不做）
+
+### 20.2 AI 工具注册（T72~T74：tools/ 下加文件 + bootstrap 注册 + ToolModule imports CloudModule）
+
+- 工具总数 25：P2b 七个 + P4b 站点文件三件套 + P4e create_site + **P5 十四个**（云盘 5 / CMS 7 / 生命周期 2）
+- handler 只注入域门面：站点系列 → SiteFacade；云盘五件套 → CloudFacade（零跨域 import 内部实现）
+- **description 边界纪律（R63）**：`write_site_files`（站点目录内，影响线上站点）与 `write_cloud_file`
+  （云盘任意路径，不影响站点）**互写对方名字做排除式描述**；`list_cloud_files` 注明「站点目录也在云盘内（inSite）、
+  操作站点内容优先用 site 系列」；`read_site_file` / `read_cloud_file` 同样互指。25 个工具并存下防误选靠 description
+- **perms 复用既有管理端点标识**（零新增权限、seed 零改动）：云盘 = `cloud:file:list` / `cloud:file:upload` /
+  `cloud:file:delete`；CMS = `site:article:list|create|update|publish`、`site:column:create`、`site:tag:create`；
+  生命周期 = `site:site:manage`
+- **工具清单与风险级别**
+
+| 工具                 | risk  | perms                | 要点                                                                                                 |
+| -------------------- | ----- | -------------------- | ---------------------------------------------------------------------------------------------------- |
+| list_cloud_files     | read  | cloud:file:list      | `{ path?, recursive? }`；返回条目（含相对路径与 inSite）+ 配额用量                                   |
+| read_cloud_file      | read  | cloud:file:list      | `{ path }`；文本白名单 ≤64KB                                                                         |
+| write_cloud_file     | write | cloud:file:upload    | `{ path, content }`；同路径温和覆盖（旧文件进回收站）；摘要复用「文件清单」表格（path/action/size）  |
+| move_cloud_files     | write | cloud:file:upload    | `{ moves[{from,to}] }`；批量 ≤20；站点根 30019 / 回收站 30019 全继承                                 |
+| delete_cloud_files   | write | cloud:file:delete    | `{ paths[] }`；**仅软删进回收站**；站点根 30020 拦截                                                 |
+| list_site_articles   | read  | site:article:list    | 分页摘要（无正文），pageSize ≤20                                                                     |
+| read_site_article    | read  | site:article:list    | 全文（含 contentMd；超 64KB 截断）；交叉校验 slug 与文章实际站点一致                                 |
+| create_site_article  | write | site:article:create  | 默认草稿；status=1 摘要带「发布即公开可见」警示行；columnId 缺省时本站唯一栏目直达、否则回喂栏目清单 |
+| update_site_article  | write | site:article:update  | 部分更新；tagNames 提供即整体替换                                                                    |
+| publish_site_article | write | site:article:publish | 上下架；上架摘要带公开警示                                                                           |
+| ensure_site_column   | write | site:column:create   | 同名同父命中即复用（created=false）                                                                  |
+| ensure_site_tags     | write | site:tag:create      | 批量幂等 → [{id,name,created}]                                                                       |
+| update_site          | write | site:site:manage     | `{ slug, title?, description?, newSlug?, status?, commentAudit? }`；改 slug / 停用的影响在摘要中明示 |
+| delete_site          | write | site:site:manage     | 摘要 = R66 三段影响 + 文章/栏目/标签/评论数；执行走既有删站级联                                      |
+
+- **summarize 摘要形态**：新工具一律返回**字符串摘要（中文标签多行）**——
+  `move_cloud_files` = 逐条 `from → to`（目标在公开目录的条目附「内容将对外可见」）；`delete_cloud_files` =
+  路径清单 + 「移入回收站，可还原」；`create/update/publish_site_article` = 标题/栏目/标签/状态/字数（R14 经门面
+  转出）+ 发布警示行；`ensure_*` = 复用/新建预判；`update_site` / `delete_site` = R66 三段；
+  例外：`write_cloud_file` 复用既有「文件清单」表格形态（单文件，path/action/size），与 `write_site_files` 视觉一致
+- **前端零改动**：`ToolConfirmCard` 现对「数组摘要」走固定 table（path/action/size）渲染、对字符串摘要走文本渲染；
+  故新工具取字符串摘要即可正确显示，未新增专用模板（§20.4）
+
+### 20.3 预算动态化（T75，§12.2 修订点；R67/R68/D65）
+
+```
+toolsBudget   = Σ(过滤后工具 schema 字符数)          // 每轮动态算，各人因权限不同而不同
+systemBudget  = system prompt 实测字符数（PLATFORM-GUIDE 全文 + 用户上下文）
+historyBudget = max_context − 输出预留(25%) − systemBudget − toolsBudget − 当前消息字符数
+                ↓ 下限保护：historyBudget < MIN_HISTORY_CHARS(2000) 时保 2000 并 logger.warn
+```
+
+- 口径恒为「1 token ≈ 1 字符」（不引分词库，铁律 7 + 既有口径延续）；输出预留仍为 25%
+- **system prompt 恒完整、tools schema 恒完整**，装不下时继续从最早历史消息丢弃（`pickHistory` 从最新往回装，
+  装不下即停 ⇒ 等价于丢最早）；chat 路径与确认回填路径共用同一 `computeHistoryBudget` / `pickHistory`
+- 每轮对话开头记一条 `logger.debug`（model maxContext / tools 数 / toolsBudget / systemBudget / historyBudget 实算值），
+  预算不足时改记 warn，便于调优
+- `ai.maxToolRounds`（env `AI_MAX_TOOL_ROUNDS`，默认 3、上限 10）替代原硬编码 `MAX_TOOL_ROUNDS`；每次现读，热改即生效
+- **usage 兜底估算（R68）**：结算基数 = messages 全文 + tools schema + tool 往返消息（assistant 回喂内容 + tool 结果），
+  同 1 token ≈ 1 字符；有上游 usage 时仍以上游为准；结算幂等键不变
+
+### 20.4 前端
+
+- `ToolConfirmCard` 保持通用渲染（数组 → 文件清单表格；字符串 → 文本），**未加任何专用模板**；
+  摘要结构化由工具 summarize 保证（§20.2），新增工具不再改卡片
+- 其余零变化（无新页面/路由/组件）
+
+### 20.5 README.txt 与手册（PLATFORM-GUIDE）
+
+- README.txt（站点模板契约）本期不动
+- PLATFORM-GUIDE 压缩改写：合并系统管理罗列、为「云盘/文章/站点生命周期 AI 能力 + 文章默认草稿 + 删除边界」腾空间；
+  **字符数硬门槛 ≤2000（UTF-8 字符口径，`[...text].length`）**，本期实测 **1976**
+
+### 20.6 实现偏差与验证登记
+
+| #   | 项                                                           | 说明                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| --- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | facade 收 siteId 而非 slug                                   | 见 §20.1 偏差说明（slug 解析留在工具层 resolveSiteForTool）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 2   | 云盘 list 条目带 `path`                                      | 增补文档只列 name/isDir/size/ext/updatedAt/inSite；补 `path` 便于模型直接引用相对路径做 read/move/delete（避免自行拼接出错）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| 3   | `listUserFiles` 自实现 BFS                                   | 增补文档写「复用 listSubtreeRaw」；因其返回类型（SubtreeEntry）不含 id/inSite，无法承载 inSite 逐层继承，故在门面内自实现同规则遍历（maxDepth 10 / limit 500 / truncated），规则与 listSubtreeRaw 逐条一致                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 4   | 文章 `contentMd` 64KB 截断                                   | 正文上限 20 万字符，直喂必爆上下文；按站点文件读口径截断并置 `truncated=true`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 5   | columnId 缺省策略                                            | 本站唯一栏目自动使用；多栏目回喂 40001 + 「名称(id=xx)」清单；无栏目提示先 ensure_site_column（不自动造栏目、不默认取第一个，避免写错栏目）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 6   | coverPath 未进工具参数                                       | 工具清单（PRD §4）未列 coverPath，AI 亦无法上传图片，故 create/update 文章工具不支持封面字段（R65 的 media/ 前缀校验在域内既有实现不变）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 7   | 确认卡摘要形态                                               | 见 §20.2/§20.4（字符串摘要 + write_cloud_file 复用表格）；增补 §20.4 描述的「通用 key-value」与现卡片实现（固定三列表格 + 文本）不一致，以代码为准                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 8   | 批量上限 20                                                  | 增补文档未给 move/delete 批量上限；取 20（AI_CLOUD_MAX_BATCH）与「单次 ≤10 文件」同量级，防模型一次性下发超大数组                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 9   | **真机验证发现并修复：连续 assistant 消息触发 DeepSeek 400** | 现象：真机链路（deepseek-v4-flash）中「第二次写工具确认卡之后的总结流」稳定 400（`The reasoning_content in the thinking mode must be passed back to the API`），错误文案误导性极强（与 reasoning 回传无关）。<br>受控实验定位（`ProviderService.streamChat` 直调，4 组对照）：C5 `user→assistant(tool_calls)→tool` 通过；C6 中间插入 user 通过；**C7 `assistant(文本)→assistant(tool_calls)→tool` 失败**；C8 把前置文本并入带 tool_calls 的那条 assistant 通过。<br>根因：确认总结以**独立 assistant 消息**落库（§12.2 第 3 条），下一次确认重建上下文时历史末条为该总结，直接紧跟原始 `assistant(tool_calls)` → 两条连续 assistant。<br>修复：`buildConfirmContext` 在拼装后若 `picked` 末条为 assistant，则弹出并把其 content 并入原消息（合并为一条 content + tool_calls）。修复后同一 4 回合真机链路 **0 上游错误**（修复前每轮各 1 次）。<br>注：曾尝试「DeepSeek 端点恒回传 reasoning_content（空串兜底）」的防御性改法，实验证明与根因无关，已回退以保持实现最小 |
+
+### 20.7 演进预留（本期不做，架构不堵路）
+
+| 项                 | 触发条件               | 预留设计                                                                           |
+| ------------------ | ---------------------- | ---------------------------------------------------------------------------------- |
+| 评论代审/代管工具  | 社区治理语义另立       | 门面侧只需再加 `listComments` / `auditComment` 委托，工具文件模式已固定            |
+| AI 删除文章        | 需先给文章加回收站语义 | 现为物理删除（R7）不可恢复，故不给工具；加软删后可照 `delete_cloud_files` 模式补齐 |
+| 工具按场景分包下发 | 工具数再翻倍           | 预算实测 debug 日志是触发依据；可在 getAvailableTools 前按意图粗分类后再过滤       |
+| 云盘二进制写入     | 用户诉求               | 需先解决上传通道与审核语义（当前 AI 产出只有文本）                                 |
