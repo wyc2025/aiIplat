@@ -966,3 +966,85 @@ content 超 500 → 40001；评论不存在 → 40110；跨站/非属主 → 401
 | AI 工具   | 25 → 28    | +list_site_comments / audit_site_comments / reply_site_comment |
 | HTTP 端点 | +1         | `PUT /api/site/comment/:id/reply`                              |
 | 前端依赖  | +1         | `@codemirror/merge`（D71 特批，按需异步加载）                  |
+
+## 14. P7：站点内容池化（内容归用户 + 多站发表 + 路径美化）
+
+> 决策 D73~~D78 / 规则 R75~~R78，见 `docs/P7/PRD-P7-STORY-DEMAND.md`。增补文档 `docs/P7/API-P7-增补.md` 已并入（保留为历史参考，冲突以本文为准）。
+> **新增 HTTP 端点 2 个**（14.2）；**新增错误码 1 个**：40120（删除用户仍有站点）；AI 工具总数维持 28；前端依赖零新增。
+> 数据模型变更见 ARCHITECTURE §22.2；迁移文件 `20260916100000_p7_content_pool`（执行前必须备份）。
+
+### 14.1 内容端点改用户级（修改既有）
+
+| 方法   | 路径                        | 变化                                                                                                                         |
+| ------ | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| GET    | /api/site/article           | **不再接受 `siteId`**（用户级）。保留可选 `siteId` 作**筛选**（不传 = 内容池全部；传 = 只出已发表到该站的）。列表项带 `sites: [{id,name,slug,isTop}]` |
+| GET    | /api/site/article/:id       | 详情带 `sites`（含每站 `isTop`）；不再有 `siteId` 字段                                                                        |
+| POST   | /api/site/article           | body 去掉 `siteId`，新增 `siteIds?: number[]`（提供即替换发表集合；不传 = 仅入内容池，不发表到任何站）                         |
+| PUT    | /api/site/article/:id       | 新增 `siteIds?: number[]`（提供即替换；**空数组 = 全站下架**，文章本体保留）                                                   |
+| GET    | /api/site/column/list       | **不再接受 `siteId`**（用户级）；列表项带 `sites: [{id,name,slug,sort}]`（展示站点）                                           |
+| POST   | /api/site/column            | body 去掉 `siteId`，新增 `siteIds?: number[]`（不传 = 该用户全部站点可见）                                                    |
+| GET    | /api/site/tag/list          | **不再接受 `siteId`**（用户级）。标签**跟随文章**出现在站点，无需单独挂载                                                     |
+| POST   | /api/site/tag               | body 去掉 `siteId`（`name` 用户级唯一，重名复用既有标签）                                                                     |
+| GET    | /api/site/manage/list       | 站点项 `articleCount` 改为「已发表到本站的文章数」                                                                            |
+
+> 兼容说明：前端三页面已同步（列表不再传 `siteId`，筛选走新增下拉；参见 ARCHITECTURE §22.8）。后端对仍传 `siteId` 的历史请求按「未知参数」处理（ValidationPipe 口径）。
+
+### 14.2 发表 / 显隐关联端点（新增）
+
+| 方法 | 路径                            | 权限                 | body                                        | 响应                                              |
+| ---- | ------------------------------- | -------------------- | ------------------------------------------- | ------------------------------------------------- |
+| PUT  | /api/site/article/:id/sites     | `site:article:update`| `{ sites: [{ siteId: number, isTop?: boolean }] }` | `{ ok: true, sites: [{id,name,slug,isTop}] }` |
+| PUT  | /api/site/column/:id/sites      | `site:column:update` | `{ sites: [{ siteId: number, sort?: number }] }`   | `{ ok: true, sites: [{id,name,slug,sort}] }` |
+
+- **替换式**：每次调用以传入集合为最终结果；空数组 = 文章从全部站点下架 / 栏目在所有站点不展示（本体保留在内容池）。
+- **置顶按站独立**：`isTop` 只影响该站内的排序，不影响其他站点。
+- 站点 id 不存在或不属于当前用户 → **40119**（文章/栏目不存在或非属主 → **40400**）。
+- 发表/下架后清理该站的开放层缓存（`site:data:{siteId}:*`）。
+
+### 14.3 建站与删站（修改既有）
+
+| 方法   | 路径                    | 变化                                                                                                                                            |
+| ------ | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | /api/site/manage        | body 新增 `publishArticleIds?: 'all' | number[]`（缺省 = `'all'`：把内容池里已发布文章发表到新站；`[]` = 先建空站）。**新 `site_site.spa_fallback`** 由模板 `template.json#spaFallback` 读入 |
+| DELETE | /api/site/manage/:id    | 级联修订：物理删该站评论 + 删该站展示关联；**文章/栏目/标签本体保留**。响应改为 `{ unpublishedArticles, deletedComments, recycledRoot }`（原 `deletedArticles` 已废弃） |
+
+### 14.4 删除用户预检（修改既有）
+
+- `system` 域删用户前若该用户仍有站点 → **40120**（message 提示先删除其站点）。内容池化的文章/栏目/标签随用户走，站点才是必须显式清理的资源。
+
+### 14.5 开放层（`/api/open/{slug}/**`，D76/R76）
+
+| 方法 | 路径                                   | 口径                                                                                          |
+| ---- | -------------------------------------- | --------------------------------------------------------------------------------------------- |
+| GET  | /api/open/{slug}/api/articles          | 只出 `site_article_publish` 中本站 + `status=1` 的文章；排序 **`is_top desc, published_at desc`** |
+| GET  | /api/open/{slug}/api/columns           | 只出 `site_column_display` 中本站的栏目；`articleCount` 只计**已发表到本站**的文章             |
+| GET  | /api/open/{slug}/api/tags              | 跟随文章：只出现在本站已有文章引用到的标签（无标签文章 → 空数组，属正常）                     |
+
+### 14.6 静态资源回退链（`/api/open/{slug}/**`，D77/R78）
+
+- **无扩展名路径**才回退：`真实文件 → 补 .html → 目录 index.html → 站点 spa_fallback`（全部未命中 → **40400**）。
+- **带扩展名路径严格 404**：如 `/not-exist.png` → 40400（不回退，避免静态资源缺失被 index 吞掉）。
+- `spa_fallback` 为 NULL（存量站点）→ 不启用回退，行为与 P7 前完全一致；回退命中**不写 `site:path` 负缓存**（新发表文章必须立即可见）。
+
+### 14.7 AI 工具契约变化（R77，工具总数 28 不变）
+
+| 工具                   | parameters 变化                                                     | 语义变化                                                                                              |
+| ---------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| create_site_article    | 加 `siteIds?: number[]`                                             | status=0 可免选站（仅入内容池）；status=1 必须能确定发表站点（slug 或 siteIds），否则回喂站点清单 40101 |
+| update_site_article    | 加 `siteIds?: number[]`                                             | siteIds 提供即整体替换（空数组 = 全站下架）；slug 由必选降为可选（传了才校验「已发表到该站」）        |
+| publish_site_article   | slug 降为可选                                                       | 上架且零发表站时，确认卡与返回值带警示行（「上架后任何站点都看不到它」）                              |
+| list_site_articles     | 站点降为筛选                                                        | 列表为用户内容池口径，返回项带 `sites`                                                                |
+| read_site_article      | slug 降为可选                                                       | 校验由「属于该站」改为「已发表到该站」（未发表 → 40400 并提示）                                       |
+| ensure_site_column / ensure_site_tags | 去站点参数                                               | 栏目/标签用户级                                                                                       |
+| delete_site            | 无                                                                  | 确认卡改口径：「下架 N 篇 + 删评论 M 条」，返回 `{ unpublishedArticles, deletedComments, ... }`        |
+
+### 14.8 编号登记
+
+| 系列      | 本期使用    | 说明                                                                                   |
+| --------- | ----------- | -------------------------------------------------------------------------------------- |
+| 决策      | D73~~D78    | 见 `docs/P7/PRD-P7-STORY-DEMAND.md`                                                     |
+| 需求      | R75~~R78    | 同上                                                                                   |
+| 任务      | T83~~T87    | 见 PROGRESS「P7 任务拆解」                                                              |
+| 错误码    | +1          | **40120**（删除用户仍有站点）；复用 40001/40101/40105/40119/40400                       |
+| HTTP 端点 | +2          | `PUT /api/site/article/:id/sites`、`PUT /api/site/column/:id/sites`                      |
+| AI 工具   | 28（不变）  | 7 个 CMS 工具签名调整；`pnpm check:ai` 16/16                                            |

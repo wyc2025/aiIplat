@@ -1509,9 +1509,135 @@ site/
 → 响应 { deletedArticles, recycledRoot: true }
 ```
 
+> ⚠ **本节已被 P7（§22.4）修订**：内容池化后文章/栏目/标签归用户，删站**不再物理删除内容本体**，只删 `site_comment`（评论随站走）与两条展示关联（文章 → 从本站下架、栏目 → 本站不再展示）。响应字段改为 `{ unpublishedArticles, deletedComments, recycledRoot }`。以 §22.4 为准。
+
 - `removeSiteRoot` 是 CloudFacade 新增门面方法（管理侧语义，只抛 cloud 段码），与 `discardSiteDraft` 的区别：discard 用于建站失败的未公开草稿回滚（物理删 + used 回退），removeSiteRoot 用于删站（软删 + used 不动）。
 - 还原后语义 R54：回收站还原的目录成为普通文件夹，is_public 保持 1；site 行已不存在，R45 按钮组按 inSite 自动回普通组。不做「还原即恢复站点」的设计（PRD 非目标）。
-- 前端 R50 确认文案必须列明三段影响（文章/栏目/标签/评论物理删不可恢复；站点文件移入回收站可还原；slug 立即释放）。
+- 前端 R50 确认文案必须列明三段影响（文章/栏目/标签/评论物理删不可恢复；站点文件移入回收站可还原；slug 立即释放）。P7 后改按 §22.4 口径描述（内容本体保留）。
+
+---
+
+## 22. P7：站点内容池化（内容归用户 + 多站发表 + 路径美化）
+
+> 决策：D73（内容/站点关系：文章/栏目/标签归用户，站点只是展示窗口）/ D74（删站级联）/ D75（迁移纪律）/ D76（开放层口径）/ D77（路径美化）/ D78（默认模板 history 路由）；规则 R75（迁移单事务）/ R76（开放层口径）/ R77（AI 工具站点分档）/ R78（回退与负缓存）。
+> 迁移文件：`apps/api/prisma/migrations/20260916100000_p7_content_pool/migration.sql`（手写 SQL + `prisma migrate deploy` 同 T46 口径）。
+
+### 22.1 变更动机（D73）
+
+P4e/P5/P6 的口径是「文章/栏目/标签属于某个站点」，导致：多站点用户想把同一篇文章给两个站点看必须复制；删站会连带物理删除内容本体（R7）。P7 改为：
+
+- **内容归用户**：文章 / 栏目 / 标签是用户内容池里的实体（`user_id`），不隶属于任何站点；
+- **站点只是展示窗口**：内容在哪些站点出现由关联表决定（文章 = 发表 `site_article_publish`，栏目 = 展示 `site_column_display`，标签**跟随文章**自动出现在对应站点）；
+- **评论仍随站走**：`site_comment.site_id` 保留（评论是站点访客产生的，删站即删评论，符合 R7 既有语义）。
+
+### 22.2 数据模型变更
+
+| 表                     | 变更                                                                                              |
+| ---------------------- | ------------------------------------------------------------------------------------------------- |
+| `site_article`         | 删 `site_id`，加 `user_id`；新索引 `idx_article_user_status(user_id,status,published_at)`、`idx_article_user_column(user_id,column_id)` |
+| `site_column`          | 删 `site_id`，加 `user_id`；新索引 `idx_column_user(user_id,parent_id)`                            |
+| `site_tag`             | 删 `site_id`，加 `user_id`；唯一键由 `(site_id,name)` 改为 `uk_tag_user_name(user_id,name)`         |
+| `site_article_publish` | **新增**：`article_id + site_id + is_top + published_at`，唯一键 `(article_id,site_id)`，索引 `(site_id,is_top,published_at)` |
+| `site_column_display`  | **新增**：`column_id + site_id + sort`，唯一键 `(column_id,site_id)`，索引 `(site_id,sort)`         |
+| `site_comment`         | 保留 `site_id`；索引改 `idx_comment_site_article_audit(site_id,article_id,audit_status)`           |
+| `site_site`            | 加 `spa_fallback VARCHAR(64) NULL`（SPA 回退入口，D77；**NULL = 不启用回退，行为与 P7 前一致**）   |
+
+迁移执行顺序（单事务，R75）：加列 → 建关联表 → 按原 `site_id` 反查站点属主回填 `user_id` → 按原归属写入发表/展示关联 → 建新索引 → 删旧索引与旧列。执行前必须 `mysqldump` 全库备份（已在 migration.sql 头部写明）。
+
+### 22.3 后端端点口径（详见 API §14）
+
+1. **内容列表全部用户级化**：`GET /api/site/article`、`GET /api/site/column/list`、`GET /api/site/tag/list` **不再接受 `siteId`**（一律以登录用户的 `userId` 为准）；
+   - 文章列表保留可选 `siteId` **筛选**语义（不传 = 内容池全部，传 = 只出已发表到该站的）；
+   - 列表实体新增 `sites` 字段（文章 = 已发表站点 + 每站 `isTop`，栏目 = 展示站点）。
+2. **发表 / 显隐关联端点**（替换式，空数组 = 全站下架/不展示，本体保留）：
+   - `PUT /api/site/article/:id/sites` `{ sites: [{ siteId, isTop }] }`
+   - `PUT /api/site/column/:id/sites` `{ sites: [{ siteId, sort }] }`
+   - 站点不属于当前用户 → 40119。
+3. **写入口**：`POST /api/site/article` / `PUT /api/site/article/:id` 支持 `siteIds`（提供即替换发表集合，新建不传 = 仅入内容池）；`POST /api/site/column` 支持 `siteIds`（不传 = 该用户全部站点可见）。
+4. **建站灌内容**：`POST /api/site/manage` 支持 `publishArticleIds: 'all' | number[]`（缺省 = `'all'`，把内容池里已发布文章发表到新站），空数组 = 先建空站。
+5. **站点列表 `articleCount`** 改为统计「已发表到本站的文章数」。
+
+### 22.4 删站级联修订（取代 §18.3）/ 删用户预检
+
+```
+属主校验（40119）
+→ 事务内物理删：site_comment（评论随站走，R7 传统）
+→ 事务内删本站展示关联：site_article_publish where site_id / site_column_display where site_id
+  （文章/栏目/标签本体保留在用户内容池，可再次发表到其他站点）
+→ CloudFacade.removeSiteRoot(rootFolderId)：站点根连同子树软删进回收站（used 不动）
+→ 缓存清理：DEL site:resolve:{slug} + scanDel site:path:{siteId}:* + scanDel site:data:{siteId}:*
+→ slug 立即可再注册（R49）
+→ 响应 { unpublishedArticles, deletedComments, recycledRoot: true }
+```
+
+- **删用户预检新增 40120**：`system` 域删用户前若该用户仍有站点，阻断并提示先删站点（内容池化内容随用户走，站点才是必须显式清理的资源）。
+- AI 工具 `delete_site` 的确认卡与返回字段同步改为「下架 N 篇 + 删评论 M 条」。
+
+### 22.5 路径美化回退链（D77/R78，open-static.controller）
+
+对 `/api/open/{slug}/**` 静态请求，**仅当最后一段无扩展名**（不匹配 `\.[A-Za-z0-9]{1,8}$`）时启用回退：
+
+```
+真实文件 ──命中──→ 直接出（Content-Type 按扩展名）
+   │ 未命中
+   ↓
+补 `.html` 再试 ──命中──→ 出 HTML
+   │ 未命中
+   ↓
+目录语义 `path/index.html` ──命中──→ 出 HTML
+   │ 未命中
+   ↓
+站点 `spa_fallback`（NULL = 跳过） ──命中──→ 出 index.html（200，SPA 自己路由）
+   │ 未命中
+   ↓
+40400（业务 404；HTTP 200 + code 40400，统一响应体口径）
+```
+
+纪律：
+
+- **带扩展名的请求永不回退**（如 `/not-exist.png` → 直接 40400），避免静态资源缺失被 index.html 吞掉；
+- **回退命中不写负缓存**（R78）：`site:path` 负缓存只用于「确定不存在」的静态文件；SPA 路径会因新发表文章而由未命中变命中（同一 URL 内容可变），写负缓存会让访客看不到新发表的内容；
+- **开关按站点**：`spa_fallback` 由「建站 / 应用模板」时从 `template.json#spaFallback` 读入，存量站点为 NULL = 行为完全不变。
+
+### 22.6 开放层口径（D76/R76）
+
+`/api/open/{slug}/api/**` 一律**按站**出内容（站点解析沿用 `site:resolve:{slug}` 缓存）：
+
+- 文章：`site_article_publish` 内连接 + `status=1`，排序 **`is_top desc, published_at desc`**（置顶仅在该站内生效）；
+- 栏目：只出 `site_column_display` 中该站的栏目，`articleCount` 只计**已发表到本站**的文章；
+- 标签：跟随文章——只出现在本站已有文章引用到的标签（空即是 0 条，属正常）；
+- 站点信息/归档/评论沿用既有口径（`site_id` 仍是评论的物理边界）。
+
+### 22.7 AI 工具适配（R77）
+
+7 个 CMS 工具的**语义调整**（工具总数 28 不变，`pnpm check:ai` 16/16）：
+
+| 工具                        | 变化                                                                                                 |
+| --------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `create_site_article`       | 加 `siteIds?: number[]`；**status=0（草稿）可完全不选站**（只进内容池），status=1（发布）必须能确定发表站点（slug 或 siteIds） |
+| `update_site_article`       | 加 `siteIds?: number[]`（提供即整体替换，空数组 = 全站下架）；slug 由必选降为可选（给了才校验「已发表到该站」） |
+| `publish_site_article`      | slug 可选；**上架且零发表站**时在确认卡与返回值加警示行（提示：尚未发表到任何站点，上架后任何站点都看不到它） |
+| `list_site_articles`        | 列表改用户级 + 可选站点筛选；返回带 `sites`                                                            |
+| `read_site_article`         | 归属校验由「属于该站」改为「已发表到该站」                                                             |
+| `ensure_site_column` / `ensure_site_tags` | 去站点参数（栏目/标签用户级）                                                    |
+| `delete_site`               | 确认卡与返回改口径（下架而非删除内容本体）                                                            |
+
+能力清单（`chat/capability.manifest.ts`）文案同步为内容池口径，与工具签名同源（R69）。
+
+### 22.8 前端
+
+- 文章 / 栏目 / 标签三页**去掉站点切换器**（列表内容不再随站点切换），默认出全部内容池内容；文章页加「发表站点」筛选下拉（全部站点 / 指定站）。
+- 文章编辑弹窗：多站勾选 + 每站独立「置顶」勾选；封面上传仍要落具体站点 `media/`，多站时提供「上传到：X」选择（D13 不变）。
+- 栏目弹窗：展示站点多选（不选 = 全部站点可见），保存走 `PUT /api/site/column/:id/sites`。
+- 建站弹窗：初始内容单选（发表全部已发布文章 / 先空站）。
+- 删站确认文案与成功提示改按 §22.4 口径。
+
+### 22.9 默认模板 history 路由（D78）
+
+`apps/api/assets/site-templates/default/`：
+
+- `app.js` 从 `location.pathname` 反推站点公开前缀 `/api/open/{slug}/` 作为 `BASE`，所有 API 与站内链接基于 BASE；`index.html` 用同一逻辑写入 `<base>`，保证**回退场景下相对资源路径仍正确**（否则 `/article/12` 会把 `./style.css` 解析到 `/article/style.css`）。
+- 路由由 hash（`#/article/{id}`）改为 history：`/article/{id}` → 详情，其余（含 `/?columnId=x`）→ 列表；`data-site-link` 标记的站内链接走 `pushState` 拦截，避免整页刷新；监听 `popstate` 而非 `hashchange`。
 
 ### 18.4 AI 工具改造（T62，ai 域 tools/ 下原位加改，handler 仍只注入 SiteFacade）
 
@@ -1923,3 +2049,4 @@ system prompt = 助手设定（静态，prompt.sections.ASSISTANT_IDENTITY）
 评论 list/audit/reply（含 trim、覆盖不新增行、空串清除、开放层携带回复）、超长 40001 / 批量 >20 40001 / 跨站与非属主 40119、
 封面四条失败链 + 真实图片通过 + create 落库 + update 空串清除、回收站顶层不含头像旧行；
 `pnpm check:ai` 16/16；`tsc --noEmit` / `eslint`（双端）/ `vue-tsc` 零错；`vite build` 产物含 `@codemirror/merge` 独立异步 chunk（首屏不加载）。
+
