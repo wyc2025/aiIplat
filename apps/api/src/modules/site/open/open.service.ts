@@ -23,6 +23,32 @@ function notFound(): never {
   throw new BusinessException(ErrorCode.NotFound, '资源不存在')
 }
 
+/** 文章列表原生 SQL 行（MySQL 列名 snake_case） */
+interface OpenArticleRow {
+  id: bigint
+  column_id: bigint
+  title: string
+  summary: string
+  cover_path: string | null
+  word_count: number | bigint
+  view_count: number | bigint
+  published_at: Date | null
+}
+
+/** 原生行 → toOpenItem 入参形态 */
+function toArticleShape(row: OpenArticleRow) {
+  return {
+    id: row.id,
+    columnId: row.column_id,
+    title: row.title,
+    summary: row.summary,
+    coverPath: row.cover_path,
+    wordCount: Number(row.word_count),
+    viewCount: Number(row.view_count),
+    publishedAt: row.published_at,
+  }
+}
+
 /**
  * 开放数据 API 编排（§14.6 / API.md §6.3，v1 只增不改）：
  * 全部只读 + 评论提交；仅返回已发布文章与已过审评论；columns 后端组嵌套树（消费者是用户站点代码）；
@@ -45,31 +71,56 @@ export class SiteOpenService {
     return { title: site.title, description: site.description }
   }
 
-  /** 栏目嵌套树（后端组树，契约例外于平台平铺惯例） */
+  /**
+   * 栏目嵌套树（后端组树，契约例外于平台平铺惯例）。
+   * P7 D73：只出「本站展示」的栏目（存在 site_column_display 行），排序用该行的 sort。
+   */
   async columns(slug: string): Promise<Array<{ id: string; name: string; sort: number; children: unknown[] }>> {
     const site = await this.assertSite(slug)
     return this.cached(site.siteId, 'columns', async () => {
-      const columns = await this.prisma.siteColumn.findMany({
-        where: { siteId: BigInt(site.siteId) },
-        orderBy: [{ sort: 'asc' }, { id: 'asc' }],
-      })
-      return this.buildTree(columns)
+      const [displays, columns] = await Promise.all([
+        this.prisma.siteColumnDisplay.findMany({
+          where: { siteId: BigInt(site.siteId) },
+          orderBy: [{ sort: 'asc' }, { columnId: 'asc' }],
+        }),
+        this.prisma.siteColumn.findMany({ where: { userId: BigInt(site.userId) } }),
+      ])
+      const sortMap = new Map(displays.map((d) => [d.columnId.toString(), d.sort]))
+      const visible = new Set(displays.map((d) => d.columnId.toString()))
+      return this.buildTree(
+        columns
+          .filter((c) => visible.has(c.id.toString()))
+          .map((c) => ({ ...c, sort: sortMap.get(c.id.toString()) ?? c.sort })),
+      )
     })
   }
 
-  /** 标签列表 */
+  /**
+   * 标签列表（P7 D73）：标签跟随文章——只出本站已发表文章实际用到的标签。
+   */
   async tags(slug: string): Promise<Array<{ id: string; name: string }>> {
     const site = await this.assertSite(slug)
     return this.cached(site.siteId, 'tags', async () => {
+      const relations = await this.prisma.siteArticleTag.findMany({
+        where: {
+          article: { status: 1, publishes: { some: { siteId: BigInt(site.siteId) } } },
+        },
+        select: { tagId: true },
+        distinct: ['tagId'],
+      })
+      if (relations.length === 0) return []
       const tags = await this.prisma.siteTag.findMany({
-        where: { siteId: BigInt(site.siteId) },
+        where: { id: { in: relations.map((r) => r.tagId) } },
         orderBy: { id: 'asc' },
       })
       return tags.map((t) => ({ id: t.id.toString(), name: t.name }))
     })
   }
 
-  /** 文章分页列表（仅已发布，按 publishedAt 倒序；coverUrl 完整公开路径） */
+  /**
+   * 文章分页列表（P7 D73：仅「已发布且发表到本站」的文章；排序 = 本站置顶优先 → 发布时间倒序）。
+   * 置顶排序跨关联表（site_article_publish.is_top），Prisma 无法对关联字段排序，故走参数化原生 SQL。
+   */
   async articles(slug: string, query: OpenArticlesQueryDto) {
     const site = await this.assertSite(slug)
     const key = `articles:${this.articlesKeyDigest(query)}`
@@ -78,7 +129,10 @@ export class SiteOpenService {
       let tagArticleIds: bigint[] | null = null
       if (query.tagId !== undefined) {
         const relations = await this.prisma.siteArticleTag.findMany({
-          where: { tagId: BigInt(query.tagId), article: { siteId: BigInt(site.siteId), status: 1 } },
+          where: {
+            tagId: BigInt(query.tagId),
+            article: { status: 1, publishes: { some: { siteId: BigInt(site.siteId) } } },
+          },
           select: { articleId: true },
         })
         tagArticleIds = relations.map((r) => r.articleId)
@@ -86,24 +140,47 @@ export class SiteOpenService {
           return { list: [], total: 0, pageNo: query.pageNo, pageSize: query.pageSize }
         }
       }
-      const where = {
-        siteId: BigInt(site.siteId),
-        status: 1,
-        ...(query.columnId !== undefined ? { columnId: BigInt(query.columnId) } : {}),
-        ...(query.keyword ? { title: { contains: query.keyword } } : {}),
-        ...(tagArticleIds ? { id: { in: tagArticleIds } } : {}),
+      const conditions = ['p.site_id = ?', 'a.status = 1']
+      const params: unknown[] = [BigInt(site.siteId)]
+      if (query.columnId !== undefined) {
+        conditions.push('a.column_id = ?')
+        params.push(BigInt(query.columnId))
       }
-      const [rows, total] = await Promise.all([
-        this.prisma.siteArticle.findMany({
-          where,
-          orderBy: [{ publishedAt: 'desc' }, { id: 'desc' }],
-          skip: (query.pageNo - 1) * query.pageSize,
-          take: query.pageSize,
-        }),
-        this.prisma.siteArticle.count({ where }),
-      ])
-      const list = await this.toOpenItem(slug, rows)
-      return { list, total, pageNo: query.pageNo, pageSize: query.pageSize }
+      if (query.keyword) {
+        conditions.push('a.title LIKE ?')
+        params.push(`%${query.keyword}%`)
+      }
+      if (tagArticleIds) {
+        conditions.push(`a.id IN (${tagArticleIds.map(() => '?').join(',')})`)
+        params.push(...tagArticleIds)
+      }
+      const whereSql = conditions.join(' AND ')
+      const rows = await this.prisma.$queryRawUnsafe<OpenArticleRow[]>(
+        `SELECT a.id, a.column_id, a.title, a.summary, a.cover_path, a.word_count, a.view_count, a.published_at
+         FROM site_article a
+         JOIN site_article_publish p ON p.article_id = a.id AND p.site_id = ?
+         WHERE ${whereSql}
+         ORDER BY p.is_top DESC, a.published_at DESC, a.id DESC
+         LIMIT ? OFFSET ?`,
+        BigInt(site.siteId),
+        ...params,
+        query.pageSize,
+        (query.pageNo - 1) * query.pageSize,
+      )
+      const totalRows = await this.prisma.$queryRawUnsafe<Array<{ c: bigint }>>(
+        `SELECT COUNT(*) c FROM site_article a
+         JOIN site_article_publish p ON p.article_id = a.id AND p.site_id = ?
+         WHERE ${whereSql}`,
+        BigInt(site.siteId),
+        ...params,
+      )
+      const list = await this.toOpenItem(slug, rows.map(toArticleShape))
+      return {
+        list,
+        total: Number(totalRows[0]?.c ?? 0),
+        pageNo: query.pageNo,
+        pageSize: query.pageSize,
+      }
     })
   }
 
@@ -127,7 +204,8 @@ export class SiteOpenService {
     await this.assertPublishedArticle(site.siteId, articleId)
     const key = `comments:${articleId.toString()}:p${query.pageNo}-${query.pageSize}`
     return this.cached(site.siteId, key, async () => {
-      const where = { articleId, auditStatus: 1 }
+      // P7 D75：评论按站隔离——本站评论只出本站的（同一文章发表到多站时互不可见）
+      const where = { siteId: BigInt(site.siteId), articleId, auditStatus: 1 }
       const [rows, total] = await Promise.all([
         this.prisma.siteComment.findMany({
           where,
@@ -209,10 +287,10 @@ export class SiteOpenService {
     return site
   }
 
-  /** 本站已发布文章；草稿/不存在 → 40400（不区分，防探测） */
+  /** 本站已发布文章（P7 D73：须存在该站发表关联）；草稿/未发表到本站/不存在 → 40400（不区分，防探测） */
   private async assertPublishedArticle(siteId: string, articleId: bigint) {
     const article = await this.prisma.siteArticle.findFirst({
-      where: { id: articleId, siteId: BigInt(siteId), status: 1 },
+      where: { id: articleId, status: 1, publishes: { some: { siteId: BigInt(siteId) } } },
     })
     if (!article) notFound()
     return article
@@ -222,7 +300,7 @@ export class SiteOpenService {
   private async cachedArticle(siteId: string, articleId: bigint, slug: string) {
     return this.cached(siteId, `article:${articleId.toString()}`, async () => {
       const article = await this.prisma.siteArticle.findFirst({
-        where: { id: articleId, siteId: BigInt(siteId), status: 1 },
+        where: { id: articleId, status: 1, publishes: { some: { siteId: BigInt(siteId) } } },
       })
       if (!article) notFound()
       const [item] = await this.toOpenItem(slug, [article])

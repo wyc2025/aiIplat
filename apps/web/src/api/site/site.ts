@@ -10,6 +10,8 @@ import type {
   SiteArticleItem,
   SiteArticleDetail,
   SiteCommentItem,
+  ArticleSiteRef,
+  ColumnSiteRef,
   PageResult,
 } from '@/types/api'
 
@@ -18,9 +20,14 @@ import type {
 /** 我的站点列表（不分页，上限即配额）+ { limit, used } */
 export const listSites = () => get<SiteListResult>('/site/manage/list')
 
-/** 创建站点（配额 40118 + slug 校验 + 建公开目录/media//模板） */
-export const createSite = (data: { slug: string; title: string; description?: string }) =>
-  post<SiteSiteInfo>('/site/manage', data)
+/** 创建站点（配额 40118 + slug 校验 + 建公开目录/media//模板；P7 D73 开站即灌内容） */
+export const createSite = (data: {
+  slug: string
+  title: string
+  description?: string
+  /** 'all' = 内容池全部已发布文章（缺省）；[] = 不发表；或指定文章 ID 数组 */
+  publishArticleIds?: 'all' | number[]
+}) => post<SiteSiteInfo>('/site/manage', data)
 
 /** 站点详情（非属主 40119） */
 export const getSite = (id: string | number) => get<SiteSiteInfo>(`/site/manage/${id}`)
@@ -37,9 +44,14 @@ export const updateSite = (
   },
 ) => put<SiteSiteInfo>(`/site/manage/${id}`, data)
 
-/** 删站（站点数据物理删 + 站点根移入回收站 + slug 释放，P4E R50/R53/R55） */
+/**
+ * 删站（P7 D73 修订）：只删该站的展示关联 —— 评论随站删、文章从该站下架（本体保留在内容池）；
+ * 站点根移入回收站 + slug 释放（P4E R50/R53/R55）。
+ */
 export const deleteSite = (id: string | number) =>
-  del<{ deletedArticles: number; recycledRoot: boolean }>(`/site/manage/${id}`)
+  del<{ unpublishedArticles: number; deletedComments: number; recycledRoot: boolean }>(
+    `/site/manage/${id}`,
+  )
 
 // ========== 站点配额（admin，site:admin:quota，P4E API §10.4） ==========
 
@@ -60,25 +72,35 @@ export const listTemplates = () => get<SiteTemplateItem[]>('/site/templates')
 export const applyTemplate = (siteId: string | number, templateId: string) =>
   post<SiteTemplateApplyResult[]>(`/site/manage/${siteId}/apply-template`, { templateId })
 
-// ========== 栏目（site:column:*，裸数组由前端组树；P4E T61 必带 siteId） ==========
+// ========== 栏目（site:column:*，裸数组由前端组树；P7 D73 用户级，站点侧显隐走 setColumnSites） ==========
 
-export const listColumns = (siteId: string | number) =>
-  get<SiteColumnItem[]>('/site/column/list', { siteId })
+/** 栏目列表：P7 起不带 siteId（用户级），返回含每栏目的展示站点 sites */
+export const listColumns = () => get<SiteColumnItem[]>('/site/column/list')
 
-export const createColumn = (data: { siteId: number; parentId: number; name: string; sort?: number }) =>
-  post<{ id: string; name: string }>('/site/column', data)
+export const createColumn = (data: {
+  parentId: number
+  name: string
+  sort?: number
+  /** 展示站点（缺省 = 全部站点可见） */
+  siteIds?: number[]
+}) => post<{ id: string; name: string }>('/site/column', data)
 
 export const updateColumn = (id: number, data: { name?: string; sort?: number; parentId?: number }) =>
   put<{ id: string; name: string; parentId: string }>(`/site/column/${id}`, data)
 
 export const removeColumn = (id: number) => del(`/site/column/${id}`)
 
-// ========== 标签（site:tag:*；P4E T61 必带 siteId） ==========
+/** 替换式管理栏目在哪些站点展示（空数组 = 全站不展示） */
+export const setColumnSites = (
+  id: number,
+  data: { sites: Array<{ siteId: number; sort?: number }> },
+) => put<{ ok: boolean; sites: ColumnSiteRef[] }>(`/site/column/${id}/sites`, data)
 
-export const listTags = (siteId: string | number) => get<SiteTagItem[]>('/site/tag/list', { siteId })
+// ========== 标签（site:tag:*；P7 D73 用户级，标签跟随文章） ==========
 
-export const createTag = (siteId: number, name: string) =>
-  post<{ id: string; name: string }>('/site/tag', { siteId, name })
+export const listTags = () => get<SiteTagItem[]>('/site/tag/list')
+
+export const createTag = (name: string) => post<{ id: string; name: string }>('/site/tag', { name })
 
 export const updateTag = (id: number, name: string) =>
   put<{ id: string; name: string }>(`/site/tag/${id}`, { name })
@@ -90,7 +112,8 @@ export const removeTag = (id: number) => del(`/site/tag/${id}`)
 export interface ArticleQuery {
   pageNo: number
   pageSize: number
-  siteId: number
+  /** 可选：按发表站点筛选（不传 = 全部内容池文章，P7 D73） */
+  siteId?: number
   columnId?: number
   tagId?: number
   status?: number
@@ -104,7 +127,8 @@ export const listArticles = (params: ArticleQuery) =>
 export const getArticle = (id: number) => get<SiteArticleDetail>(`/site/article/${id}`)
 
 export interface ArticleSaveDto {
-  siteId: number
+  /** 发表站点集合（替换式；缺省新建 = 不发表到任何站） */
+  siteIds?: number[]
   columnId: number
   title: string
   summary?: string
@@ -117,8 +141,15 @@ export interface ArticleSaveDto {
 export const createArticle = (data: ArticleSaveDto) =>
   post<{ id: string }>('/site/article', data)
 
-export const updateArticle = (id: number, data: Partial<Omit<ArticleSaveDto, 'siteId'>>) =>
+/** 编辑：siteIds 提供即替换式更新发表集合（不传 = 不动；空数组 = 全站下架） */
+export const updateArticle = (id: number, data: Partial<ArticleSaveDto>) =>
   put<{ id: string }>(`/site/article/${id}`, data)
+
+/** 替换式管理文章发表站点（每站可置顶；空数组 = 全站下架，文章本体保留） */
+export const setArticleSites = (
+  id: number,
+  data: { sites: Array<{ siteId: number; isTop?: boolean }> },
+) => put<{ ok: boolean; sites: ArticleSiteRef[] }>(`/site/article/${id}/sites`, data)
 
 /** 发布/下架（首次发布由后端写发布时间，下架再上架不刷新） */
 export const updateArticleStatus = (id: number, status: number) =>

@@ -532,6 +532,8 @@ model SiteSite {
   status       Int      @default(1) @map("status") @db.TinyInt
   /// 评论审核开关（1 开=需审核 / 0 关=直过审）
   commentAudit Int      @default(1) @map("comment_audit") @db.TinyInt
+  /// SPA 回退入口（P7 D77/R78：template.json#spaFallback 读入，相对站点根；NULL = 无回退）
+  spaFallback  String?  @map("spa_fallback") @db.VarChar(64)
   createTime   DateTime @default(now()) @map("create_time")
   updateTime   DateTime @updatedAt @map("update_time")
 
@@ -552,11 +554,11 @@ model SiteQuota {
   @@map("site_quota")
 }
 
-/// 栏目树（≤3 级）
+/// 栏目树（≤3 级；P7 D73：内容池化后归用户所有，站点侧显隐由 site_column_display 控制）
 model SiteColumn {
   id        BigInt   @id @default(autoincrement())
-  /// 冗余便于按站点过滤
-  siteId    BigInt   @map("site_id")
+  /// 属主（P7 D73：内容归用户，不再挂 site_id）
+  userId    BigInt   @map("user_id")
   /// 0 = 根；≤3 级（R6）
   parentId  BigInt   @default(0) @map("parent_id")
   name      String   @map("name") @db.VarChar(32)
@@ -567,30 +569,31 @@ model SiteColumn {
 
   /// 逻辑关联 site_article（relationMode=prisma，无物理 FK）
   articles SiteArticle[]
+  /// 站点显隐（P7 D73：无行 = 该站不展示此栏目）
+  displays  SiteColumnDisplay[]
 
-  @@index([siteId, parentId])
+  @@index([userId, parentId], map: "idx_column_user")
   @@map("site_column")
 }
 
-/// 标签
+/// 标签（P7 D73：归用户所有；标签跟随文章，无按站显隐）
 model SiteTag {
   id        BigInt   @id @default(autoincrement())
-  siteId    BigInt   @map("site_id")
+  userId    BigInt   @map("user_id")
   name      String   @map("name") @db.VarChar(32)
   createdAt DateTime @default(now()) @map("created_at")
 
   /// 逻辑关联 site_article_tag（relationMode=prisma，无物理 FK）
   articleTags SiteArticleTag[]
 
-  @@unique([siteId, name])
-  @@index([siteId])
+  @@unique([userId, name], map: "uk_tag_user_name")
   @@map("site_tag")
 }
 
-/// 文章
+/// 文章（P7 D73：内容池——归用户所有，发表到哪些站点由 site_article_publish 决定）
 model SiteArticle {
   id          BigInt    @id @default(autoincrement())
-  siteId      BigInt    @map("site_id")
+  userId      BigInt    @map("user_id")
   /// 逻辑关联 site_column
   columnId    BigInt    @map("column_id")
   title       String    @map("title") @db.VarChar(100)
@@ -612,13 +615,54 @@ model SiteArticle {
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
-  column      SiteColumn       @relation(fields: [columnId], references: [id])
+  column      SiteColumn            @relation(fields: [columnId], references: [id])
   articleTags SiteArticleTag[]
   comments    SiteComment[]
+  publishes   SiteArticlePublish[]
 
-  @@index([siteId, status, publishedAt])
-  @@index([siteId, columnId])
+  @@index([userId, status, publishedAt], map: "idx_article_user_status")
+  @@index([userId, columnId], map: "idx_article_user_column")
   @@map("site_article")
+}
+
+/// 文章发表关联（P7 D73：内容池 —— 一篇文章可发表到多个站点，每站独立置顶）
+model SiteArticlePublish {
+  id          BigInt    @id @default(autoincrement())
+  /// 逻辑关联 site_article
+  articleId   BigInt    @map("article_id")
+  /// 逻辑关联 site_site
+  siteId      BigInt    @map("site_id")
+  /// 该站置顶（每站独立，取代原 site_article.is_top）
+  isTop       Int       @default(0) @map("is_top") @db.TinyInt
+  /// 发表到该站的时间（沿用迁移前的 published_at）
+  publishedAt DateTime? @map("published_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  /// 逻辑关联（relationMode=prisma，无物理 FK）
+  article SiteArticle @relation(fields: [articleId], references: [id])
+
+  @@unique([articleId, siteId], map: "uk_publish_article_site")
+  @@index([siteId, isTop, publishedAt], map: "idx_publish_site")
+  @@map("site_article_publish")
+}
+
+/// 栏目站点显隐（P7 D73：栏目在本体之外按站控制是否展示；无行 = 该站不展示）
+model SiteColumnDisplay {
+  id        BigInt   @id @default(autoincrement())
+  /// 逻辑关联 site_column
+  columnId  BigInt   @map("column_id")
+  /// 逻辑关联 site_site
+  siteId    BigInt   @map("site_id")
+  /// 该站内排序，升序
+  sort      Int      @default(0) @map("sort")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  /// 逻辑关联（relationMode=prisma，无物理 FK）
+  column SiteColumn @relation(fields: [columnId], references: [id])
+
+  @@unique([columnId, siteId], map: "uk_display_column_site")
+  @@index([siteId, sort], map: "idx_display_site")
+  @@map("site_column_display")
 }
 
 /// 文章-标签
@@ -658,7 +702,7 @@ model SiteComment {
   /// 逻辑关联 site_article（relationMode=prisma，无物理 FK）
   article SiteArticle @relation(fields: [articleId], references: [id])
 
-  @@index([articleId, auditStatus])
-  @@index([siteId, auditStatus])
+  @@index([articleId, auditStatus], map: "idx_comment_article_audit")
+  @@index([siteId, articleId, auditStatus], map: "idx_comment_site_article_audit")
   @@map("site_comment")
 }

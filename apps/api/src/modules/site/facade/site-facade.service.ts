@@ -142,11 +142,19 @@ export interface SiteColumnItem {
   articleCount: number
 }
 
+/** 文章已发表站点（P7 D73：内容池化后文章不再「属于」某个站点） */
+export interface ArticleSiteRef {
+  id: string
+  name: string
+  slug: string
+  isTop: boolean
+}
+
 /** 文章条目（列表/详情出域形态；tagNames 由本层补全，tagIds 原样保留） */
 export interface SiteArticleItem {
   id: string
-  /** 所属站点 id（工具层用于交叉校验 slug 解析结果与文章实际归属一致） */
-  siteId: string
+  /** 已发表站点集合（P7 D73：取代原单一 siteId） */
+  sites: ArticleSiteRef[]
   columnId: string
   columnName: string
   title: string
@@ -230,11 +238,13 @@ export type CommentBatchResult =
   | { id: number; ok: false; errorCode: number; message: string }
 
 /** 删站影响面（R66 确认卡摘要：三段影响中的「N 篇文章/栏目/标签/评论」） */
+/**
+ * 删站影响面（P7 D73 修订）：删站只删「该站的展示关联」——
+ * articles = 将从该站下架的文章数（文章本体保留在内容池），comments = 将删除的该站评论数。
+ */
 export interface SiteDeleteImpact {
   slug: string
   articles: number
-  columns: number
-  tags: number
   comments: number
 }
 
@@ -274,6 +284,14 @@ export class SiteFacade {
   async hasSite(userId: bigint): Promise<boolean> {
     const count = await this.prisma.siteSite.count({ where: { userId } })
     return count > 0
+  }
+
+  /**
+   * 用户名下是否仍有站点内容（文章/栏目/标签）（P7 R75 删用户预检，40120）。
+   * 与 hasSite 分列：内容池化后内容不再随站点存在，无站点也可能有内容。
+   */
+  async hasContent(userId: bigint): Promise<boolean> {
+    return this.manageService.hasContent(userId)
   }
 
   /** 用户全部站点（P4E：按创建时间升序，保证「第一站」语义稳定；未开通返回空数组） */
@@ -448,12 +466,13 @@ export class SiteFacade {
    */
   async listArticles(
     userId: bigint,
-    siteId: bigint,
     params: ArticleListParams,
+    siteId?: bigint,
   ): Promise<{ list: SiteArticleItem[]; total: number; pageNo: number; pageSize: number }> {
-    await this.requireOwnedSite(userId, siteId)
+    if (siteId !== undefined) await this.requireOwnedSite(userId, siteId)
     const query = new ArticleQueryDto()
-    query.siteId = Number(siteId)
+    // P7 D73：用户级内容池；siteId 存在时按「已发表到该站」筛选
+    if (siteId !== undefined) query.siteId = Number(siteId)
     query.pageNo = params.pageNo ?? 1
     query.pageSize = Math.min(params.pageSize ?? AI_ARTICLE_PAGE_MAX, AI_ARTICLE_PAGE_MAX)
     if (params.columnId !== undefined) query.columnId = params.columnId
@@ -461,21 +480,20 @@ export class SiteFacade {
     if (params.keyword) query.keyword = params.keyword
 
     const result = await this.articleService.list(userId, query)
-    const tagNames = await this.tagNameMap(userId, siteId)
+    const tagNames = await this.tagNameMap(userId)
     return {
-      list: result.list.map((item) => this.toArticleItem(item, siteId, tagNames)),
+      list: result.list.map((item) => this.toArticleItem(item, tagNames)),
       total: result.total,
       pageNo: result.pageNo,
       pageSize: result.pageSize,
     }
   }
 
-  /** 读文章全文（属主按实体反查 40109/40119）；正文超 64KB 截断并置 truncated=true */
+  /** 读文章全文（属主按实体反查 user_id 40109/40119）；正文超 64KB 截断并置 truncated=true */
   async readArticle(userId: bigint, id: bigint): Promise<SiteArticleItem> {
-    const siteId = await this.articleService.getOwnedSiteId(userId, id)
     const detail = (await this.articleService.detail(userId, id)) as Record<string, unknown>
-    const tagNames = await this.tagNameMap(userId, siteId)
-    const item = this.toArticleItem(detail, siteId, tagNames)
+    const tagNames = await this.tagNameMap(userId)
+    const item = this.toArticleItem(detail, tagNames)
     const contentMd = typeof detail.contentMd === 'string' ? detail.contentMd : ''
     if (Buffer.byteLength(contentMd, 'utf-8') > AI_ARTICLE_READ_MAX_BYTES) {
       return { ...item, contentMd: contentMd.slice(0, AI_ARTICLE_READ_MAX_BYTES), truncated: true }
@@ -488,14 +506,19 @@ export class SiteFacade {
    * columnId 缺省时——本站仅 1 个栏目则直达，否则回喂 40001 并附栏目清单请模型指定；
    * tagNames 走 ensure 语义（存在复用、不存在创建）；摘要留空由既有口径自动取正文前 100 字。
    */
-  async createArticle(userId: bigint, siteId: bigint, input: CreateArticleInput): Promise<SiteArticleItem> {
-    await this.requireOwnedSite(userId, siteId)
-    const columnId = await this.resolveColumnId(userId, siteId, input.columnId)
-    const tags = input.tagNames?.length ? await this.ensureTags(userId, siteId, input.tagNames) : []
+  async createArticle(
+    userId: bigint,
+    siteId: bigint | undefined,
+    input: CreateArticleInput,
+  ): Promise<SiteArticleItem> {
+    if (siteId !== undefined) await this.requireOwnedSite(userId, siteId)
+    const columnId = await this.resolveColumnId(userId, input.columnId)
+    const tags = input.tagNames?.length ? await this.ensureTags(userId, input.tagNames) : []
     const status = input.status === 1 ? 1 : 0
 
     const dto: CreateArticleDto = {
-      siteId: Number(siteId),
+      // P7 D73：创建时一并发表到目标站点；无站点（0 站场景）则仅入内容池
+      ...(siteId !== undefined ? { siteIds: [Number(siteId)] } : {}),
       columnId,
       title: input.title,
       contentMd: input.contentMd,
@@ -506,12 +529,11 @@ export class SiteFacade {
       ...(input.coverPath ? { coverPath: input.coverPath } : {}),
     }
     const created = await this.articleService.create(userId, dto)
-    return this.composeArticle(userId, siteId, BigInt(created.id))
+    return this.composeArticle(userId, BigInt(created.id))
   }
 
   /** 更新文章（部分更新；tagNames 提供即整体替换，走 ensure 语义） */
   async updateArticle(userId: bigint, id: bigint, input: UpdateArticleInput): Promise<SiteArticleItem> {
-    const siteId = await this.articleService.getOwnedSiteId(userId, id)
     const dto: UpdateArticleDto = {}
     if (input.title !== undefined) dto.title = input.title
     if (input.contentMd !== undefined) dto.contentMd = input.contentMd
@@ -524,21 +546,45 @@ export class SiteFacade {
       dto.tagIds =
         input.tagNames.length === 0
           ? []
-          : (await this.ensureTags(userId, siteId, input.tagNames)).map((t) => Number(t.id))
+          : (await this.ensureTags(userId, input.tagNames)).map((t) => Number(t.id))
     }
     if (Object.keys(dto).length === 0) {
       throw new BusinessException(ErrorCode.ParamInvalid, '至少需要提供一项要修改的字段')
     }
     await this.articleService.update(userId, id, dto)
-    return this.composeArticle(userId, siteId, id)
+    return this.composeArticle(userId, id)
   }
 
   /** 发布 / 下架文章（0 下架 / 1 发布；published_at 口径沿用） */
   async publishArticle(userId: bigint, id: bigint, status: number): Promise<SiteArticleItem> {
-    const siteId = await this.articleService.getOwnedSiteId(userId, id)
     const dto: UpdateArticleStatusDto = { status: status === 1 ? 1 : 0 }
     await this.articleService.updateStatus(userId, id, dto)
-    return this.composeArticle(userId, siteId, id)
+    return this.composeArticle(userId, id)
+  }
+
+  /**
+   * 替换式管理文章发表站点（P7 API §14.2）：提交集合 = 最终集合；空数组 = 全站下架。
+   * 站点须全部属主（40119）；返回最终态站点列表。
+   */
+  async setArticleSites(
+    userId: bigint,
+    id: bigint,
+    sites: Array<{ siteId: number; isTop?: boolean }>,
+  ): Promise<ArticleSiteRef[]> {
+    const result = await this.articleService.setSites(userId, id, { sites })
+    return result.sites.map((s) => ({ id: s.id, name: s.name, slug: s.slug, isTop: s.isTop }))
+  }
+
+  /**
+   * 替换式管理栏目站点显隐（P7 API §14.2）：返回最终态站点列表。
+   */
+  async setColumnSites(
+    userId: bigint,
+    id: bigint,
+    sites: Array<{ siteId: number; sort?: number }>,
+  ): Promise<Array<{ id: string; name: string; slug: string; sort: number }>> {
+    const result = await this.columnService.setSites(userId, id, { sites })
+    return result.sites
   }
 
   /**
@@ -576,16 +622,17 @@ export class SiteFacade {
   /** 栏目 ensure（幂等）：同名同父命中即返回现有（created=false），否则创建（R6 层级校验在域内） */
   async ensureColumn(
     userId: bigint,
-    siteId: bigint,
+    siteId: bigint | undefined,
     input: { name: string; parentId?: number },
   ): Promise<EnsureResult> {
-    await this.requireOwnedSite(userId, siteId)
+    if (siteId !== undefined) await this.requireOwnedSite(userId, siteId)
     const parentId = input.parentId ?? 0
-    const columns = await this.columnService.list(userId, siteId)
+    const columns = await this.columnService.list(userId)
     const hit = columns.find((c) => c.name === input.name && String(c.parentId) === String(parentId))
     if (hit) return { id: String(hit.id), name: hit.name, created: false }
     const created = await this.columnService.create(userId, {
-      siteId: Number(siteId),
+      // P7 D73：siteIds 缺省 = 全部站点可见；指定站点时只在该站展示
+      ...(siteId !== undefined ? { siteIds: [Number(siteId)] } : {}),
       parentId,
       name: input.name,
       sort: 0,
@@ -593,20 +640,15 @@ export class SiteFacade {
     return { id: String(created.id), name: created.name, created: true }
   }
 
-  /** 标签列表（AI 工具确认卡摘要「复用/新建」预判用；属主 40119） */
-  async listTags(
-    userId: bigint,
-    siteId: bigint,
-  ): Promise<Array<{ id: string; name: string; articleCount: number }>> {
-    await this.requireOwnedSite(userId, siteId)
-    const tags = await this.tagService.list(userId, siteId)
+  /** 标签列表（AI 工具确认卡摘要「复用/新建」预判用；P7 D73 用户级） */
+  async listTags(userId: bigint): Promise<Array<{ id: string; name: string; articleCount: number }>> {
+    const tags = await this.tagService.list(userId)
     return tags.map((t) => ({ id: String(t.id), name: t.name, articleCount: t.articleCount }))
   }
 
-  /** 栏目平铺列表（AI 工具确认卡摘要 / columnId 缺省时的引导清单用；属主 40119） */
-  async listColumns(userId: bigint, siteId: bigint): Promise<SiteColumnItem[]> {
-    await this.requireOwnedSite(userId, siteId)
-    const columns = await this.columnService.list(userId, siteId)
+  /** 栏目平铺列表（AI 工具确认卡摘要 / columnId 缺省时的引导清单用；P7 D73 用户级） */
+  async listColumns(userId: bigint): Promise<SiteColumnItem[]> {
+    const columns = await this.columnService.list(userId)
     return columns.map((c) => ({
       id: String(c.id),
       parentId: String(c.parentId),
@@ -617,8 +659,7 @@ export class SiteFacade {
   }
 
   /** 标签批量 ensure（幂等）：返回 tagIds；名称去重、去空、限 1~32 字、单次 ≤20 个 */
-  async ensureTags(userId: bigint, siteId: bigint, names: string[]): Promise<EnsureResult[]> {
-    await this.requireOwnedSite(userId, siteId)
+  async ensureTags(userId: bigint, names: string[]): Promise<EnsureResult[]> {
     const cleaned = [
       ...new Set(
         names
@@ -632,7 +673,7 @@ export class SiteFacade {
     if (cleaned.length > AI_TAG_MAX) {
       throw new BusinessException(ErrorCode.ParamInvalid, `单次最多 ${AI_TAG_MAX} 个标签`)
     }
-    const existing = await this.tagService.list(userId, siteId)
+    const existing = await this.tagService.list(userId)
     const idByName = new Map(existing.map((tag) => [tag.name, String(tag.id)]))
     const results: EnsureResult[] = []
     for (const name of cleaned) {
@@ -641,7 +682,7 @@ export class SiteFacade {
         results.push({ id: hit, name, created: false })
         continue
       }
-      const created = await this.tagService.create(userId, { siteId: Number(siteId), name })
+      const created = await this.tagService.create(userId, { name })
       results.push({ id: String(created.id), name: created.name, created: true })
     }
     return results
@@ -752,30 +793,37 @@ export class SiteFacade {
     return this.manageService.update(userId, siteId, dto)
   }
 
-  /** 删站影响面预检（R66 确认卡摘要用；只读计数，不写库） */
+  /**
+   * 删站影响面预检（R66 确认卡摘要用；只读计数，不写库）。
+   * P7 D73：内容池化后删站不再删内容——articles = 将从该站下架的文章数，comments = 将删除的评论数。
+   */
   async getSiteDeleteImpact(userId: bigint, siteId: bigint): Promise<SiteDeleteImpact> {
     const site = await this.requireOwnedSite(userId, siteId)
-    const [articles, columns, tags, comments] = await Promise.all([
-      this.prisma.siteArticle.count({ where: { siteId: site.id } }),
-      this.prisma.siteColumn.count({ where: { siteId: site.id } }),
-      this.prisma.siteTag.count({ where: { siteId: site.id } }),
+    const [articles, comments] = await Promise.all([
+      this.prisma.siteArticlePublish.count({ where: { siteId: site.id } }),
       this.prisma.siteComment.count({ where: { siteId: site.id } }),
     ])
-    return { slug: site.slug, articles, columns, tags, comments }
+    return { slug: site.slug, articles, comments }
   }
 
-  /** 删站（R50/R53/R55 级联，委托 manage.remove）：返回 `{ deletedArticles, recycledRoot }` 供摘要 */
-  async deleteSite(userId: bigint, siteId: bigint): Promise<{ deletedArticles: number; recycledRoot: boolean }> {
+  /**
+   * 删站（R50/R53/R55 级联，委托 manage.remove）：
+   * 返回 `{ unpublishedArticles, deletedComments, recycledRoot }` 供摘要（P7 D73：内容本体不删）。
+   */
+  async deleteSite(
+    userId: bigint,
+    siteId: bigint,
+  ): Promise<{ unpublishedArticles: number; deletedComments: number; recycledRoot: boolean }> {
     return this.manageService.remove(userId, siteId)
   }
 
   // ==================== CMS 层私有辅助 ====================
 
-  /** 文章写后回读（摘要口径），tagNames 由本站标签表补全 */
-  private async composeArticle(userId: bigint, siteId: bigint, id: bigint): Promise<SiteArticleItem> {
+  /** 文章写后回读（摘要口径），tagNames 由本人标签表补全 */
+  private async composeArticle(userId: bigint, id: bigint): Promise<SiteArticleItem> {
     const detail = (await this.articleService.detail(userId, id)) as Record<string, unknown>
-    const tagNames = await this.tagNameMap(userId, siteId)
-    return this.toArticleItem(detail, siteId, tagNames)
+    const tagNames = await this.tagNameMap(userId)
+    return this.toArticleItem(detail, tagNames)
   }
 
   /** 该站 media/ 下已有图片（有界遍历前 10 条，R72 回喂清单） */
@@ -806,22 +854,24 @@ export class SiteFacade {
     }
   }
 
-  /** 本站标签 id → 名称映射 */
-  private async tagNameMap(userId: bigint, siteId: bigint): Promise<Map<string, string>> {
-    const tags = await this.tagService.list(userId, siteId)
+  /** 本人标签 id → 名称映射（P7 D73：用户级） */
+  private async tagNameMap(userId: bigint): Promise<Map<string, string>> {
+    const tags = await this.tagService.list(userId)
     return new Map(tags.map((tag) => [String(tag.id), tag.name]))
   }
 
-  /** 文章行 → 出域条目（tagIds 经映射补 tagNames，未命中回退原 id） */
-  private toArticleItem(
-    item: Record<string, unknown>,
-    siteId: bigint,
-    tagNames: Map<string, string>,
-  ): SiteArticleItem {
+  /** 文章行 → 出域条目（tagIds 经映射补 tagNames，未命中回退原 id；sites 为已发表站点集合） */
+  private toArticleItem(item: Record<string, unknown>, tagNames: Map<string, string>): SiteArticleItem {
     const tagIds = Array.isArray(item.tagIds) ? (item.tagIds as string[]).map(String) : []
+    const rawSites = Array.isArray(item.sites) ? (item.sites as Record<string, unknown>[]) : []
     return {
       id: String(item.id ?? ''),
-      siteId: siteId.toString(),
+      sites: rawSites.map((s) => ({
+        id: String(s.id ?? ''),
+        name: String(s.name ?? ''),
+        slug: String(s.slug ?? ''),
+        isTop: s.isTop === true,
+      })),
       columnId: String(item.columnId ?? ''),
       columnName: String(item.columnName ?? ''),
       title: String(item.title ?? ''),
@@ -842,9 +892,9 @@ export class SiteFacade {
    * 解析栏目 id（R65）：显式提供即用（归属校验由 articleService.create/update 抛 40106）；
    * 缺省时本站仅 1 个栏目则直达，否则回喂 40001 并附「名称(id=xx)」清单请模型指定。
    */
-  private async resolveColumnId(userId: bigint, siteId: bigint, columnId?: number): Promise<number> {
+  private async resolveColumnId(userId: bigint, columnId?: number): Promise<number> {
     if (columnId !== undefined) return columnId
-    const columns = await this.columnService.list(userId, siteId)
+    const columns = await this.columnService.list(userId)
     if (columns.length === 1) return Number(columns[0].id)
     if (columns.length === 0) {
       throw new BusinessException(

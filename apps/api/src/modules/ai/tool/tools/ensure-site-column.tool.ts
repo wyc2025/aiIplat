@@ -40,7 +40,7 @@ export function createEnsureSiteColumnTool(siteFacade: SiteFacade): AiTool {
       try {
         const target = await resolveToolSite(siteFacade, ctx.user.userId, params)
         if (!target.ok) return null
-        const columns = await siteFacade.listColumns(BigInt(ctx.user.userId), target.site.id)
+        const columns = await siteFacade.listColumns(BigInt(ctx.user.userId))
         const hit = columns.find((c) => c.name === name && c.parentId === String(parentId))
         const parent = columns.find((c) => c.id === String(parentId))
         const parentText = parentId === 0 ? '顶级栏目' : parent ? `${parent.name}（id=${parent.id}）` : `id=${parentId}`

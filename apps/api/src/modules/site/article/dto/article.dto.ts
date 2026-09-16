@@ -4,18 +4,55 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
   IsString,
   Length,
   Min,
+  ValidateNested,
 } from 'class-validator'
-import { SiteIdDto } from '../../dto/site-id.dto'
 
-/** 创建文章（P4E T61：body 带 siteId，属主校验 40119） */
-export class CreateArticleDto extends SiteIdDto {
-  @ApiProperty({ description: '栏目 ID（须为本站栏目）' })
+/** 发表站点项（P7 D73：每站独立置顶） */
+export class ArticleSiteInput {
+  @ApiProperty({ description: '站点 ID（不存在或非属主 → 40119）' })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  siteId!: number
+
+  @ApiPropertyOptional({ description: '该站置顶（缺省 false）', default: false })
+  @IsOptional()
+  @IsBoolean()
+  isTop?: boolean
+}
+
+/** 文章发表关联（替换式；空数组 = 全站下架，文章本体保留在内容池） */
+export class ArticleSitesDto {
+  @ApiProperty({ description: '发表站点集合（替换式；空数组 = 全站下架）', type: [ArticleSiteInput] })
+  @IsArray()
+  @ArrayMaxSize(100, { message: '站点最多 100 个' })
+  @ValidateNested({ each: true })
+  @Type(() => ArticleSiteInput)
+  sites!: ArticleSiteInput[]
+}
+
+/** 创建文章（P7 D73：内容池化，body 带 siteIds 发表目标；缺省 = 不发表到任何站，纯草稿） */
+export class CreateArticleDto {
+  @ApiPropertyOptional({
+    description: '发表站点 ID 数组（缺省 = 不发表到任何站，仅入内容池；不存在或非属主 → 40119）',
+    type: [Number],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100, { message: '站点最多 100 个' })
+  @Type(() => Number)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  siteIds?: number[]
+
+  @ApiProperty({ description: '栏目 ID（须为本人栏目）' })
   @Type(() => Number)
   @IsInt()
   @Min(1)
@@ -60,8 +97,23 @@ export class CreateArticleDto extends SiteIdDto {
   status!: number
 }
 
-/** 编辑文章（全可选，提供即更新；tagIds 提供即整体重建；属主按实体反查，不接受请求 siteId） */
+/**
+ * 编辑文章（全可选，提供即更新；tagIds 提供即整体重建；属主按实体反查 user_id）。
+ * P7 D73：siteIds 提供即替换式更新发表集合（不传 = 不动；空数组 = 全站下架）。
+ */
 export class UpdateArticleDto {
+  @ApiPropertyOptional({
+    description: '发表站点 ID 数组（提供即替换式更新；空数组 = 全站下架；不传 = 不动）',
+    type: [Number],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100, { message: '站点最多 100 个' })
+  @Type(() => Number)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  siteIds?: number[]
+
   @ApiPropertyOptional({ description: '栏目 ID' })
   @IsOptional()
   @Type(() => Number)

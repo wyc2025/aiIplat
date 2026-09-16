@@ -86,25 +86,25 @@ export const CAPABILITY_MANIFEST: readonly CapabilityRow[] = [
   {
     key: 'site.article.read',
     perms: 'site:article:list',
-    text: '文章查看：按状态或栏目列文章、读文章全文（含 markdown 正文）。',
+    text: '文章查看：按状态或栏目列**内容池**全部文章（可按发表站点筛）、读文章全文（含 markdown 正文）。',
     tools: ['list_site_articles', 'read_site_article'],
   },
   {
     key: 'site.article.create',
     perms: 'site:article:create',
-    text: '代写文章：新建文章默认草稿（用户明示「直接发布」才公开），可指定栏目、标签、封面（需确认）。',
+    text: '代写文章：新建文章默认草稿（用户明示「直接发布」才公开），可指定栏目、标签、封面；草稿可不选站（只进内容池），发布需明确发表站点（siteIds，可多站）（需确认）。',
     tools: ['create_site_article'],
   },
   {
     key: 'site.article.update',
     perms: 'site:article:update',
-    text: '改写文章：更新已有文章的标题、正文、栏目、标签（需确认）。',
+    text: '改写文章：更新已有文章的标题、正文、栏目、标签；siteIds 可整体替换发表站点（空数组 = 全站下架，文章本体保留）（需确认）。',
     tools: ['update_site_article'],
   },
   {
     key: 'site.article.publish',
     perms: 'site:article:publish',
-    text: '文章上下架：发布即公开可见、下架即访客不可见（需确认）。',
+    text: '文章上下架：发布即公开可见、下架即访客不可见；未发表到任何站点的文章即使上架也无人可见（需确认）。',
     tools: ['publish_site_article'],
   },
   {

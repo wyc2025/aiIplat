@@ -126,7 +126,10 @@ export class UserService {
     return { success: true }
   }
 
-  /** 删除（软删除，admin 不可删除）；清理用户-角色关联；R13：依次经 cloud hasFiles（30011）→ site hasSite（40112）预检 */
+  /**
+   * 删除（软删除，admin 不可删除）；清理用户-角色关联。
+   * R13 预检链（P7 D73 扩展）：cloud hasFiles（30011）→ site hasSite（40112）→ site hasContent（40120）。
+   */
   async remove(id: bigint) {
     const user = await this.assertExists(id)
     if (user.username === ADMIN_USERNAME) {
@@ -137,6 +140,9 @@ export class UserService {
     }
     if (await this.site.hasSite(id)) {
       throw new BusinessException(ErrorCode.SiteUserHasSite, '该用户已开通个人网站，禁止删除')
+    }
+    if (await this.site.hasContent(id)) {
+      throw new BusinessException(ErrorCode.SiteUserHasContent, '该用户名下仍有站点内容（文章/栏目/标签），请先清理')
     }
     await this.prisma.sysUserRole.deleteMany({ where: { userId: id } })
     await this.prisma.sysUser.update({ where: { id }, data: { deletedAt: new Date() } })

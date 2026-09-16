@@ -14,11 +14,15 @@ const NEGATIVE_CACHE = '404'
 /** slug 解析结果（缓存值形态，id 以字符串序列化避免 bigint JSON 问题） */
 export interface ResolvedSite {
   siteId: string
+  /** 站点属主（P7 D73：内容池化后开放层按用户取内容） */
+  userId: string
   rootFolderId: string
   status: number
   title: string
   description: string | null
   commentAudit: number
+  /** SPA 回退入口（P7 D77：无扩展名路径回退时静态服务的入口文件；null = 不回退） */
+  spaFallback: string | null
 }
 
 /** 路径解析结果 */
@@ -56,11 +60,13 @@ export class SiteResolveService {
 
     const resolved: ResolvedSite = {
       siteId: site.id.toString(),
+      userId: site.userId.toString(),
       rootFolderId: site.rootFolderId.toString(),
       status: site.status,
       title: site.title,
       description: site.description,
       commentAudit: site.commentAudit,
+      spaFallback: site.spaFallback,
     }
     await this.redis.client
       .set(cacheKey, JSON.stringify(resolved), 'EX', RESOLVE_TTL_SEC)

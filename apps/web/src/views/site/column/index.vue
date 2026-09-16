@@ -1,6 +1,5 @@
 <template>
   <div class="v-site-column">
-    <SiteSwitcher />
     <ProTable
       :data="tree"
       :loading="loading"
@@ -39,6 +38,23 @@
         width="100"
         prop="articleCount"
       />
+      <el-table-column
+        label="展示站点"
+        min-width="180"
+      >
+        <template #default="{ row }">
+          <el-tag
+            v-for="s in row.sites"
+            :key="s.id"
+            size="small"
+            type="info"
+            class="v-sc-site-tag"
+          >
+            {{ s.name }}
+          </el-tag>
+          <span v-if="!row.sites.length">未展示</span>
+        </template>
+      </el-table-column>
       <el-table-column
         label="创建时间"
         width="180"
@@ -132,6 +148,24 @@
             :min="0"
           />
         </el-form-item>
+        <el-form-item label="展示站点">
+          <el-select
+            v-model="form.siteIds"
+            multiple
+            style="width: 100%"
+            placeholder="不选 = 全部站点可见"
+          >
+            <el-option
+              v-for="s in siteStore.sites"
+              :key="s.id"
+              :label="s.title"
+              :value="Number(s.id)"
+            />
+          </el-select>
+          <div class="v-sc-tip">
+            不选 = 本站全部站点可见；勾选后只在这些站点展示（栏目本体始终保留）
+          </div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">
@@ -150,15 +184,20 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { confirmDialog } from '@/utils/confirm'
 import { Plus } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import ProTable from '@/components/ProTable/index.vue'
-import SiteSwitcher from '@/components/SiteSwitcher/index.vue'
 import { formatTime } from '@/utils/format'
-import { listColumns, createColumn, updateColumn, removeColumn } from '@/api/site/site'
+import {
+  listColumns,
+  createColumn,
+  updateColumn,
+  removeColumn,
+  setColumnSites,
+} from '@/api/site/site'
 import { useSiteStore } from '@/stores/site'
 import type { SiteColumnItem } from '@/types/api'
 
@@ -166,15 +205,16 @@ const siteStore = useSiteStore()
 const loading = ref(false)
 const loadError = ref(false)
 const list = ref<SiteColumnItem[]>([])
-/** 无站点时的空态文案（P4E：站点为 0 时不做接口请求） */
-const emptyText = computed(() => (siteStore.empty ? '还没有站点，请先到「站点列表」创建' : '还没有栏目'))
+/** 空态文案（P7 D73：栏目归用户，无站点也可先建栏目） */
+const emptyText = computed(() => '还没有栏目')
 
 const dialogVisible = ref(false)
 const submitting = ref(false)
 const formRef = ref<FormInstance>()
 /** 0 = 新增模式 */
 const editingId = ref(0)
-const form = reactive({ parentId: 0, name: '', sort: 0 })
+/** siteIds：展示站点集合（空数组 = 全部站点可见，走后端缺省语义） */
+const form = reactive({ parentId: 0, name: '', sort: 0, siteIds: [] as number[] })
 const rules: FormRules = {
   name: [{ required: true, message: '请输入栏目名称', trigger: 'blur' }],
 }
@@ -210,13 +250,9 @@ const parentOptions = computed(() => {
 
 async function reload() {
   loadError.value = false
-  if (!siteStore.currentSiteId) {
-    list.value = []
-    return
-  }
   loading.value = true
   try {
-    list.value = await listColumns(siteStore.currentSiteId)
+    list.value = await listColumns()
   } catch {
     list.value = []
     loadError.value = true
@@ -230,6 +266,8 @@ function openCreate(parent?: SiteColumnItem | 0) {
   form.parentId = typeof parent === 'object' && parent !== null ? Number(parent.id) : 0
   form.name = ''
   form.sort = 0
+  // 默认全部站点可见（空数组 → 后端缺省 = 用户全部站点）
+  form.siteIds = []
   dialogVisible.value = true
 }
 
@@ -238,6 +276,7 @@ function openEdit(row: SiteColumnItem) {
   form.parentId = Number(row.parentId)
   form.name = row.name
   form.sort = row.sort
+  form.siteIds = row.sites.map((s) => Number(s.id))
   dialogVisible.value = true
 }
 
@@ -248,13 +287,17 @@ async function submit() {
   try {
     if (editingId.value) {
       await updateColumn(editingId.value, { name: form.name, sort: form.sort })
+      // 站点显隐是独立端点（P7 §14.2）
+      await setColumnSites(editingId.value, {
+        sites: form.siteIds.map((siteId) => ({ siteId, sort: form.sort })),
+      })
       ElMessage.success('已保存')
     } else {
       await createColumn({
-        siteId: Number(siteStore.currentSiteId),
         parentId: form.parentId,
         name: form.name,
         sort: form.sort,
+        siteIds: form.siteIds,
       })
       ElMessage.success('已创建')
     }
@@ -280,15 +323,10 @@ async function onRemove(row: SiteColumnItem) {
 }
 
 onMounted(async () => {
+  // P7：栏目归用户；站点列表只用于「展示站点」勾选，不再决定列表内容
   await siteStore.ensureLoaded().catch(() => undefined)
   reload()
 })
-
-// 切换当前站点 → 重新拉取本页数据（P4E D54）
-watch(
-  () => siteStore.currentSiteId,
-  () => reload(),
-)
 </script>
 
 <style scoped>
@@ -297,5 +335,12 @@ watch(
   background: #fff;
   border-radius: 6px;
   min-height: 100%;
+}
+.v-sc-site-tag + .v-sc-site-tag {
+  margin-left: 4px;
+}
+.v-sc-tip {
+  color: #909399;
+  font-size: 12px;
 }
 </style>

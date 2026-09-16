@@ -178,6 +178,11 @@ export const ErrorCode = {
   SiteQuotaExceeded: 40118,
   /** 站点不存在或非属主（P4E R56；不暴露他人站点存在性） */
   SiteForbidden: 40119,
+  /**
+   * 用户名下有站点内容（文章/栏目/标签），禁止删除（P7 D73/R75 删用户预检）。
+   * 与 40112 的关系：内容池化后内容不再随站点删，无站点也可能有内容，故单列一码。
+   */
+  SiteUserHasContent: 40120,
 } as const
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode]

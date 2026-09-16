@@ -39,7 +39,7 @@ export function createEnsureSiteTagsTool(siteFacade: SiteFacade): AiTool {
       try {
         const target = await resolveToolSite(siteFacade, ctx.user.userId, params)
         if (!target.ok) return null
-        const existing = await siteFacade.listTags(BigInt(ctx.user.userId), target.site.id)
+        const existing = await siteFacade.listTags(BigInt(ctx.user.userId))
         const existingNames = new Set(existing.map((t) => t.name))
         const lines = [`确保 ${names.length} 个标签存在：`]
         for (const [index, name] of names.entries()) {
@@ -59,7 +59,7 @@ export function createEnsureSiteTagsTool(siteFacade: SiteFacade): AiTool {
       try {
         const target = await resolveToolSite(siteFacade, ctx.user.userId, params)
         if (!target.ok) return target.feed
-        const tags = await siteFacade.ensureTags(BigInt(ctx.user.userId), target.site.id, names)
+        const tags = await siteFacade.ensureTags(BigInt(ctx.user.userId), names)
         return {
           ok: true,
           site: { slug: target.site.slug, title: target.site.title },

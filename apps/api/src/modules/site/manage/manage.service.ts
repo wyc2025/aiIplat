@@ -70,9 +70,10 @@ export class SiteManageService {
       where: { userId },
       orderBy: [{ createTime: 'asc' }, { id: 'asc' }],
     })
-    const counts = await this.prisma.siteArticle.groupBy({
+    // P7 D73：articleCount 口径 = 已发布且发表到该站的文章数（内容池化后不再是「属于该站」）
+    const counts = await this.prisma.siteArticlePublish.groupBy({
       by: ['siteId'],
-      where: { siteId: { in: sites.map((s) => s.id) } },
+      where: { siteId: { in: sites.map((s) => s.id) }, article: { status: 1 } },
       _count: { _all: true },
     })
     const countMap = new Map(counts.map((c) => [c.siteId.toString(), c._count._all]))
@@ -87,8 +88,7 @@ export class SiteManageService {
   /** 站点详情（属主校验 40119；含 articleCount） */
   async detail(userId: bigint, siteId: bigint) {
     const site = await this.getOwnedSite(userId, siteId)
-    const articleCount = await this.prisma.siteArticle.count({ where: { siteId: site.id } })
-    return this.toSiteView(site, articleCount)
+    return this.toSiteView(site, await this.countPublished(site.id))
   }
 
   /** 创建站点（配额 → slug 校验 → 云盘骨架 + 模板，一气呵成，失败回滚） */
@@ -128,7 +128,7 @@ export class SiteManageService {
         drafts.push({ id: created.id, storageName, size: BigInt(content.length) })
       }
 
-      // 落 site_site 行
+      // 落 site_site 行（P7 D77：SPA 回退入口取自模板 template.json#spaFallback，读不到 = 无回退）
       const site = await this.prisma.siteSite.create({
         data: {
           userId,
@@ -137,9 +137,12 @@ export class SiteManageService {
           description: dto.description || null,
           rootFolderId: root.id,
           mediaFolderId: media.id,
+          spaFallback: await this.readTemplateSpaFallback(),
         },
       })
-      return this.toSiteView(site, 0)
+      // P7 D73：开站即灌内容——默认把用户内容池里全部已发布文章发表到新站
+      const publishedCount = await this.publishArticlesToSite(userId, site.id, dto.publishArticleIds)
+      return this.toSiteView(site, publishedCount)
     } catch (error) {
       // §14.3 第 5 步：任一步失败回滚，不留半成品（行软删 + 物理删除 + used 回退）
       await this.cloudFacade.discardSiteDraft(userId, drafts)
@@ -184,27 +187,28 @@ export class SiteManageService {
       await this.resolveService.invalidateSite(data.slug)
       await this.redis.scanDel(`site:data:${site.id.toString()}:*`).catch(() => undefined)
     }
-    const articleCount = await this.prisma.siteArticle.count({ where: { siteId: site.id } })
-    return this.toSiteView(updated, articleCount)
+    return this.toSiteView(updated, await this.countPublished(site.id))
   }
 
   /**
-   * 删站（R50/R53/R55）：
-   * site 域六表物理删（R7 传统，无回收站）→ 站点根连同子树软删进回收站（used 不动，可还原为普通文件夹）
+   * 删站（R50/R53/R55；P7 D73 修订）：
+   * 删站只删「该站的展示关联」——评论（按站隔离 D75）+ 发表关联 + 栏目显隐；
+   * **文章/栏目/标签本体保留在内容池**（不再随站陪葬）→ 站点根连同子树软删进回收站
    * → 缓存三族清理 → slug 立即释放（R49）。
-   * 响应 `{ deletedArticles, recycledRoot }` 供前端结果提示。
+   * 响应 `{ unpublishedArticles, deletedComments, recycledRoot }` 供前端结果提示。
    */
   async remove(userId: bigint, siteId: bigint) {
     const site = await this.getOwnedSite(userId, siteId)
-    const deletedArticles = await this.prisma.siteArticle.count({ where: { siteId: site.id } })
+    const [unpublishedArticles, deletedComments] = await Promise.all([
+      this.prisma.siteArticlePublish.count({ where: { siteId: site.id } }),
+      this.prisma.siteComment.count({ where: { siteId: site.id } }),
+    ])
 
-    // 物理删（顺序：评论 → 文章-标签 → 文章 → 标签 → 栏目 → 站点；R7 无软删）
+    // 物理删（顺序：评论 → 发表关联 → 栏目显隐 → 站点；内容本体不删）
     await this.prisma.$transaction([
       this.prisma.siteComment.deleteMany({ where: { siteId: site.id } }),
-      this.prisma.siteArticleTag.deleteMany({ where: { article: { siteId: site.id } } }),
-      this.prisma.siteArticle.deleteMany({ where: { siteId: site.id } }),
-      this.prisma.siteTag.deleteMany({ where: { siteId: site.id } }),
-      this.prisma.siteColumn.deleteMany({ where: { siteId: site.id } }),
+      this.prisma.siteArticlePublish.deleteMany({ where: { siteId: site.id } }),
+      this.prisma.siteColumnDisplay.deleteMany({ where: { siteId: site.id } }),
       this.prisma.siteSite.delete({ where: { id: site.id } }),
     ])
 
@@ -216,7 +220,20 @@ export class SiteManageService {
     await this.redis.scanDel(`site:path:${site.id.toString()}:*`).catch(() => undefined)
     await this.redis.scanDel(`site:data:${site.id.toString()}:*`).catch(() => undefined)
 
-    return { deletedArticles, recycledRoot: true }
+    return { unpublishedArticles, deletedComments, recycledRoot: true }
+  }
+
+  /**
+   * 用户名下是否仍有站点内容（P7 R75 删用户预检，40120）。
+   * 内容池化后内容不再随站点存在，故与 hasSite 分列：无站点也可能有内容。
+   */
+  async hasContent(userId: bigint): Promise<boolean> {
+    const [articles, columns, tags] = await Promise.all([
+      this.prisma.siteArticle.count({ where: { userId } }),
+      this.prisma.siteColumn.count({ where: { userId } }),
+      this.prisma.siteTag.count({ where: { userId } }),
+    ])
+    return articles + columns + tags > 0
   }
 
   /** 站点数配额视图（供 AI create_site 回喂 limit/used，P4E R57/D55） */
@@ -255,6 +272,58 @@ export class SiteManageService {
       throw new BusinessException(ErrorCode.NotFound, '目标用户不存在')
     }
     return id
+  }
+
+  /** 站点已发布文章数（P7 D73 口径：status=1 且存在该站发表关联） */
+  private async countPublished(siteId: bigint): Promise<number> {
+    return this.prisma.siteArticlePublish.count({
+      where: { siteId, article: { status: 1 } },
+    })
+  }
+
+  /**
+   * 建站内容初始化（P7 D73）：'all'（缺省）= 内容池全部已发布文章；数组 = 指定文章（须属本人）。
+   * 返回发表到新站的文章数。
+   */
+  private async publishArticlesToSite(
+    userId: bigint,
+    siteId: bigint,
+    spec: 'all' | number[] | undefined,
+  ): Promise<number> {
+    const articles =
+      spec === undefined || spec === 'all'
+        ? await this.prisma.siteArticle.findMany({
+            where: { userId, status: 1 },
+            select: { id: true, publishedAt: true },
+          })
+        : await this.prisma.siteArticle.findMany({
+            where: { userId, id: { in: [...new Set(spec)].map((v) => BigInt(v)) } },
+            select: { id: true, publishedAt: true },
+          })
+    if (spec !== undefined && spec !== 'all' && articles.length !== new Set(spec).size) {
+      throw new BusinessException(ErrorCode.SiteForbidden, '文章不存在或非属主')
+    }
+    if (articles.length === 0) return 0
+    await this.prisma.siteArticlePublish.createMany({
+      data: articles.map((a) => ({
+        articleId: a.id,
+        siteId,
+        publishedAt: a.publishedAt ?? new Date(),
+      })),
+    })
+    return articles.length
+  }
+
+  /** 读默认模板的 SPA 回退入口（P7 D77：template.json#spaFallback；读不到 = 无回退） */
+  private async readTemplateSpaFallback(): Promise<string | null> {
+    try {
+      const raw = await readFile(join(TEMPLATE_DIR, 'template.json'), 'utf-8')
+      const value: unknown = JSON.parse(raw)
+      const fallback = (value as { spaFallback?: unknown })?.spaFallback
+      return typeof fallback === 'string' && fallback ? fallback.slice(0, 64) : null
+    } catch {
+      return null
+    }
   }
 
   /** R11 slug 校验：格式正则 + 保留字黑名单 → 40103 */

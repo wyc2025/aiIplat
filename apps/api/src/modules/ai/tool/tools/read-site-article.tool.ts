@@ -36,11 +36,12 @@ export function createReadSiteArticleTool(siteFacade: SiteFacade): AiTool {
         const target = await resolveToolSite(siteFacade, ctx.user.userId, params)
         if (!target.ok) return target.feed
         const article = await siteFacade.readArticle(BigInt(ctx.user.userId), BigInt(id))
-        if (article.siteId !== target.site.id.toString()) {
+        // P7 D73：文章不再「属于」某站 —— 改校验是否已发表到该站
+        if (!article.sites.some((s) => s.id === target.site.id.toString())) {
           return {
             ok: false,
             errorCode: ErrorCode.SiteArticleNotFound,
-            message: `文章 ${id} 不属于站点 ${target.site.slug}（请确认 slug 与文章 id 是否配套）`,
+            message: `文章 ${id} 未发表到站点 ${target.site.slug}（请确认 slug 与文章 id 是否配套）`,
           }
         }
         return { site: { slug: target.site.slug, title: target.site.title }, article }

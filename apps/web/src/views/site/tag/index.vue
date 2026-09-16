@@ -1,6 +1,5 @@
 <template>
   <div class="v-site-tag">
-    <SiteSwitcher />
     <ProTable
       :data="list"
       :loading="loading"
@@ -105,24 +104,21 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { confirmDialog } from '@/utils/confirm'
 import { Plus } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import ProTable from '@/components/ProTable/index.vue'
-import SiteSwitcher from '@/components/SiteSwitcher/index.vue'
 import { formatTime } from '@/utils/format'
 import { listTags, createTag, updateTag, removeTag } from '@/api/site/site'
-import { useSiteStore } from '@/stores/site'
 import type { SiteTagItem } from '@/types/api'
 
-const siteStore = useSiteStore()
 const loading = ref(false)
 const loadError = ref(false)
 const list = ref<SiteTagItem[]>([])
-/** 无站点时的空态文案（P4E：站点为 0 时不做接口请求） */
-const emptyText = computed(() => (siteStore.empty ? '还没有站点，请先到「站点列表」创建' : '还没有标签'))
+/** 空态文案（P7 D73：标签归用户，无站点也可先建标签） */
+const emptyText = computed(() => '还没有标签')
 
 const dialogVisible = ref(false)
 const submitting = ref(false)
@@ -135,13 +131,9 @@ const rules: FormRules = {
 
 async function reload() {
   loadError.value = false
-  if (!siteStore.currentSiteId) {
-    list.value = []
-    return
-  }
   loading.value = true
   try {
-    list.value = await listTags(siteStore.currentSiteId)
+    list.value = await listTags()
   } catch {
     list.value = []
     loadError.value = true
@@ -171,7 +163,7 @@ async function submit() {
       await updateTag(editingId.value, form.name)
       ElMessage.success('已保存')
     } else {
-      await createTag(Number(siteStore.currentSiteId), form.name)
+      await createTag(form.name)
       ElMessage.success('已创建')
     }
     dialogVisible.value = false
@@ -197,16 +189,8 @@ async function onRemove(row: SiteTagItem) {
   }
 }
 
-onMounted(async () => {
-  await siteStore.ensureLoaded().catch(() => undefined)
-  reload()
-})
-
-// 切换当前站点 → 重新拉取本页数据（P4E D54）
-watch(
-  () => siteStore.currentSiteId,
-  () => reload(),
-)
+// P7 D73：标签归用户，列表与站点无关（标签跟随文章出现在各站）
+onMounted(reload)
 </script>
 
 <style scoped>

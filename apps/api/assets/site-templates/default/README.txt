@@ -61,8 +61,12 @@ iplat 个人网站默认模板
      （或等价转义），禁止 innerHTML 直插；markdown 渲染库必须关闭 raw HTML（html:false）。
 
 四、模板当前行为
-  · 首页：站点标题/描述 + 栏目导航 + 文章卡片列表（分页）；
-  · 文章详情：hash 路由 #/article/{id}，markdown-it 渲染（html:false）+ 评论区。
+  · 首页：站点标题/描述 + 栏目导航 + 文章卡片列表（分页，/?columnId={id} 切栏目）；
+  · 文章详情：history 路由 /article/{id}（服务端对无扩展名路径回退到 index.html，
+    回退入口由 template.json#spaFallback 声明，建站时写入站点配置）；
+    markdown-it 渲染（html:false）+ 评论区；
+  · 站点前缀：app.js 从 location.pathname 反推 /api/open/{slug}/ 作为 BASE，
+    index.html 内同一逻辑写入 <base>，保证回退场景下相对资源与接口路径正确。
 
 五、改造建议
   · 改样式：直接编辑 style.css；

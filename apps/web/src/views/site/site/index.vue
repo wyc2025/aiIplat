@@ -174,6 +174,20 @@
             show-word-limit
           />
         </el-form-item>
+        <!-- P7 D73：开站即灌内容（默认把内容池里全部已发布文章发表到新站） -->
+        <el-form-item label="初始内容">
+          <el-radio-group v-model="createForm.publishMode">
+            <el-radio-button value="all">
+              发表全部已发布文章
+            </el-radio-button>
+            <el-radio-button value="none">
+              先空站（仅建模板）
+            </el-radio-button>
+          </el-radio-group>
+          <div class="v-sl-tip">
+            内容池里的文章不随站点删除而消失，可随时再发表到任意站点
+          </div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="createVisible = false">
@@ -281,7 +295,13 @@ const editFormRef = ref<FormInstance>()
 const editingId = ref('')
 
 const origin = window.location.origin
-const createForm = reactive({ slug: '', title: '', description: '' })
+/** publishMode：P7 D73 建站内容初始化（'all' = 发表全部已发布文章 / 'none' = 先空站） */
+const createForm = reactive({
+  slug: '',
+  title: '',
+  description: '',
+  publishMode: 'all' as 'all' | 'none',
+})
 const editForm = reactive({ slug: '', title: '', description: '' })
 
 const { copy: copyToClipboard } = useClipboard({ legacy: true })
@@ -329,6 +349,7 @@ function openCreate() {
   createForm.slug = ''
   createForm.title = ''
   createForm.description = ''
+  createForm.publishMode = 'all'
   createVisible.value = true
 }
 
@@ -341,6 +362,7 @@ async function submitCreate() {
       slug: createForm.slug,
       title: createForm.title,
       description: createForm.description || undefined,
+      publishArticleIds: createForm.publishMode === 'none' ? [] : 'all',
     })
     ElMessage.success('站点创建成功，已生成默认模板')
     createVisible.value = false
@@ -392,7 +414,7 @@ function onManage(row: SiteSiteInfo) {
 async function onRemove(row: SiteSiteInfo) {
   const confirmed = await confirmDialog(
     `确认删除站点「${row.title}（${row.slug}）」？` +
-      '① 文章 / 栏目 / 标签 / 评论将物理删除，不可恢复；' +
+      '① 该站的评论将物理删除、文章将从本站下架（文章/栏目/标签本体保留在内容池，可再发表）；' +
       '② 站点文件（含 media/）移入云盘回收站，可还原为普通文件夹；' +
       `③ 站点标识 ${row.slug} 立即释放，他人可再次注册。`,
     '删除站点',
@@ -401,7 +423,9 @@ async function onRemove(row: SiteSiteInfo) {
   if (!confirmed) return
   try {
     const res = await deleteSite(row.id)
-    ElMessage.success(`站点已删除（文章 ${res.deletedArticles} 篇，站点文件已移入回收站）`)
+    ElMessage.success(
+      `站点已删除（${res.unpublishedArticles} 篇文章已从本站下架、${res.deletedComments} 条评论已删除，站点文件已移入回收站）`,
+    )
     await store.load()
   } catch {
     // 拦截器提示

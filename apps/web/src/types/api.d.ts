@@ -371,12 +371,30 @@ export interface SiteTemplateApplyResult {
 }
 
 /** 栏目平铺项（list 返回裸数组，前端组树） */
+/** 栏目可见站点（P7 D73：栏目归用户，按站显隐） */
+export interface ColumnSiteRef {
+  id: string
+  name: string
+  slug: string
+  sort: number
+}
+
+/** 文章已发表站点（P7 D73：文章归用户，可发表到多站，每站独立置顶） */
+export interface ArticleSiteRef {
+  id: string
+  name: string
+  slug: string
+  isTop: boolean
+}
+
 export interface SiteColumnItem {
   id: string
   parentId: string
   name: string
   sort: number
   articleCount: number
+  /** 展示站点（无 = 全部站点不展示） */
+  sites: ColumnSiteRef[]
   createdAt: string
   /** 前端组树用（children 由前端构造） */
   children?: SiteColumnItem[]
@@ -399,6 +417,8 @@ export interface SiteArticleItem {
   summary: string
   coverPath: string | null
   tagIds: string[]
+  /** 已发表站点（P7 D73：取代原「所属站点」概念） */
+  sites: ArticleSiteRef[]
   wordCount: number
   viewCount: number
   /** 0 草稿 / 1 已发布 */

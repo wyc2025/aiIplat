@@ -4,6 +4,20 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>我的站点</title>
+  <!--
+    P7 D77/R78（路径美化 + SPA 回退）：无扩展名路径（如 /article/12）由服务端回退到本 index.html，
+    此时浏览器地址目录已变，相对资源会解析错。这里按 URL 反推站点公开前缀并写入 <base>，
+    使 style.css / app.js / 开放 API 的相对引用在回退场景下依然正确。
+  -->
+  <script>
+    ;(function () {
+      var m = location.pathname.match(/^(.*\/api\/open\/[^/]+\/)/)
+      if (!m) return
+      var base = document.createElement('base')
+      base.href = m[1]
+      document.head.appendChild(base)
+    })()
+  </script>
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
@@ -25,7 +39,11 @@
     </section>
 
     <section id="page-article" hidden>
-      <a class="back-link" href="#/">← 返回列表</a>
+      <a
+        class="back-link"
+        href="./"
+        data-site-link
+      >← 返回列表</a>
       <h2 id="article-title"></h2>
       <p class="article-meta" id="article-meta"></p>
       <div class="article-content markdown-body" id="article-content"></div>

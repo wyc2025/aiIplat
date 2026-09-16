@@ -1,6 +1,5 @@
 <template>
   <div class="v-site-article">
-    <SiteSwitcher />
     <ProTable
       :data="list"
       :loading="loading"
@@ -13,6 +12,22 @@
       @size-change="onSizeChange"
     >
       <template #search>
+        <!-- P7 D73：内容归用户，列表默认出全部内容池文章；站点降为「已发表到该站」筛选 -->
+        <el-form-item label="发表站点">
+          <el-select
+            v-model="filterSiteId"
+            clearable
+            style="width: 160px"
+            placeholder="全部站点"
+          >
+            <el-option
+              v-for="s in siteStore.sites"
+              :key="s.id"
+              :label="s.title"
+              :value="Number(s.id)"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="栏目">
           <el-select
             v-model="filterColumnId"
@@ -99,6 +114,26 @@
           >
             {{ row.status === 1 ? '已发布' : '草稿' }}
           </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column
+        label="展示站点"
+        min-width="180"
+      >
+        <template #default="{ row }">
+          <span
+            v-for="s in row.sites"
+            :key="s.id"
+            class="v-sa-site-tag"
+          >
+            <el-tag
+              size="small"
+              :type="s.isTop ? 'warning' : 'info'"
+            >
+              {{ s.name }}{{ s.isTop ? ' · 置顶' : '' }}
+            </el-tag>
+          </span>
+          <span v-if="!row.sites.length">未发表</span>
         </template>
       </el-table-column>
       <el-table-column
@@ -226,6 +261,41 @@
           </el-col>
         </el-row>
         <el-row :gutter="16">
+          <el-col :span="24">
+            <el-form-item label="发表站点">
+              <el-select
+                v-model="form.siteIds"
+                multiple
+                style="width: 100%"
+                placeholder="不选 = 仅入内容池（各站不可见）"
+              >
+                <el-option
+                  v-for="s in siteStore.sites"
+                  :key="s.id"
+                  :label="s.title"
+                  :value="Number(s.id)"
+                />
+              </el-select>
+              <div
+                v-if="form.siteIds.length"
+                class="v-sa-tops"
+              >
+                <el-checkbox
+                  v-for="sid in form.siteIds"
+                  :key="sid"
+                  :model-value="form.topSiteIds.includes(sid)"
+                  @change="(v: boolean) => toggleTop(sid, v)"
+                >
+                  {{ siteName(sid) }} 置顶
+                </el-checkbox>
+              </div>
+              <div class="v-sa-tip">
+                可发表到多个站点，每站独立置顶；不选 = 只进内容池，随时可再发表
+              </div>
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="16">
           <el-col :span="18">
             <el-form-item label="摘要">
               <el-input
@@ -238,6 +308,20 @@
           </el-col>
           <el-col :span="6">
             <el-form-item label="封面">
+              <!-- P7：内容池化后封面上传仍要落到具体站点的 media/（D13），故保留「上传到哪个站」 -->
+              <el-select
+                v-if="siteStore.sites.length > 1"
+                v-model="uploadSiteId"
+                size="small"
+                style="width: 100%; margin-bottom: 6px"
+              >
+                <el-option
+                  v-for="s in siteStore.sites"
+                  :key="s.id"
+                  :label="`上传到：${s.title}`"
+                  :value="Number(s.id)"
+                />
+              </el-select>
               <div class="v-sa-cover">
                 <img
                   v-if="form.coverPath"
@@ -407,7 +491,6 @@ import { Plus, Refresh } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import ProTable from '@/components/ProTable/index.vue'
 import MarkdownView from '@/components/MarkdownView/index.vue'
-import SiteSwitcher from '@/components/SiteSwitcher/index.vue'
 import { formatTime } from '@/utils/format'
 import {
   listArticles,
@@ -418,6 +501,7 @@ import {
   removeArticle,
   listColumns,
   listTags,
+  setArticleSites,
 } from '@/api/site/site'
 import { uploadFile } from '@/api/cloud/file'
 import { useSiteStore } from '@/stores/site'
@@ -431,14 +515,33 @@ const total = ref(0)
 const pageNo = ref(1)
 const pageSize = ref(10)
 
+const filterSiteId = ref<number | undefined>()
 const filterColumnId = ref<number | undefined>()
 const filterStatus = ref<number | undefined>()
 const filterKeyword = ref('')
 
 const columns = ref<SiteColumnItem[]>([])
 const tags = ref<SiteTagItem[]>([])
-/** 当前站点（封面/插图上传落 media/ 用，D13；P4E 由 store 提供） */
-const currentSite = computed(() => siteStore.currentSite)
+/** 封面/插图上传的落点站点（默认当前站；P7 内容池化后仅在多站时可切） */
+const uploadSiteId = ref<number | undefined>(
+  siteStore.currentSiteId ? Number(siteStore.currentSiteId) : undefined,
+)
+/** 上传目标站点对象（取 media 目录用） */
+const currentSite = computed(
+  () => siteStore.sites.find((s) => Number(s.id) === uploadSiteId.value) ?? siteStore.currentSite,
+)
+
+/** 站点名（置顶勾选回显用） */
+function siteName(id: number): string {
+  return siteStore.sites.find((s) => Number(s.id) === id)?.title ?? String(id)
+}
+
+/** 置顶开关（每站独立） */
+function toggleTop(siteId: number, checked: boolean) {
+  const exists = form.topSiteIds.includes(siteId)
+  if (checked && !exists) form.topSiteIds.push(siteId)
+  if (!checked && exists) form.topSiteIds = form.topSiteIds.filter((v) => v !== siteId)
+}
 
 const coverInput = ref<HTMLInputElement>()
 const imageInput = ref<HTMLInputElement>()
@@ -472,8 +575,8 @@ function wrapMarkdown(before: string, after: string, placeholder: string) {
   })
 }
 
-/** 无站点时的空态文案（P4E：站点为 0 时不做接口请求） */
-const emptyText = computed(() => (siteStore.empty ? '还没有站点，请先到「站点列表」创建' : '还没有文章'))
+/** 空态文案（P7 D73：内容池化后列表不再依赖站点，无站点也可撰写内容） */
+const emptyText = computed(() => '还没有文章')
 
 /** 封面回显：完整公开 URL（走开放静态链路） */
 const coverPreviewUrl = computed(() =>
@@ -490,6 +593,10 @@ const form = reactive({
   title: '',
   summary: '',
   tagIds: [] as number[],
+  /** 发表站点（P7 D73：替换式） */
+  siteIds: [] as number[],
+  /** 置顶站点子集 */
+  topSiteIds: [] as number[],
   coverPath: '',
   contentMd: '',
   status: 0,
@@ -531,17 +638,13 @@ function buildTree(items: SiteColumnItem[]): SiteColumnItem[] {
 
 async function reload() {
   loadError.value = false
-  if (!siteStore.currentSiteId) {
-    list.value = []
-    total.value = 0
-    return
-  }
   loading.value = true
   try {
     const res = await listArticles({
       pageNo: pageNo.value,
       pageSize: pageSize.value,
-      siteId: Number(siteStore.currentSiteId),
+      // P7 D73：不传 siteId = 全部内容池文章；传 = 只出已发表到该站的
+      siteId: filterSiteId.value,
       columnId: filterColumnId.value,
       status: filterStatus.value,
       keyword: filterKeyword.value.trim() || undefined,
@@ -567,18 +670,14 @@ function onSizeChange(size: number) {
   reload()
 }
 
+/** 栏目/标签元数据（P7 D73：用户级，与站点无关） */
 async function loadMeta() {
-  if (!siteStore.currentSiteId) {
-    columns.value = []
-    tags.value = []
-    return
-  }
-  const [cols, tgs] = await Promise.all([
-    listColumns(siteStore.currentSiteId),
-    listTags(siteStore.currentSiteId),
-  ])
+  const [cols, tgs] = await Promise.all([listColumns(), listTags()])
   columns.value = cols
   tags.value = tgs
+  if (!uploadSiteId.value && siteStore.currentSiteId) {
+    uploadSiteId.value = Number(siteStore.currentSiteId)
+  }
 }
 
 /** 上传封面：落 media/（站点媒体目录），回填相对路径并回显（D13） */
@@ -624,6 +723,9 @@ function openCreate() {
   form.title = ''
   form.summary = ''
   form.tagIds = []
+  // P7：新建默认发表到当前站（无站则仅入内容池）
+  form.siteIds = siteStore.currentSiteId ? [Number(siteStore.currentSiteId)] : []
+  form.topSiteIds = []
   form.coverPath = ''
   form.contentMd = ''
   form.status = 0
@@ -638,6 +740,8 @@ async function openEdit(row: SiteArticleItem) {
     form.title = detail.title
     form.summary = detail.summary
     form.tagIds = detail.tagIds.map(Number)
+    form.siteIds = detail.sites.map((s) => Number(s.id))
+    form.topSiteIds = detail.sites.filter((s) => s.isTop).map((s) => Number(s.id))
     form.coverPath = detail.coverPath ?? ''
     form.contentMd = detail.contentMd
     form.status = detail.status
@@ -661,13 +765,18 @@ async function submit() {
     contentMd: form.contentMd,
     status: form.status,
   }
+  // 置顶是发表关联属性（每站独立），正文/字段走 update，置顶走 :id/sites
+  const sitePayload = {
+    sites: form.siteIds.map((id) => ({ siteId: id, isTop: form.topSiteIds.includes(id) })),
+  }
   try {
     if (editingId.value) {
-      await updateArticle(editingId.value, payload)
+      await updateArticle(editingId.value, { ...payload, siteIds: form.siteIds })
+      if (form.siteIds.length) await setArticleSites(editingId.value, sitePayload)
       ElMessage.success(form.status === 1 ? '已保存并发布' : '已保存草稿')
     } else {
-      // P4E：新建以请求 siteId 为准（更新按实体反查属主，不带 siteId）
-      await createArticle({ ...payload, siteId: Number(siteStore.currentSiteId) })
+      const created = await createArticle({ ...payload, siteIds: form.siteIds })
+      if (form.siteIds.length) await setArticleSites(Number(created.id), sitePayload)
       ElMessage.success(form.status === 1 ? '已发布' : '已存草稿')
     }
     editorVisible.value = false
@@ -730,20 +839,17 @@ async function openPreview(row: SiteArticleItem) {
 }
 
 onMounted(async () => {
+  // P7：站点只用于上传落点与站点筛选，不再决定列表内容
   await siteStore.ensureLoaded().catch(() => undefined)
   reload()
   await loadMeta().catch(() => undefined)
 })
 
-// 切换当前站点 → 回到第一页、重拉列表与栏目/标签元数据（P4E D54）
-watch(
-  () => siteStore.currentSiteId,
-  () => {
-    pageNo.value = 1
-    reload()
-    loadMeta().catch(() => undefined)
-  },
-)
+// 站点筛选变化 → 回到第一页重拉（栏目/标签/关键词沿用既有交互：回车或清空时刷新）
+watch(filterSiteId, () => {
+  pageNo.value = 1
+  reload()
+})
 </script>
 
 <style scoped>
@@ -796,6 +902,15 @@ watch(
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.v-sa-site-tag + .v-sa-site-tag {
+  margin-left: 4px;
+}
+.v-sa-tops {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 .v-sa-cover-img {
   width: 64px;

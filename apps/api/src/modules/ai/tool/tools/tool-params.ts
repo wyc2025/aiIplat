@@ -31,3 +31,21 @@ export function readNumParam(params: Record<string, unknown>, key: string): numb
   if (typeof raw === 'string' && /^\d+$/.test(raw.trim())) return Number(raw.trim())
   return undefined
 }
+
+/**
+ * 正整数数组参数安全取值（P7 R77：siteIds 分档解析用）。
+ * 非数组 → undefined（与「空数组」区分：空数组 = 明确不发表到任何站点）。
+ */
+export function readNumArrayParam(
+  params: Record<string, unknown>,
+  key: string,
+): number[] | undefined {
+  const raw = params[key]
+  if (!Array.isArray(raw)) return undefined
+  const seen = new Set<number>()
+  for (const item of raw) {
+    if (typeof item === 'number' && Number.isInteger(item) && item >= 1) seen.add(item)
+    if (typeof item === 'string' && /^\d+$/.test(item.trim())) seen.add(Number(item.trim()))
+  }
+  return [...seen]
+}

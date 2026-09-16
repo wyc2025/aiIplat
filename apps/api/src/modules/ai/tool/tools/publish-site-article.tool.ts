@@ -35,10 +35,11 @@ export function createPublishSiteArticleTool(siteFacade: SiteFacade): AiTool {
       const status = readNumParam(params, 'status')
       if (id === null || (status !== 0 && status !== 1)) return null
       try {
-        const target = await resolveToolSite(siteFacade, ctx.user.userId, params)
-        if (!target.ok) return null
+        // P7 D73/R77：站点可选——给了 slug 就校验「已发表到该站」，没给（多站场景）按文章操作
+        const resolved = await resolveToolSite(siteFacade, ctx.user.userId, params)
         const article = await siteFacade.readArticle(BigInt(ctx.user.userId), BigInt(id))
-        if (article.siteId !== target.site.id.toString()) return null
+        const target = resolved.ok ? resolved : null
+        if (target && !article.sites.some((s) => s.id === target.site.id.toString())) return null
         const lines = [
           status === 1
             ? `将文章《${article.title}》（id=${id}）上架`
@@ -47,10 +48,19 @@ export function createPublishSiteArticleTool(siteFacade: SiteFacade): AiTool {
         ]
         if (status === 1) {
           lines.push('⚠️ 发布即公开可见：访客立即可通过站点访问该文章')
+          if (article.sites.length === 0) {
+            lines.push(
+              '⚠️ 该文章尚未发表到任何站点：上架后任何站点都看不到它，请先指定发表站点（update_site_article 的 siteIds）',
+            )
+          }
         } else {
           lines.push('下架后访客立即不可见（文章不会被删除，可再次上架）')
         }
-        lines.push(`目标站点：${target.site.title}（${target.site.slug}）`)
+        lines.push(
+          target
+            ? `目标站点：${target.site.title}（${target.site.slug}）`
+            : `已发表站点：${article.sites.map((s) => s.name || s.slug).join('、') || '无'}`,
+        )
         return lines.join('\n')
       } catch {
         return null
@@ -67,16 +77,22 @@ export function createPublishSiteArticleTool(siteFacade: SiteFacade): AiTool {
         }
       }
       try {
-        const target = await resolveToolSite(siteFacade, ctx.user.userId, params)
-        if (!target.ok) return target.feed
+        // P7 D73：站点可选（多站场景无需选站），文章属主由域内反查
+        const resolved = await resolveToolSite(siteFacade, ctx.user.userId, params)
         const article = await siteFacade.publishArticle(BigInt(ctx.user.userId), BigInt(id), status)
         return {
           ok: true,
-          site: { slug: target.site.slug, title: target.site.title },
+          ...(resolved.ok
+            ? { site: { slug: resolved.site.slug, title: resolved.site.title } }
+            : {}),
           id: article.id,
           title: article.title,
           status: article.status,
+          sites: article.sites,
           publishedAt: article.publishedAt,
+          ...(status === 1 && article.sites.length === 0
+            ? { warning: '该文章尚未发表到任何站点：已上架但任何站点都看不到它' }
+            : {}),
         }
       } catch (e) {
         return feedSiteError(e)

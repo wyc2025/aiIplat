@@ -7,8 +7,8 @@ import { CreateTagDto, SaveTagDto, TagQueryDto } from './dto/tag.dto'
 import { SiteTagService } from './tag.service'
 
 /**
- * 标签管理（site:tag:*，API.md §6.2；P4E T61 siteId 作用域化）：
- * list/create 必带 siteId；update/delete 按实体反查属主。
+ * 标签管理（site:tag:*，API.md §6.2；P7 D73 内容池化）：
+ * 标签归用户，list/create 不再带 siteId（站点切换器隐藏）；update/delete 按实体反查 user_id。
  */
 @ApiTags('个人网站-标签管理')
 @ApiBearerAuth()
@@ -18,15 +18,15 @@ export class SiteTagController {
 
   @Get('list')
   @RequirePermission('site:tag:list')
-  @ApiOperation({ summary: '标签列表（必带 siteId；含 articleCount）' })
-  list(@CurrentUser('userId') userId: string, @Query() query: TagQueryDto) {
-    return this.tagService.list(BigInt(userId), BigInt(query.siteId))
+  @ApiOperation({ summary: '标签列表（P7 用户级；含 articleCount）' })
+  list(@CurrentUser('userId') userId: string, @Query() _query: TagQueryDto) {
+    return this.tagService.list(BigInt(userId))
   }
 
   @Post()
   @RequirePermission('site:tag:create')
   @OperationLog('个人网站', '新增标签')
-  @ApiOperation({ summary: '新增标签（body 带 siteId；同站重名 → 40108）' })
+  @ApiOperation({ summary: '新增标签（P7 用户级；本人名下重名 → 40108）' })
   create(@CurrentUser('userId') userId: string, @Body() dto: CreateTagDto) {
     return this.tagService.create(BigInt(userId), dto)
   }

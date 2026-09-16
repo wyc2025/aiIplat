@@ -67,13 +67,18 @@ export function createListSiteArticlesTool(siteFacade: SiteFacade): AiTool {
       try {
         const target = await resolveToolSite(siteFacade, ctx.user.userId, params)
         if (!target.ok) return target.feed
-        const result = await siteFacade.listArticles(BigInt(ctx.user.userId), target.site.id, {
-          columnId: readNumParam(params, 'columnId'),
-          status: readNumParam(params, 'status'),
-          keyword: typeof params.keyword === 'string' ? params.keyword.trim() : undefined,
-          pageNo: readNumParam(params, 'page') ?? 1,
-          pageSize: AI_ARTICLE_PAGE_MAX,
-        })
+        // P7 D73：内容池化后按用户查内容池，站点降为「已发表到该站」筛选
+        const result = await siteFacade.listArticles(
+          BigInt(ctx.user.userId),
+          {
+            columnId: readNumParam(params, 'columnId'),
+            status: readNumParam(params, 'status'),
+            keyword: typeof params.keyword === 'string' ? params.keyword.trim() : undefined,
+            pageNo: readNumParam(params, 'page') ?? 1,
+            pageSize: AI_ARTICLE_PAGE_MAX,
+          },
+          target.site.id,
+        )
         return {
           site: { slug: target.site.slug, title: target.site.title },
           total: result.total,

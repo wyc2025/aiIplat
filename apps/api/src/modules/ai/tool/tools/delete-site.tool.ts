@@ -38,7 +38,8 @@ export function createDeleteSiteTool(siteFacade: SiteFacade): AiTool {
         const impact = await siteFacade.getSiteDeleteImpact(BigInt(ctx.user.userId), target.site.id)
         return [
           `将删除站点 ${impact.slug}（${target.site.title}）：`,
-          `⚠️ 将物理删除 ${impact.articles} 篇文章 / ${impact.columns} 个栏目 / ${impact.tags} 个标签 / ${impact.comments} 条评论，**不可恢复**`,
+          // P7 D73：删站只删该站的展示关联——文章/栏目/标签本体保留在内容池
+          `⚠️ 将从本站下架 ${impact.articles} 篇文章（文章本体保留在内容池）并删除 ${impact.comments} 条评论，**不可恢复**`,
           '站点文件目录将移入云盘回收站（可在回收站还原为普通文件夹）',
           `站点标识 ${impact.slug} 立即释放（此后可被重新注册）`,
         ].join('\n')
@@ -59,10 +60,8 @@ export function createDeleteSiteTool(siteFacade: SiteFacade): AiTool {
         return {
           ok: true,
           slug: impact.slug,
-          deletedArticles: result.deletedArticles,
-          deletedColumns: impact.columns,
-          deletedTags: impact.tags,
-          deletedComments: impact.comments,
+          unpublishedArticles: result.unpublishedArticles,
+          deletedComments: result.deletedComments,
           recycledRoot: result.recycledRoot,
         }
       } catch (e) {

@@ -111,9 +111,15 @@ export class OpenStaticController {
         return
       }
       if (!dirResult.found) {
-        throw new BusinessException(ErrorCode.NotFound, '资源不存在')
+        // P7 D77/R78（路径美化）：无扩展名路径再走回退链 —— x.html → 站点 SPA 回退入口；都无 → 404
+        const fallback = await this.tryPrettyFallback(site.siteId, site.rootFolderId, normalized, site.spaFallback)
+        if (!fallback.found) {
+          throw new BusinessException(ErrorCode.NotFound, '资源不存在')
+        }
+        resolved = fallback
+      } else {
+        resolved = dirResult
       }
-      resolved = dirResult
     }
 
     // 5. 解析 Range（先取元数据判断区间，再按区间取流）
@@ -191,6 +197,29 @@ export class OpenStaticController {
       })
     }
     file.stream.pipe(res)
+  }
+
+  /**
+   * 路径美化回退（P7 D77/R78）：无扩展名路径（如 /article/42、/about）依次尝试
+   *   ① `{path}.html` ② 站点 SPA 回退入口（site_site.spa_fallback，默认模板为 index.html）；
+   * 带扩展名的请求不参与回退（保持"文件不存在即 404"的既有语义，避免掩盖真实缺失）。
+   * 目录语义（`{path}/index.html`）已在 tryDirectoryRedirect 先行覆盖。
+   */
+  private async tryPrettyFallback(
+    siteId: string,
+    rootFolderId: string,
+    normalized: string,
+    spaFallback: string | null,
+  ): Promise<ResolvedPath> {
+    const lastSegment = normalized.split('/').pop() ?? ''
+    if (/\.[A-Za-z0-9]{1,8}$/.test(lastSegment)) return { found: false }
+    const candidates = [`${normalized}.html`]
+    if (spaFallback) candidates.push(spaFallback)
+    for (const candidate of candidates) {
+      const r = await this.resolveService.resolvePath(siteId, rootFolderId, candidate)
+      if (r.found) return r
+    }
+    return { found: false }
   }
 
   /** 路径规范化（R3）：解码后拒绝空段/反斜杠/./..；返回规范化相对路径或 null */

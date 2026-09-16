@@ -1,9 +1,36 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Type } from 'class-transformer'
-import { IsIn, IsInt, IsOptional, IsString, Length, Matches } from 'class-validator'
+import {
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Length,
+  Matches,
+  Validate,
+  ValidatorConstraint,
+  ValidatorConstraintInterface,
+} from 'class-validator'
 
 /** slug 正则（R11，校验失败 40103；保留字黑名单在 Service 层判断） */
 export const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{2,31}$/
+
+/** 开站即发表的文章：'all' = 内容池全部已发布文章；或文章 ID 数组（P7 D73） */
+@ValidatorConstraint({ name: 'allOrArticleIds', async: false })
+export class AllOrArticleIdsConstraint implements ValidatorConstraintInterface {
+  validate(value: unknown): boolean {
+    if (value === 'all') return true
+    return (
+      Array.isArray(value) &&
+      value.length <= 1000 &&
+      value.every((v) => typeof v === 'number' && Number.isInteger(v) && v >= 1)
+    )
+  }
+
+  defaultMessage(): string {
+    return "publishArticleIds 仅支持 'all' 或文章 ID 数组"
+  }
+}
 
 /** 创建站点 */
 export class CreateSiteDto {
@@ -22,6 +49,14 @@ export class CreateSiteDto {
   @IsString()
   @Length(0, 200, { message: '站点描述不能超过 200 字' })
   description?: string
+
+  @ApiPropertyOptional({
+    description: "开站即发表的文章：'all' = 内容池全部已发布文章（缺省）；或文章 ID 数组",
+    example: 'all',
+  })
+  @IsOptional()
+  @Validate(AllOrArticleIdsConstraint)
+  publishArticleIds?: 'all' | number[]
 }
 
 /** 编辑站点（全部可选，至少一项生效） */
