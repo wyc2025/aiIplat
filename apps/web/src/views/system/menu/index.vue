@@ -231,8 +231,9 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import type { FormRules } from 'element-plus'
+import { confirmDialog } from '@/utils/confirm'
 import { Plus } from '@element-plus/icons-vue'
 import { createMenu, deleteMenu, getMenuList, updateMenu } from '@/api/system/menu'
 import type { MenuPayload } from '@/api/system/menu'
@@ -382,7 +383,7 @@ async function handleSubmit() {
 }
 
 async function handleDelete(row: MenuNode) {
-  await ElMessageBox.confirm(`确认删除菜单「${row.name}」吗？`, '提示', { type: 'warning' })
+  if (!(await confirmDialog(`确认删除菜单「${row.name}」吗？`, '提示', { type: 'warning' }))) return
   await deleteMenu(row.id)
   ElMessage.success('删除成功')
   load()

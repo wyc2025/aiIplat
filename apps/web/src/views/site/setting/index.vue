@@ -116,6 +116,26 @@
               :class="{ selected: selectedTemplateId === tpl.id }"
               @click="selectedTemplateId = tpl.id"
             >
+              <!-- 预览图（P6 T80/R72：缺图或加载失败降级占位，不裂图） -->
+              <div class="v-ss-tpl-preview">
+                <el-image
+                  v-if="tpl.previewUrl"
+                  :src="tpl.previewUrl"
+                  fit="cover"
+                >
+                  <template #error>
+                    <div class="v-ss-tpl-preview-empty">
+                      预览图加载失败
+                    </div>
+                  </template>
+                </el-image>
+                <div
+                  v-else
+                  class="v-ss-tpl-preview-empty"
+                >
+                  暂无预览图
+                </div>
+              </div>
               <div class="v-ss-tpl-name">
                 {{ tpl.name }}
               </div>
@@ -211,7 +231,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { confirmDialog } from '@/utils/confirm'
 import type { FormInstance, FormRules } from 'element-plus'
 import { formatTime } from '@/utils/format'
 import SiteSwitcher from '@/components/SiteSwitcher/index.vue'
@@ -297,7 +318,8 @@ async function toggleStatus() {
   if (!site.value) return
   const disabling = site.value.status === 1
   if (disabling) {
-    await ElMessageBox.confirm('停用后站点将对访客全部不可见，确认停用？', '提示', { type: 'warning' })
+    const confirmed = await confirmDialog('停用后站点将对访客全部不可见，确认停用？', '提示', { type: 'warning' })
+    if (!confirmed) return
   }
   await updateSite(site.value.id, { status: disabling ? 0 : 1 })
   await store.load()
@@ -332,11 +354,12 @@ async function loadTemplates() {
 async function onApplyTemplate() {
   const tpl = templates.value.find((t) => t.id === selectedTemplateId.value)
   if (!tpl || !site.value) return
-  await ElMessageBox.confirm(
+  const confirmed = await confirmDialog(
     `确认应用「${tpl.name}」？同名文件将被覆盖，旧版可在回收站还原；media/ 与模板外文件不受影响。`,
     '应用模板',
     { type: 'warning', confirmButtonText: '应用' },
   )
+  if (!confirmed) return
   applying.value = true
   try {
     const results = await applyTemplate(site.value.id, tpl.id)
@@ -410,6 +433,27 @@ onMounted(() => {
 .v-ss-tpl-name {
   font-weight: 600;
   margin-bottom: 6px;
+}
+/* 预览图（P6 T80）：固定比例占位，缺图/失败时同一容器显示提示文案 */
+.v-ss-tpl-preview {
+  height: 120px;
+  margin-bottom: 10px;
+  overflow: hidden;
+  background: #f5f7fa;
+  border-radius: 6px;
+}
+.v-ss-tpl-preview :deep(.el-image) {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.v-ss-tpl-preview-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #909399;
+  font-size: 12px;
 }
 .v-ss-tpl-desc {
   color: #909399;

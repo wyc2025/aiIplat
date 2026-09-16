@@ -26,6 +26,18 @@ export class CommentQueryDto extends SitePageQueryDto {
   keyword?: string
 }
 
+/**
+ * 作者回复评论（P6 T78 / D69 / R71）：
+ * trim 后 ≤500 字；**空字符串或 null = 清除已有回复**（reply_content/reply_at 置 NULL）。
+ */
+export class ReplyCommentDto {
+  @ApiPropertyOptional({ description: '回复内容（trim 后 ≤500 字；空串或 null = 清除已有回复）', nullable: true })
+  @IsOptional()
+  @IsString()
+  @Length(0, 500, { message: '回复内容最多 500 字' })
+  content?: string | null
+}
+
 /** 审核评论（1 通过 / 2 驳回；属主按实体反查） */
 export class AuditCommentDto {
   @ApiProperty({ description: '审核结果（1 通过 / 2 驳回）', enum: [1, 2] })

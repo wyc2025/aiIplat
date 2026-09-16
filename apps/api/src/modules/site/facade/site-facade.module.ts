@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { CloudModule } from '../../cloud/cloud.module'
 import { SiteArticleModule } from '../article/article.module'
 import { SiteColumnModule } from '../column/column.module'
+import { SiteCommentModule } from '../comment/comment.module'
 import { SiteManageModule } from '../manage/manage.module'
 import { SiteTagModule } from '../tag/tag.module'
 import { SiteFacade } from './site-facade.service'
@@ -17,9 +18,19 @@ import { SiteFacade } from './site-facade.service'
  *
  * P5 T71：imports SiteArticleModule / SiteColumnModule / SiteTagModule 以获得 CMS 三服务
  * （同域直注，照 template 先例）；三者均零 imports，无循环风险。
+ *
+ * P6 T78：再 imports SiteCommentModule 以获得 SiteCommentService（评论 list/audit/reply），
+ * CommentModule 零 imports，无循环风险。
  */
 @Module({
-  imports: [CloudModule, SiteManageModule, SiteArticleModule, SiteColumnModule, SiteTagModule],
+  imports: [
+    CloudModule,
+    SiteManageModule,
+    SiteArticleModule,
+    SiteColumnModule,
+    SiteTagModule,
+    SiteCommentModule,
+  ],
   providers: [SiteFacade],
   exports: [SiteFacade],
 })

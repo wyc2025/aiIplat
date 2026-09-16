@@ -254,7 +254,8 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useClipboard } from '@vueuse/core'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { confirmDialog } from '@/utils/confirm'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import ProTable from '@/components/ProTable/index.vue'
@@ -389,7 +390,7 @@ function onManage(row: SiteSiteInfo) {
 
 /** 删站二次确认（R50：逐条列明影响，尤其是「文件可还原 / 文章评论不可恢复」的差异） */
 async function onRemove(row: SiteSiteInfo) {
-  await ElMessageBox.confirm(
+  const confirmed = await confirmDialog(
     `确认删除站点「${row.title}（${row.slug}）」？` +
       '① 文章 / 栏目 / 标签 / 评论将物理删除，不可恢复；' +
       '② 站点文件（含 media/）移入云盘回收站，可还原为普通文件夹；' +
@@ -397,6 +398,7 @@ async function onRemove(row: SiteSiteInfo) {
     '删除站点',
     { type: 'warning', confirmButtonText: '确认删除', confirmButtonClass: 'el-button--danger' },
   )
+  if (!confirmed) return
   try {
     const res = await deleteSite(row.id)
     ElMessage.success(`站点已删除（文章 ${res.deletedArticles} 篇，站点文件已移入回收站）`)

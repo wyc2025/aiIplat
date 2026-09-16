@@ -145,4 +145,11 @@ export const listComments = (params: CommentQuery) =>
 export const auditComment = (id: number, auditStatus: number) =>
   put<{ id: string; auditStatus: number }>(`/site/comment/${id}/audit`, { auditStatus })
 
+/** 作者回复（P6 D69/R71：一级回复，重复回复 = 覆盖；content 空串 = 清除已有回复） */
+export const replyComment = (id: number, content: string) =>
+  put<{ ok: boolean; id: string; replyContent: string | null; replyAt: string | null }>(
+    `/site/comment/${id}/reply`,
+    { content },
+  )
+
 export const removeComment = (id: number) => del(`/site/comment/${id}`)

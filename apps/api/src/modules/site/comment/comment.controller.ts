@@ -3,7 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { CurrentUser } from '../../../gateway/decorators/current-user.decorator'
 import { OperationLog } from '../../../gateway/decorators/operation-log.decorator'
 import { RequirePermission } from '../../../gateway/decorators/require-permission.decorator'
-import { AuditCommentDto, CommentQueryDto } from './dto/comment.dto'
+import { AuditCommentDto, CommentQueryDto, ReplyCommentDto } from './dto/comment.dto'
 import { SiteCommentService } from './comment.service'
 
 /** 评论管理（site:comment:*，API.md §6.2） */
@@ -30,6 +30,18 @@ export class SiteCommentController {
     @Body() dto: AuditCommentDto,
   ) {
     return this.commentService.audit(BigInt(userId), BigInt(id), dto)
+  }
+
+  @Put(':id/reply')
+  @RequirePermission('site:comment:audit')
+  @OperationLog('个人网站', '回复评论')
+  @ApiOperation({ summary: '设置/更新/清除作者回复（空串或 null = 清除；P6 D69）' })
+  reply(
+    @CurrentUser('userId') userId: string,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ReplyCommentDto,
+  ) {
+    return this.commentService.reply(BigInt(userId), BigInt(id), dto.content)
   }
 
   @Delete(':id')

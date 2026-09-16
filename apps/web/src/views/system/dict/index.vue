@@ -295,7 +295,8 @@
 
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { confirmDialog } from '@/utils/confirm'
 import { Plus } from '@element-plus/icons-vue'
 import {
   createDictData,
@@ -417,7 +418,7 @@ async function handleTypeSubmit() {
 }
 
 async function handleTypeDelete(row: DictTypeItem) {
-  await ElMessageBox.confirm(`确认删除字典类型「${row.name}」吗？`, '提示', { type: 'warning' })
+  if (!(await confirmDialog(`确认删除字典类型「${row.name}」吗？`, '提示', { type: 'warning' }))) return
   await deleteDictType(row.id)
   ElMessage.success('删除成功')
   if (currentType.value?.id === row.id) {
@@ -487,7 +488,7 @@ async function handleDataSubmit() {
 }
 
 async function handleDataDelete(row: DictDataItem) {
-  await ElMessageBox.confirm(`确认删除字典数据「${row.label}」吗？`, '提示', { type: 'warning' })
+  if (!(await confirmDialog(`确认删除字典数据「${row.label}」吗？`, '提示', { type: 'warning' }))) return
   await deleteDictData(row.id)
   ElMessage.success('删除成功')
   loadData()

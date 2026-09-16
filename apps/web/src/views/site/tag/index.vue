@@ -106,7 +106,8 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { confirmDialog } from '@/utils/confirm'
 import { Plus } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import ProTable from '@/components/ProTable/index.vue'
@@ -183,9 +184,10 @@ async function submit() {
 }
 
 async function onRemove(row: SiteTagItem) {
-  await ElMessageBox.confirm(`确认删除标签「${row.name}」？文章上的该标签将同步移除`, '提示', {
+  const confirmed = await confirmDialog(`确认删除标签「${row.name}」？文章上的该标签将同步移除`, '提示', {
     type: 'warning',
   })
+  if (!confirmed) return
   try {
     await removeTag(Number(row.id))
     ElMessage.success('已删除')

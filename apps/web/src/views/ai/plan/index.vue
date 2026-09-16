@@ -104,7 +104,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import dayjs from 'dayjs'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { confirmDialog } from '@/utils/confirm'
 import { getMyPlan, getPlanList, subscribePlan, type MyPlanResult, type PlanInfo } from '@/api/ai/plan'
 
 const planList = ref<PlanInfo[]>([])
@@ -139,11 +140,12 @@ async function loadMyPlan() {
 
 async function handleSubscribe(p: PlanInfo) {
   const action = myPlan.value.plan ? '切换' : '开通'
-  await ElMessageBox.confirm(
+  const confirmed = await confirmDialog(
     `确认${action}套餐「${p.name}」吗？${action}后立即生效并重新计算周期，本周期额度将被重置。`,
     `${action}套餐`,
     { type: 'warning', confirmButtonText: `确认${action}`, cancelButtonText: '取消' },
   )
+  if (!confirmed) return
   submitting.value = p.id
   try {
     await subscribePlan({ planId: Number(p.id) })

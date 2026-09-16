@@ -2,7 +2,7 @@
 
 > 本文档是前后端接口的唯一事实来源。与代码冲突时以本文档为准并修正代码。
 > 通用约定（统一响应、错误码、分页、bigint→string、时间格式）见 ARCHITECTURE.md 4.3 节，此处不再重复。
-> 当前覆盖：P2a（ai 域 + system 域在线用户增量）、P2b（AI 工具调用）、P3（cloud 域 + 头像上传）、P4a（site 域 + 开放层 + cloud 公开机制增量）、P4b（AI 站点工具 + 在线编辑 + 模板库）、P4c（云盘公开链接 + /api/pub/ 公开访问端点 + 在线解压，T46~~T49，见 §8；批量上传为纯前端，后端零改动）、**P4d（移动/打包下载/分享升级/公开语义分流，T52~~T56，见 §9；剪切粘贴、多选批量与语义分流为前端能力，后端仅 §9 所列增量）**、**P4e（多站点/删站/AI 多站语义/sid 脱敏，T59~~T65，见 §10）\**、**P4F（配额对账两端点，T68，见 §11；回收站自动清理为纯 cron 行为，无 HTTP 端点）**、\**P5（AI 工具 11→25 + 预算动态化，T71~~T75，见 §12；零新 HTTP 端点、零新错误码、零新依赖——工具契约与配置增量）**。system 域既有接口以代码与 Swagger 为准。
+> 当前覆盖：P2a（ai 域 + system 域在线用户增量）、P2b（AI 工具调用）、P3（cloud 域 + 头像上传）、P4a（site 域 + 开放层 + cloud 公开机制增量）、P4b（AI 站点工具 + 在线编辑 + 模板库）、P4c（云盘公开链接 + /api/pub/ 公开访问端点 + 在线解压，T46~~T49，见 §8；批量上传为纯前端，后端零改动）、**P4d（移动/打包下载/分享升级/公开语义分流，T52~~T56，见 §9；剪切粘贴、多选批量与语义分流为前端能力，后端仅 §9 所列增量）**、**P4e（多站点/删站/AI 多站语义/sid 脱敏，T59~~T65，见 §10）\**、**P4F（配额对账两端点，T68，见 §11；回收站自动清理为纯 cron 行为，无 HTTP 端点）**、\**P5（AI 工具 11→25 + 预算动态化，T71~~T75，见 §12；零新 HTTP 端点、零新错误码、零新依赖——工具契约与配置增量）**、**P6（按需注入 + 评论代审代回 + 封面通道 + 体验三件套，T77~~T81，见 §13；新增 1 个 HTTP 端点、工具 25→28、零新错误码、新依赖 1 个 `@codemirror/merge`）**。system 域既有接口以代码与 Swagger 为准。
 
 ## ai 域错误码（20xxx）
 
@@ -723,15 +723,15 @@ Content-Type: application/json　Accept: text/event-stream
 
 **站点 CMS**
 
-| 工具                 | risk / perms                 | parameters                                                             | 要点                                                                                                                                                                                                                                   |
-| -------------------- | ---------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| list_site_articles   | read / site:article:list     | `{ slug?, columnId?, status?, keyword?, page? }`                       | `{ site, total, pageNo, pageSize, articles:[...] }`（摘要不含 contentMd，pageSize ≤20）                                                                                                                                                |
-| read_site_article    | read / site:article:list     | `{ slug?, id }`                                                        | `{ site, article }`（含 contentMd；超 64KB → truncated=true；slug 与文章实际站点不符 → 40109）                                                                                                                                         |
-| create_site_article  | write / site:article:create  | `{ slug?, columnId?, title, contentMd, summary?, tagNames?, status? }` | status 缺省 0 草稿（D63）；status=1 摘要带「发布即公开可见」警示行；columnId 缺省时本站唯一栏目直达、多栏目回喂 40001+栏目清单、无栏目提示先 ensure；返回 `{ ok, site, id, title, columnId, columnName, tagNames, status, wordCount }` |
-| update_site_article  | write / site:article:update  | `{ slug?, id, title?, contentMd?, columnId?, tagNames?, summary? }`    | 部分更新；`tagNames` 提供即整体替换（**显式空数组 = 清空全部标签**）；无字段 → 40001                                                                                                                                                   |
-| publish_site_article | write / site:article:publish | `{ slug?, id, status }`                                                | 上下架；上架摘要带公开警示；published_at 口径沿用（首次发布写）                                                                                                                                                                        |
-| ensure_site_column   | write / site:column:create   | `{ slug?, name, parentId? }`                                           | 幂等：同名同父命中即返回现有 `{ ok, site, id, name, created:false }`                                                                                                                                                                   |
-| ensure_site_tags     | write / site:tag:create      | `{ slug?, names:[] }`                                                  | 批量幂等 → `{ ok, site, tags:[{ id, name, created }] }`                                                                                                                                                                                |
+| 工具                 | risk / perms                 | parameters                                                                         | 要点                                                                                                                                                                                                                                                                        |
+| -------------------- | ---------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| list_site_articles   | read / site:article:list     | `{ slug?, columnId?, status?, keyword?, page? }`                                   | `{ site, total, pageNo, pageSize, articles:[...] }`（摘要不含 contentMd，pageSize ≤20）                                                                                                                                                                                     |
+| read_site_article    | read / site:article:list     | `{ slug?, id }`                                                                    | `{ site, article }`（含 contentMd；超 64KB → truncated=true；slug 与文章实际站点不符 → 40109）                                                                                                                                                                              |
+| create_site_article  | write / site:article:create  | `{ slug?, columnId?, title, contentMd, summary?, tagNames?, status?, coverPath? }` | status 缺省 0 草稿（D63）；status=1 摘要带「发布即公开可见」警示行；columnId 缺省时本站唯一栏目直达、多栏目回喂 40001+栏目清单、无栏目提示先 ensure；coverPath 见 §13.5（P6）；返回 `{ ok, site, id, title, columnId, columnName, tagNames, coverPath, status, wordCount }` |
+| update_site_article  | write / site:article:update  | `{ slug?, id, title?, contentMd?, columnId?, tagNames?, summary?, coverPath? }`    | 部分更新；`tagNames` 提供即整体替换（**显式空数组 = 清空全部标签**）；coverPath 提供空串 = 清除封面（P6 §13.5）；无字段 → 40001                                                                                                                                             |
+| publish_site_article | write / site:article:publish | `{ slug?, id, status }`                                                            | 上下架；上架摘要带公开警示；published_at 口径沿用（首次发布写）                                                                                                                                                                                                             |
+| ensure_site_column   | write / site:column:create   | `{ slug?, name, parentId? }`                                                       | 幂等：同名同父命中即返回现有 `{ ok, site, id, name, created:false }`                                                                                                                                                                                                        |
+| ensure_site_tags     | write / site:tag:create      | `{ slug?, names:[] }`                                                              | 批量幂等 → `{ ok, site, tags:[{ id, name, created }] }`                                                                                                                                                                                                                     |
 
 **站点生命周期**
 
@@ -750,3 +750,219 @@ Content-Type: application/json　Accept: text/event-stream
 ### 12.4 手册（PLATFORM-GUIDE）
 
 压缩改写 ≤2000 字（UTF-8 字符口径），覆盖：AI 可管云盘（读/写文本/移动/删到回收站）、可发文章（默认草稿、明示才发布、不可删文章）、可改/删站点（删站确认卡列影响）。README.txt（站点模板契约）不动。
+
+> P6 起手册改**两段式**（通用版 + 按权限动态注入的能力清单），本小节的「全文注入 ≤2000 字」口径由 §13.6 取代。
+
+## 13. P6：按需注入 + 评论代审代回 + 封面通道 + 体验三件套
+
+> 决策 D67~~D72 / 规则 R69~~R74，见 `docs/P6/PRD-P6-AI-UX.md`。增补文档 `docs/P6/API-P6-增补.md` 已并入（保留为历史参考，**冲突以本文为准**——§13.6 分组表与 §13.1/§13.4 错误码已按实现改写）。
+> **新增 HTTP 端点 1 个**（作者回复评论，§13.1）；**错误码零新增**（复用 40001/40105/40110/40119 与既有权限码）；工具总数 **25 → 28**。
+
+### 13.1 作者回复评论（新增）
+
+| 方法 | 路径                          | 权限                 | 说明                                                    |
+| ---- | ----------------------------- | -------------------- | ------------------------------------------------------- |
+| PUT  | `/api/site/comment/:id/reply` | `site:comment:audit` | 设置/更新/清除作者回复（一级回复，D69/R71）；挂操作日志 |
+
+请求体：
+
+```json
+{ "content": "感谢反馈，已修复" }
+```
+
+| 字段    | 约束                                                                                    |
+| ------- | --------------------------------------------------------------------------------------- |
+| content | string，trim 后 ≤500 字；**空字符串/null = 清除回复**（reply_content/reply_at 置 NULL） |
+
+返回（实现超集，前端不依赖）：
+
+```json
+{
+  "ok": true,
+  "id": "12",
+  "nickname": "访客甲",
+  "content": "…",
+  "replyContent": "感谢反馈，已修复",
+  "replyAt": "2026-09-15T10:00:00.000Z"
+}
+```
+
+错误码（实际口径）：
+
+| 码    | 触发                                                                                                                          |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------- |
+| 40110 | 评论不存在                                                                                                                    |
+| 40119 | 评论存在但站点非属主（「不存在」与「无权限」同口径，不暴露存在性）                                                            |
+| 40001 | content 超 500 字（DTO `@Length(0,500)` + service 兜底；HISTORICAL 注：API-P6 增补写的 40107 实为 `SiteColumnInUse`，不适用） |
+| —     | 无 `site:comment:audit` → 全局权限守卫码（与所有 `@RequirePermission` 端点一致）                                              |
+
+幂等：重复 PUT 同内容 = 覆盖更新 `reply_at`；无版本冲突概念。列表接口 `GET /api/site/comment` 条目同步增 `replyContent/replyAt`。
+
+### 13.2 开放 API：评论条目携带回复（修改既有）
+
+`GET /api/open/{slug}/api/articles/{id}/comments`（§7.4）返回条目**新增两个字段**：
+
+```json
+{
+  "id": 12,
+  "nickname": "访客甲",
+  "content": "…",
+  "createdAt": "…",
+  "replyContent": "感谢反馈，已修复",
+  "replyAt": "2026-09-15T10:00:00.000Z"
+}
+```
+
+- **仅当评论审核通过（`audit_status=1`）且 `reply_content` 非空时返回内容**；未回复条目两字段为 `null`（字段保留，前端判空渲染）
+- 未过审评论本就不可见，其回复自然不可见（D69：回复不单独审核）
+- 回复无独立点赞/再回复（一级模型）；写回复后失效既有 `site:data:{siteId}:*` 缓存
+
+### 13.3 模板列表携带预览图（修改既有）
+
+`GET /api/site/templates` 条目新增 `previewUrl`：
+
+```json
+{
+  "id": "default",
+  "name": "默认博客",
+  "description": "…",
+  "previewUrl": "/templates/default/preview.png"
+}
+```
+
+- `previewUrl` 为**前端静态资源路径**（Vite 构建产物直出：`apps/web/public/templates/{id}/preview.png`）；模板未配置 `template.json#preview` 时为 `null`（前端渲染占位块，不裂图）
+- 实现偏差登记：ARCHITECTURE-P6 增补写 `assets/site-templates/*/preview.png`（服务端资产），实现落在 web 侧以避免新增静态端点与二进制双份，见 ARCHITECTURE §21.4/§21.7
+
+### 13.4 评论管理 AI 工具（新增 3 个，工具总数 25 → 28）
+
+均挂 `site:comment:audit`，均校验评论属于解析出的当前站点（跨站/非属主 = 40119）。
+
+### 13.4.1 list_site_comments（read）
+
+```json
+{
+  "name": "list_site_comments",
+  "description": "列出站点评论（默认待审核）。可按文章筛选。",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "slug": { "type": "string" },
+      "status": {
+        "type": "string",
+        "enum": ["pending", "approved", "rejected", "all"],
+        "default": "pending"
+      },
+      "articleId": { "type": "integer" },
+      "page": { "type": "integer", "default": 1 },
+      "pageSize": { "type": "integer", "default": 10, "maximum": 20 }
+    }
+  },
+  "perms": ["site:comment:audit"],
+  "risk": "read"
+}
+```
+
+返回 `{ site, filter, total, pageNo, pageSize, comments:[{ id, articleId, articleTitle, nickname, content（超 60 字截断 + contentTruncated）, auditStatus, auditStatusText, replyContent, replyAt, createdAt }] }`。
+
+### 13.4.2 audit_site_comments（write）
+
+```json
+{
+  "name": "audit_site_comments",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "slug": { "type": "string" },
+      "ids": { "type": "array", "items": { "type": "integer" }, "minItems": 1, "maxItems": 20 },
+      "action": { "type": "string", "enum": ["approve", "reject"] }
+    },
+    "required": ["ids", "action"]
+  },
+  "perms": ["site:comment:audit"],
+  "risk": "write"
+}
+```
+
+确认卡摘要：`批量通过/驳回评论：N 条（#id…）` + 公开影响 + 目标站点；执行逐条独立成败 → `{ ok, site, action, total, succeeded:[], failed:[{ id, message }] }`；ids 为空或 >20 → 40001。
+
+### 13.4.3 reply_site_comment（write）
+
+```json
+{
+  "name": "reply_site_comment",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "slug": { "type": "string" },
+      "id": { "type": "integer" },
+      "content": { "type": "string", "maxLength": 500, "description": "回复内容；空串 = 清除回复" }
+    },
+    "required": ["id", "content"]
+  },
+  "perms": ["site:comment:audit"],
+  "risk": "write"
+}
+```
+
+确认卡摘要（R71）= 原评论昵称 + 内容截断 30 字 + 现有回复（若有）+ 新回复内容 + 目标站点；执行返回 `{ ok, site, id, nickname, content, replyContent, replyAt, cleared }`；
+content 超 500 → 40001；评论不存在 → 40110；跨站/非属主 → 40119。
+
+### 13.5 发文/改文工具新增 coverPath（修改既有，D70/R72）
+
+`create_site_article` / `update_site_article` parameters 新增可选字段：
+
+```json
+"coverPath": { "type": "string", "description": "封面图：站点云盘 media/ 下的已有图片路径，如 media/covers/a.png。必须先上传。" }
+```
+
+校验链（`SiteFacade.resolveCoverPath`，任一失败 → 回喂 `{ ok:false, errorCode:40105, message, availableImages, hint }`，不抛栈）：
+
+1. 以 `media/` 前缀开头；
+2. 解析到该站云盘存在对应 file 行（属主 + 未删除 + 非目录 + **当前可公开访问**，站点页面加载得到）；
+3. 扩展名 ∈ `{ .png, .jpg, .jpeg, .webp, .gif }`。
+
+失败时 `availableImages` = 该站 `media/` 下已有图片路径（有界遍历前 10 条），引导模型换图；`update_site_article` 传 `coverPath: ""` = 清除封面。
+列表/详情/开放 API 的 cover 字段既有契约不变（`coverPath` 相对站点根，开放层 `coverUrl` 为完整公开地址）。
+
+### 13.6 手册注入与工具路由（无 HTTP 契约变化，行为说明）
+
+- **手册两段式**（D67/R69）：system prompt = 助手设定 + 通用版（`docs/PLATFORM-GUIDE.md`，静态 ≤1000 字）+ **能力清单**（`capability.manifest.ts`，按用户权限逐项注入 ≤1200 字）+ 用户上下文；合注 ≤2000 字。
+  实测：admin（17 项能力）prompt 1691 字符，无角色用户（1 项能力）prompt 1097 字符——后者不含任何站点/云盘/系统能力行
+- **工具确定性路由**（D68/R70）：请求进入时按**当前用户消息**关键词命中 `KEYWORD_TO_GROUPS` 预筛工具组；common 组恒下发；**无命中 = 全量 28 工具兜底**；
+  确认回填链路按该会话最近一条 user 消息路由；SSE 事件流格式不变
+- 观测日志：`[AI] tools injected: groups=siteCms,common count=13/28`（info 级）；`DEBUG_AI=1` 时 debug 级输出命中关键字与权限内工具数
+
+**分组常量（实现口径，§21.1 为准）**：
+
+| 组             | 工具（28 个，与注册表逐一对应）                                                                                   |
+| -------------- | ----------------------------------------------------------------------------------------------------------------- |
+| common（恒发） | get_my_profile / update_my_profile / get_my_credits                                                               |
+| system         | get_online_users / kick_user / search_users / list_roles                                                          |
+| siteFile       | list_site_files / read_site_file / write_site_files                                                               |
+| siteCms        | list/read/create/update/publish_site_article、ensure_site_column、ensure_site_tags、list/audit/reply_site_comment |
+| siteLifecycle  | create_site / update_site / delete_site                                                                           |
+| cloud          | list_cloud_files / read_cloud_file / write_cloud_file / move_cloud_files / delete_cloud_files                     |
+
+> 工具改名说明：P5 文档中的 create 组自本期起称 **siteCms / siteLifecycle / siteFile**；API-P6 增补 §13.6 原表（含 navigate_page、list_users 等未注册工具）已作废，以本表为准。
+
+### 13.7 体验类改动（前端行为，无接口变化）
+
+| 项          | 说明                                                                                                                                       |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| 模板预览图  | 模板卡片显示 `previewUrl`（`<el-image>`）；缺图/加载失败降级为占位块                                                                       |
+| 编辑器 diff | `FileEditorDialog`「对比改动」（所有文本文件）= 打开时快照 ↔ 当前编辑内容 的**只读双栏**对比（`@codemirror/merge` 异步加载；不做合并编辑） |
+| 格式按钮    | markdown 面（文件编辑器 .md / 文章正文工具栏）快捷插入：粗体 `**`、斜体 `*`、链接 `[](url)`（选区包裹，零依赖）                            |
+| 回收站      | 头像旧行（`parent_id = -1`）不再出现在回收站顶层列表                                                                                       |
+| 确认弹窗    | 全仓统一 `confirmDialog` 封装（内置 try/catch，取消静默；`ElMessageBox.confirm` 仅存在于封装内部）                                         |
+
+### 13.8 编号登记
+
+| 系列      | 本期使用   | 说明                                                           |
+| --------- | ---------- | -------------------------------------------------------------- |
+| 决策      | D67~~D72   | 见 PRD-P6 §2                                                   |
+| 需求      | R69~~R74   | 见 PRD-P6 §3                                                   |
+| 任务      | T77~T82    | 见 PRD-P6 §5                                                   |
+| 错误码    | **无新增** | 复用 40001（超长/批量超限）/40105（封面口径）/40110/40119      |
+| AI 工具   | 25 → 28    | +list_site_comments / audit_site_comments / reply_site_comment |
+| HTTP 端点 | +1         | `PUT /api/site/comment/:id/reply`                              |
+| 前端依赖  | +1         | `@codemirror/merge`（D71 特批，按需异步加载）                  |

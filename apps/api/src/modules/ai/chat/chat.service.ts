@@ -13,6 +13,7 @@ import { CreditService } from '../credit/credit.service'
 import { ProviderService } from '../engine/provider.service'
 import type { EngineChatMessage, EngineTool, EngineToolCall, EngineUsage } from '../engine/engine.types'
 import { ToolRegistry } from '../tool/tool.registry'
+import { groupOfTool, resolveToolGroups, type ToolRoutingResult } from '../tool/tool.groups'
 import type { AiTool } from '../tool/tool.types'
 import type { ChatDto } from './dto/chat.dto'
 import { SystemPromptService } from './system-prompt.service'
@@ -211,8 +212,18 @@ export class ChatService {
 
     // 7. 解析目标（原 assistant 消息 + 会话模型）→ 过滤后工具子集 → 重建上下文（实测预算截取，R67）
     const { conversationId, model, originalMessage } = await this.resolveConfirmTarget(record)
-    const { tools } = await this.getAvailableTools(user, model)
-    const messages = await this.buildConfirmContext(user, record, toolResult, model, originalMessage, tools)
+    // 组路由口径：确认回填链路取本会话最近一条 user 消息（P6 T77；与 chat 链路同一路由函数）
+    const routingText = await this.lastUserMessageText(conversationId)
+    const { tools, routing } = await this.getAvailableTools(user, model, routingText)
+    const messages = await this.buildConfirmContext(
+      user,
+      record,
+      toolResult,
+      model,
+      originalMessage,
+      tools,
+      routing,
+    )
 
     // 8. 建新 assistant 消息（总结独立落库 + 独立结算）
     const assistantMessage = await this.prisma.aiMessage.create({
@@ -348,6 +359,7 @@ export class ChatService {
     model: ChatModel,
     originalMessage: { content: string; reasoningContent: string | null },
     tools: EngineTool[],
+    routing: ToolRoutingResult,
   ): Promise<EngineChatMessage[]> {
     // 历史消息（正序，排除原 assistant 占位消息）
     const history = await this.prisma.aiMessage.findMany({
@@ -366,6 +378,7 @@ export class ChatService {
         this.toolsCharsOf(tools),
         toolResult.length,
         tools.length,
+        routing,
       ),
     )
 
@@ -399,6 +412,16 @@ export class ChatService {
       },
       { role: 'tool', tool_call_id: record.messageId.toString(), content: toolResult },
     ]
+  }
+
+  /** 会话最近一条 user 消息文本（确认回填链路的组路由输入；无则 undefined = 全量兜底） */
+  private async lastUserMessageText(conversationId: bigint): Promise<string | undefined> {
+    const message = await this.prisma.aiMessage.findFirst({
+      where: { conversationId, role: 'user', deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+      select: { content: true },
+    })
+    return message?.content
   }
 
   /** 按 id 加载模型（含厂商） */
@@ -441,8 +464,8 @@ export class ChatService {
       data: { conversationId, role: 'assistant', content: '', modelId: model.id, status: 1 },
     })
 
-    // 8. 确定可用工具（模型支持 + 按权限过滤）——先定工具子集，再按其 schema 实测占用扣减历史预算（R67）
-    const { tools } = await this.getAvailableTools(user, model)
+    // 8. 确定可用工具（模型支持 + 权限过滤 + 组路由，P6 T77）——先定工具子集，再按其 schema 实测占用扣减历史预算（R67）
+    const { tools, routing } = await this.getAvailableTools(user, model, dto.content)
 
     // 9. 拼装上下文（system + tools 恒完整，历史从最早丢弃）
     const { messages, inputChars } = await this.buildContext(
@@ -452,6 +475,7 @@ export class ChatService {
       dto.content,
       model,
       tools,
+      routing,
     )
 
     // 10. 进入流式
@@ -788,25 +812,65 @@ export class ChatService {
     return str.length > max ? `${str.slice(0, max)}…` : str
   }
 
-  /** 确定可用工具：模型 support_tool=1 且按当前用户权限过滤；过滤后为空则不携带 tools */
+  /**
+   * 确定可用工具：模型 support_tool=1 → 权限过滤（现状）→ 组路由（P6 T77 / D68 / R70）。
+   * 两道串联顺序固定：先权限过滤、再组路由（路由不改变权限语义）。
+   * 无命中 = 全量兜底；未归组工具（孤儿，启动已告警）出于安全一律保留。
+   * routingText = 当前用户消息（不含历史），确认回填链路取最近一条 user 消息。
+   */
   private async getAvailableTools(
     user: AuthUser,
     model: ChatModel,
-  ): Promise<{ tools: EngineTool[] }> {
-    if (model.supportTool !== 1) return { tools: [] }
-
-    const available: AiTool[] = []
-    for (const tool of this.toolRegistry.getAll()) {
-      if (!tool.perms || (await this.permissionService.hasPermission(user.userId, tool.perms))) {
-        available.push(tool)
+    routingText?: string,
+  ): Promise<{ tools: EngineTool[]; routing: ToolRoutingResult; injected: number; total: number }> {
+    const all = this.toolRegistry.getAll()
+    const total = all.length
+    if (model.supportTool !== 1) {
+      return {
+        tools: [],
+        routing: { matchedKeywords: [], groups: [], fallback: false },
+        injected: 0,
+        total,
       }
+    }
+
+    // 第一道：权限过滤
+    const permitted: AiTool[] = []
+    for (const tool of all) {
+      if (!tool.perms || (await this.permissionService.hasPermission(user.userId, tool.perms))) {
+        permitted.push(tool)
+      }
+    }
+
+    // 第二道：组路由（无命中全量兜底；孤儿工具恒保留）
+    const routing = resolveToolGroups(routingText)
+    const groups = new Set(routing.groups)
+    const available = permitted.filter((t) => {
+      const group = groupOfTool(t.name)
+      return routing.fallback || group === null || groups.has(group)
+    })
+
+    this.logger.log(
+      `[AI] tools injected: groups=${routing.fallback ? 'all(no-match)' : routing.groups.join(',')} ` +
+        `count=${available.length}/${total}`,
+    )
+    if (this.debugAi) {
+      this.logger.debug(
+        `[AI] 工具路由明细：命中关键字=[${routing.matchedKeywords.join(',')}] ` +
+          `权限内=${permitted.length}/${total} 下发=${available.length}`,
+      )
     }
 
     const tools: EngineTool[] = available.map((t) => ({
       type: 'function',
       function: { name: t.name, description: t.description, parameters: t.parameters },
     }))
-    return { tools }
+    return { tools, routing, injected: available.length, total }
+  }
+
+  /** 路由明细日志开关（env DEBUG_AI=1；默认关） */
+  private get debugAi(): boolean {
+    return this.config.get<boolean>('ai.debugAi', false)
   }
 
   /** 限流检查：Redis INCR，首次设置 60s 窗口，超 20 次返回 42900 */
@@ -872,6 +936,7 @@ export class ChatService {
     currentContent: string,
     model: ChatModel,
     tools: EngineTool[],
+    routing?: ToolRoutingResult,
   ): Promise<{ messages: EngineChatMessage[]; inputChars: number }> {
     const history = await this.prisma.aiMessage.findMany({
       where: { conversationId, deletedAt: null, id: { not: excludeMessageId } },
@@ -884,7 +949,14 @@ export class ChatService {
     const systemMsg: EngineChatMessage = { role: 'system', content: systemPrompt }
     const picked = this.pickHistory(
       history,
-      this.computeHistoryBudget(model, systemPrompt.length, toolsChars, currentContent.length, tools.length),
+      this.computeHistoryBudget(
+        model,
+        systemPrompt.length,
+        toolsChars,
+        currentContent.length,
+        tools.length,
+        routing,
+      ),
     )
 
     const currentMsg: EngineChatMessage = { role: 'user', content: currentContent }
@@ -902,7 +974,7 @@ export class ChatService {
    * 历史截取预算（P5 R67）：max_context − 输出预留(25%) − system prompt 实测 − tools schema 实测
    * − 当前消息（本轮必然入参，故同样先从预算中扣除）。
    * 不足下限（MIN_HISTORY_CHARS）时保底并告警（提示调大模型上下文或精简工具/手册）。
-   * 另于每轮对话开头记 debug 日志（实算值），便于调优。
+   * 另于每轮对话开头记 debug 日志（实算值 + P6 T77 路由明细：命中组/下发数/toolsBudget/historyBudget），便于调优。
    */
   private computeHistoryBudget(
     model: ChatModel,
@@ -910,19 +982,23 @@ export class ChatService {
     toolsChars: number,
     currentChars: number,
     toolsCount: number,
+    routing?: ToolRoutingResult,
   ): number {
     const outputReserve = Math.floor(model.maxContext * OUTPUT_RESERVE_RATIO)
     const budget = model.maxContext - outputReserve - systemChars - toolsChars - currentChars
+    const routeLabel = routing
+      ? `groups=${routing.fallback ? 'all(no-match)' : routing.groups.join(',')} `
+      : ''
     if (budget < MIN_HISTORY_CHARS) {
       this.logger.warn(
         `上下文预算不足：maxContext=${model.maxContext} 输出预留=${outputReserve} system=${systemChars} ` +
-          `tools=${toolsCount}(${toolsChars} 字符) 当前消息=${currentChars} → 历史预算 ${budget} < ${MIN_HISTORY_CHARS}，` +
+          `${routeLabel}tools=${toolsCount}(${toolsChars} 字符) 当前消息=${currentChars} → 历史预算 ${budget} < ${MIN_HISTORY_CHARS}，` +
           '已按下限保底截取（建议调大模型 max_context 或精简工具/手册字数）',
       )
       return MIN_HISTORY_CHARS
     }
     this.logger.debug(
-      `上下文预算：model maxContext=${model.maxContext} tools=${toolsCount} toolsBudget=${toolsChars} ` +
+      `上下文预算：model maxContext=${model.maxContext} ${routeLabel}tools=${toolsCount} toolsBudget=${toolsChars} ` +
         `systemBudget=${systemChars} historyBudget=${budget}`,
     )
     return budget

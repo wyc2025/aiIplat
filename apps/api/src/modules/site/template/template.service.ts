@@ -10,12 +10,17 @@ import type { ApplyTemplateDto } from './dto/template.dto'
 /** 模板库资产目录（应用静态资产，读取用 fs；§15.7：实时读不缓存，模板由部署侧维护） */
 const TEMPLATES_DIR = join(process.cwd(), 'assets', 'site-templates')
 
-/** 模板列表项（id = 模板目录名） */
+/** 模板列表项（id = 模板目录名；previewUrl 见 P6 T80/R72） */
 export interface SiteTemplateItem {
   id: string
   name: string
   description: string
+  /** 预览图静态地址（前端 public/templates/{id}/ 直出）；模板未配置 preview 时为 null（前端渲染占位） */
+  previewUrl: string | null
 }
+
+/** 模板预览图静态前缀（web 构建产物直出，P6 T80：不新增后端端点，见 ARCHITECTURE §21.4） */
+const TEMPLATE_PREVIEW_BASE = '/templates'
 
 /**
  * 模板库（P4b F5/§15.7；P4E T61 应用模板站点化）：
@@ -45,9 +50,15 @@ export class SiteTemplateService {
       if (!entry.isDirectory()) continue
       try {
         const raw = await readFile(join(TEMPLATES_DIR, entry.name, 'template.json'), 'utf-8')
-        const meta = JSON.parse(raw) as { name?: string; description?: string }
+        const meta = JSON.parse(raw) as { name?: string; description?: string; preview?: string | null }
         if (!meta.name) throw new Error('缺少 name 字段')
-        list.push({ id: entry.name, name: meta.name, description: meta.description ?? '' })
+        list.push({
+          id: entry.name,
+          name: meta.name,
+          description: meta.description ?? '',
+          // preview 填文件名才返回地址（缺图为 null → 前端占位，R72）
+          previewUrl: meta.preview ? `${TEMPLATE_PREVIEW_BASE}/${entry.name}/${meta.preview}` : null,
+        })
       } catch (error) {
         // 目录无 template.json 或 JSON 解析失败 → 跳过并记运行日志（§15.7）
         this.logger.warn(

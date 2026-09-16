@@ -1,4 +1,4 @@
-import { Injectable, type OnModuleInit } from '@nestjs/common'
+import { Injectable, Logger, type OnModuleInit } from '@nestjs/common'
 import { CloudFacade } from '../../cloud/facade/cloud-facade.service'
 import { CreditService } from '../credit/credit.service'
 import { SiteFacade } from '../../site/facade/site-facade.service'
@@ -6,6 +6,7 @@ import { OnlineService } from '../../system/online/online.service'
 import { RoleService } from '../../system/role/role.service'
 import { UserService } from '../../system/user/user.service'
 import { ToolRegistry } from './tool.registry'
+import { checkToolGroupCoverage, groupedToolCount } from './tool.groups'
 import { createCreateSiteTool } from './tools/create-site.tool'
 import { createGetMyCreditsTool } from './tools/get-my-credits.tool'
 import { createGetMyProfileTool } from './tools/get-my-profile.tool'
@@ -34,12 +35,16 @@ import { createUpdateSiteArticleTool } from './tools/update-site-article.tool'
 // P5 T74：站点生命周期两件套
 import { createDeleteSiteTool } from './tools/delete-site.tool'
 import { createUpdateSiteTool } from './tools/update-site.tool'
+// P6 T78：评论三件套（代审 + 代回）
+import { createAuditSiteCommentsTool } from './tools/audit-site-comments.tool'
+import { createListSiteCommentsTool } from './tools/list-site-comments.tool'
+import { createReplySiteCommentTool } from './tools/reply-site-comment.tool'
 
 /**
- * 工具装配器：注入各域暴露的门面 Service，在模块启动时把 25 个工具注册到 ToolRegistry。
- * 新增工具 = tools/ 下加一个工厂 + 在此处 register。
+ * 工具装配器：注入各域暴露的门面 Service，在模块启动时把注册表内全部工具（P6 起 28 个）注册到 ToolRegistry。
+ * 新增工具 = tools/ 下加一个工厂 + 在此处 register + 在 tool.groups.ts 归组（R70）。
  * 域门面纪律（见 ARCHITECTURE §12.3）：handler 只注入域 exports 的 Service，零跨域 import 内部实现——
- * 站点系列（文件三件套 + create_site + CMS 七件套 + 生命周期两件套）只注入 SiteFacade；
+ * 站点系列（文件三件套 + create_site + CMS 七件套 + 评论三件套 + 生命周期两件套）只注入 SiteFacade；
  * 云盘五件套只注入 CloudFacade（P5 T72 起）。
  */
 @Injectable()
@@ -53,6 +58,8 @@ export class ToolBootstrap implements OnModuleInit {
     private readonly siteFacade: SiteFacade,
     private readonly cloudFacade: CloudFacade,
   ) {}
+
+  private readonly logger = new Logger(ToolBootstrap.name)
 
   onModuleInit(): void {
     // P2b 七个（系统/用户/角色/资料/积分）
@@ -85,5 +92,30 @@ export class ToolBootstrap implements OnModuleInit {
     // P5 T74：站点生命周期两件套（D64/R66）
     this.registry.register(createUpdateSiteTool(this.siteFacade))
     this.registry.register(createDeleteSiteTool(this.siteFacade))
+    // P6 T78：评论三件套（代审 list/audit + 代回 reply，D69/R71/R74）
+    this.registry.register(createListSiteCommentsTool(this.siteFacade))
+    this.registry.register(createAuditSiteCommentsTool(this.siteFacade))
+    this.registry.register(createReplySiteCommentTool(this.siteFacade))
+
+    // P6 T77：工具归组校验（R70）——孤儿工具会让组路由漏发工具，启动即告警
+    this.assertToolGroups()
+  }
+
+  /**
+   * 分组覆盖校验（T77 验收 3）：注册表中的每个工具必须有组归属，分组表也不能登记不存在的工具。
+   * 运行期只告警不中断（宁可多下发也不让服务起不来）；scripts/check-ai-prompt.ts 为硬失败版。
+   */
+  private assertToolGroups(): void {
+    const names = this.registry.getAll().map((tool) => tool.name)
+    const { orphans, stale } = checkToolGroupCoverage(names)
+    if (orphans.length > 0) {
+      this.logger.warn(
+        `工具未归组（组路由会漏发，请在 tool.groups.ts 的 TOOL_GROUPS 中登记）：${orphans.join('、')}`,
+      )
+    }
+    if (stale.length > 0) {
+      this.logger.warn(`分组表登记了未注册的工具（请同步清理）：${stale.join('、')}`)
+    }
+    this.logger.log(`工具注册完成：${names.length} 个（分组覆盖 ${groupedToolCount()} 条）`)
   }
 }

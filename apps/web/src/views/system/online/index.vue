@@ -76,7 +76,8 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { confirmDialog } from '@/utils/confirm'
 import { Refresh } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import ProTable from '@/components/ProTable/index.vue'
@@ -104,11 +105,16 @@ async function load() {
 }
 
 async function handleKick(row: OnlineUserItem) {
-  await ElMessageBox.confirm(`确认将用户「${row.nickname}（${row.username}）」踢下线吗？其所有端将被强制登出。`, '提示', {
-    type: 'warning',
-    confirmButtonText: '确认踢下线',
-    cancelButtonText: '取消',
-  })
+  const confirmed = await confirmDialog(
+    `确认将用户「${row.nickname}（${row.username}）」踢下线吗？其所有端将被强制登出。`,
+    '提示',
+    {
+      type: 'warning',
+      confirmButtonText: '确认踢下线',
+      cancelButtonText: '取消',
+    },
+  )
+  if (!confirmed) return
   await kickUser(row.userId)
   ElMessage.success('已踢下线')
   load()

@@ -233,7 +233,8 @@
 
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { confirmDialog } from '@/utils/confirm'
 import { Plus } from '@element-plus/icons-vue'
 import ProTable from '@/components/ProTable/index.vue'
 import FormDialog from '@/components/FormDialog/index.vue'
@@ -333,7 +334,7 @@ async function handleSubmit() {
 }
 
 async function handleDelete(row: PlanAdminItem) {
-  await ElMessageBox.confirm(`确认删除套餐「${row.name}」吗？`, '提示', { type: 'warning' })
+  if (!(await confirmDialog(`确认删除套餐「${row.name}」吗？`, '提示', { type: 'warning' }))) return
   await deletePlan(row.id)
   ElMessage.success('删除成功')
   load()

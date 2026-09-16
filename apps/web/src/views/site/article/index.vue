@@ -281,6 +281,31 @@
           <div class="v-sa-pane-title">
             <span>
               正文（markdown）
+              <!-- 格式按钮（P6 T80/D71）：选中文本包裹 markdown 语法，零依赖 -->
+              <el-button
+                link
+                type="primary"
+                size="small"
+                @click="wrapMarkdown('**', '**', '粗体')"
+              >
+                粗体
+              </el-button>
+              <el-button
+                link
+                type="primary"
+                size="small"
+                @click="wrapMarkdown('*', '*', '斜体')"
+              >
+                斜体
+              </el-button>
+              <el-button
+                link
+                type="primary"
+                size="small"
+                @click="wrapMarkdown('[', '](https://)', '链接文字')"
+              >
+                链接
+              </el-button>
               <el-button
                 v-permission="'cloud:file:upload'"
                 link
@@ -312,6 +337,7 @@
             </el-radio-group>
           </div>
           <el-input
+            ref="contentInputRef"
             v-model="form.contentMd"
             type="textarea"
             :rows="18"
@@ -375,7 +401,8 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { confirmDialog } from '@/utils/confirm'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import ProTable from '@/components/ProTable/index.vue'
@@ -417,6 +444,33 @@ const coverInput = ref<HTMLInputElement>()
 const imageInput = ref<HTMLInputElement>()
 const coverUploading = ref(false)
 const imageUploading = ref(false)
+/** 正文输入框（格式按钮需读取 textarea 的选区，P6 T80） */
+const contentInputRef = ref<{ textarea?: HTMLTextAreaElement; $el?: HTMLElement }>()
+
+/** 取正文 textarea 原生元素（Element Plus 暴露 textarea ref；兜底 DOM 查询） */
+function textareaEl(): HTMLTextAreaElement | null {
+  const instance = contentInputRef.value
+  if (!instance) return null
+  if (instance.textarea) return instance.textarea
+  return instance.$el?.querySelector('textarea') ?? null
+}
+
+/**
+ * 格式按钮（P6 T80/D71）：把选区包裹成 markdown 语法（粗体 `**` / 斜体 `*` / 链接 `[](url)`），
+ * 无选区时插入占位文本；包裹后保持选中新插入的文本，便于继续输入替换。
+ */
+function wrapMarkdown(before: string, after: string, placeholder: string) {
+  const textarea = textareaEl()
+  if (!textarea) return
+  const start = textarea.selectionStart ?? form.contentMd.length
+  const end = textarea.selectionEnd ?? start
+  const selected = form.contentMd.slice(start, end) || placeholder
+  form.contentMd = `${form.contentMd.slice(0, start)}${before}${selected}${after}${form.contentMd.slice(end)}`
+  requestAnimationFrame(() => {
+    textarea.focus()
+    textarea.setSelectionRange(start + before.length, start + before.length + selected.length)
+  })
+}
 
 /** 无站点时的空态文案（P4E：站点为 0 时不做接口请求） */
 const emptyText = computed(() => (siteStore.empty ? '还没有站点，请先到「站点列表」创建' : '还没有文章'))
@@ -629,7 +683,8 @@ async function submit() {
 async function onToggleStatus(row: SiteArticleItem) {
   const publishing = row.status !== 1
   if (publishing) {
-    await ElMessageBox.confirm(`确认发布「${row.title}」？`, '提示', { type: 'info' })
+    const confirmed = await confirmDialog(`确认发布「${row.title}」？`, '提示', { type: 'info' })
+    if (!confirmed) return
   }
   try {
     await updateArticleStatus(Number(row.id), publishing ? 1 : 0)
@@ -641,9 +696,14 @@ async function onToggleStatus(row: SiteArticleItem) {
 }
 
 async function onRemove(row: SiteArticleItem) {
-  await ElMessageBox.confirm(`确认删除「${row.title}」？正文、标签关联与全部评论将被物理删除，不可恢复`, '警告', {
-    type: 'warning',
-  })
+  const confirmed = await confirmDialog(
+    `确认删除「${row.title}」？正文、标签关联与全部评论将被物理删除，不可恢复`,
+    '警告',
+    {
+      type: 'warning',
+    },
+  )
+  if (!confirmed) return
   try {
     await removeArticle(Number(row.id))
     ElMessage.success('已删除')

@@ -29,9 +29,15 @@
         </template>
       </el-result>
       <div
-        v-show="!loadError"
+        v-show="!loadError && !diffOpen"
         ref="editorHost"
         class="v-fe-host"
+      />
+      <!-- 只读对比（P6 T80/R73：旧 ← → 新，双栏 @codemirror/merge 按需加载，不做合并编辑） -->
+      <div
+        v-show="!loadError && diffOpen"
+        ref="diffHost"
+        class="v-fe-host v-fe-diff"
       />
     </div>
     <template #footer>
@@ -45,6 +51,34 @@
             {{ dirty ? '未保存' : '无改动' }}
           </el-tag>
         </span>
+        <!-- 格式按钮（P6 T80/D71）：markdown 文件快捷插入，零依赖 -->
+        <template v-if="isMarkdown && !diffOpen">
+          <el-button
+            size="small"
+            @click="wrapSelection('**', '**', '粗体')"
+          >
+            粗体
+          </el-button>
+          <el-button
+            size="small"
+            @click="wrapSelection('*', '*', '斜体')"
+          >
+            斜体
+          </el-button>
+          <el-button
+            size="small"
+            @click="wrapSelection('[', '](https://)', '链接文字')"
+          >
+            链接
+          </el-button>
+        </template>
+        <el-button
+          size="small"
+          :disabled="!dirty && !diffOpen"
+          @click="toggleDiff"
+        >
+          {{ diffOpen ? '返回编辑' : '对比改动' }}
+        </el-button>
         <el-button @click="requestClose">
           关闭
         </el-button>
@@ -62,18 +96,23 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { ElMessage } from 'element-plus'
+import { confirmDialog } from '@/utils/confirm'
 import { EditorView, basicSetup } from 'codemirror'
+import { EditorState } from '@codemirror/state'
 import type { Extension } from '@codemirror/state'
+import type { MergeView } from '@codemirror/merge'
 import { previewFileBlob, updateFileContent } from '@/api/cloud/file'
 import { formatSize } from '@/utils/format'
 
 /**
- * CodeMirror 6 在线编辑弹窗（P4b T43，架构增补 §15.1/§15.13）。
+ * CodeMirror 6 在线编辑弹窗（P4b T43，架构增补 §15.1/§15.13；P6 T80 增只读对比与格式按钮）。
  * - 语言包按扩展名动态 import（vite 自动分包），不阻塞云盘页首屏（PRD F3）
  * - 保存走 PUT /cloud/file/:id/content（更新行语义，fileId/URL 不变，开放层立即生效）
  * - 脏检查：内容变更未保存时关闭 → ElMessageBox 二次确认（PRD F3）
+ * - P6 T80/R73：markdown 文件提供「粗体/斜体/链接」快捷插入；「对比改动」= 打开时内容 ↔
+ *   当前编辑内容 的只读双栏对比（@codemirror/merge 按需异步加载，不做合并编辑）
  */
 const props = defineProps<{
   visible: boolean
@@ -86,14 +125,22 @@ const emit = defineEmits<{
 }>()
 
 const editorHost = ref<HTMLElement>()
+const diffHost = ref<HTMLElement>()
 const loading = ref(false)
 const loadError = ref(false)
 const saving = ref(false)
 const dirty = ref(false)
 /** EditorView 持有大量子对象，用 shallowRef 避免深度响应式开销 */
 const view = shallowRef<EditorView | null>(null)
+/** 打开时的内容快照（对比左侧 = 旧） */
+const originalContent = ref('')
+/** 只读对比视图（P6 T80；仅打开期间存在） */
+const mergeView = shallowRef<MergeView | null>(null)
+const diffOpen = ref(false)
 
 const extLabel = computed(() => (props.file?.ext ?? 'txt').toUpperCase())
+/** 格式按钮仅对 markdown 文件开放（markdown 语法插入才有意义）；「对比改动」对所有文本文件开放 */
+const isMarkdown = computed(() => (props.file?.ext ?? '').toLowerCase() === 'md')
 
 /** 语言扩展按需加载（§15.12 白名单内高亮，yaml/csv/txt 纯文本） */
 async function loadLangExtension(ext: string): Promise<Extension[]> {
@@ -136,6 +183,7 @@ async function open() {
     // 文本内容读取复用预览流（文本类强制 text/plain; charset=utf-8，R7）
     const blob = await previewFileBlob(Number(props.file.id))
     const content = await blob.text()
+    originalContent.value = content
     const lang = await loadLangExtension((props.file.ext ?? '').toLowerCase())
     view.value?.destroy()
     view.value = new EditorView({
@@ -174,12 +222,65 @@ onBeforeUnmount(() => {
   editorHost.value?.removeEventListener('keydown', onHostKeydown, true)
 })
 
+/** 选区包裹（P6 T80/D71）：粗体 `**`、斜体 `*`、链接 `[](url)`；无选区时插入占位文本 */
+function wrapSelection(before: string, after: string, placeholder: string) {
+  const editor = view.value
+  if (!editor || diffOpen.value) return
+  const { from, to } = editor.state.selection.main
+  const selected = editor.state.sliceDoc(from, to) || placeholder
+  editor.dispatch({
+    changes: { from, to, insert: `${before}${selected}${after}` },
+    selection: { anchor: from + before.length, head: from + before.length + selected.length },
+  })
+  editor.focus()
+  dirty.value = true
+}
+
+/** 打开/关闭只读对比：左 = 打开时内容（旧），右 = 当前编辑内容（新）；merge 包按需异步加载（R73） */
+async function toggleDiff() {
+  if (diffOpen.value) {
+    closeDiff()
+    return
+  }
+  const editor = view.value
+  if (!editor || !diffHost.value) return
+  const { MergeView } = await import('@codemirror/merge')
+  mergeView.value?.destroy()
+  mergeView.value = null
+  // 先切到对比态（容器 v-show 显示）再挂载：隐藏态下 CodeMirror 测量为 0 会渲染异常
+  diffOpen.value = true
+  await nextTick()
+  mergeView.value = new MergeView({
+    parent: diffHost.value,
+    a: {
+      doc: originalContent.value,
+      extensions: [EditorState.readOnly.of(true), EditorView.lineWrapping],
+    },
+    b: {
+      doc: editor.state.doc.toString(),
+      extensions: [EditorState.readOnly.of(true), EditorView.lineWrapping],
+    },
+    highlightChanges: true,
+    gutter: true,
+  })
+}
+
+/** 关闭对比并释放 merge 实例（返回编辑态） */
+function closeDiff() {
+  mergeView.value?.destroy()
+  mergeView.value = null
+  diffOpen.value = false
+}
+
 async function save() {
   if (!props.file || !view.value) return
   saving.value = true
   try {
-    await updateFileContent(Number(props.file.id), view.value.state.doc.toString())
+    const content = view.value.state.doc.toString()
+    await updateFileContent(Number(props.file.id), content)
     dirty.value = false
+    originalContent.value = content
+    closeDiff()
     ElMessage.success('已保存，公开访问即时生效')
     emit('saved')
   } catch {
@@ -195,29 +296,28 @@ async function handleBeforeClose(done: () => void) {
     done()
     return
   }
-  try {
-    await ElMessageBox.confirm('当前内容尚未保存，确定关闭？', '提示', {
-      confirmButtonText: '放弃更改并关闭',
-      cancelButtonText: '继续编辑',
-      type: 'warning',
-    })
-    dirty.value = false
-    done()
-  } catch {
-    // 用户选择继续编辑
-  }
+  const confirmed = await confirmDialog('当前内容尚未保存，确定关闭？', '提示', {
+    confirmButtonText: '放弃更改并关闭',
+    cancelButtonText: '继续编辑',
+    type: 'warning',
+  })
+  if (!confirmed) return // 用户选择继续编辑
+  dirty.value = false
+  done()
 }
 
 function requestClose() {
   void handleBeforeClose(() => emit('update:visible', false))
 }
 
-/** 关闭完成：销毁编辑器释放资源 */
+/** 关闭完成：销毁编辑器与对比视图释放资源 */
 function onClosed() {
+  closeDiff()
   view.value?.destroy()
   view.value = null
   loadError.value = false
   dirty.value = false
+  originalContent.value = ''
 }
 </script>
 
@@ -233,6 +333,14 @@ function onClosed() {
 }
 .v-fe-host :deep(.cm-editor) {
   height: 100%;
+}
+/* 只读对比容器（P6 T80）：MergeView 自带滚动，容器只负责撑满高度 */
+.v-fe-diff :deep(.cm-mergeView) {
+  height: 100%;
+  overflow: auto;
+}
+.v-fe-diff :deep(.cm-mergeViewEditors) {
+  height: auto;
 }
 .v-fe-footer {
   display: flex;

@@ -137,11 +137,15 @@ export class SiteOpenService {
         }),
         this.prisma.siteComment.count({ where }),
       ])
+      // P6 T78 / R71：评论条目携带作者回复（本查询恒为 audit_status=1，故回复可见性与评论一致；
+      // 未回复条目两字段为 null，前端判空渲染）
       const list = rows.map((c) => ({
         id: c.id.toString(),
         nickname: c.nickname,
         content: c.content,
         createdAt: c.createdAt,
+        replyContent: c.replyContent,
+        replyAt: c.replyAt,
       }))
       return { list, total, pageNo: query.pageNo, pageSize: query.pageSize }
     })

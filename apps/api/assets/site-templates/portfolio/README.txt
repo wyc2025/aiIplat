@@ -44,7 +44,8 @@ iplat 个人网站模板 —— 作品集（portfolio）
 
   6. GET ./api/articles/{id}/comments —— 评论分页（仅已过审，按时间正序）
      参数：pageNo / pageSize
-     data: { list: [{ id, nickname, content, createdAt }], total, pageNo, pageSize }
+     data: { list: [{ id, nickname, content, createdAt, replyContent, replyAt }], total, pageNo, pageSize }
+     replyContent/replyAt：作者回复（一级回复，每条至多一条；未回复为 null，判空后渲染）
 
   7. POST ./api/articles/{id}/comments —— 提交评论
      body: { nickname: 1~32 字, content: 1~500 字 }

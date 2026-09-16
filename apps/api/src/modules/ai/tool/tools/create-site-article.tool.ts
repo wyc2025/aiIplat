@@ -7,6 +7,33 @@ import { articleStatusText, resolveToolSite } from './list-site-articles.tool'
 import { readNumParam, readStrArrayParam, readStrParam } from './tool-params'
 
 /**
+ * 封面路径校验（P6 T79 / R72）：失败直接产出回喂对象（40105 + media/ 可用图片清单），
+ * 由 create/update 文章工具共用；成功返回校验通过的规范化路径。
+ */
+export async function resolveCoverOrFeed(
+  siteFacade: SiteFacade,
+  userId: string,
+  siteId: bigint,
+  coverPath: string,
+): Promise<{ ok: true; path: string } | { ok: false; feed: unknown }> {
+  const result = await siteFacade.resolveCoverPath(BigInt(userId), siteId, coverPath)
+  if (result.ok) return { ok: true, path: result.path }
+  return {
+    ok: false,
+    feed: {
+      ok: false,
+      errorCode: result.errorCode,
+      message: result.message,
+      availableImages: result.availableImages,
+      hint:
+        result.availableImages.length > 0
+          ? '请改用上述 media/ 下已有图片之一作为 coverPath 重试'
+          : '该站点 media/ 下暂无图片，请先引导用户到「个人网站 → 文件管理」的 media/ 目录上传图片',
+    },
+  }
+}
+
+/**
  * 创建站点文章（write，确认卡）。
  * D63 代发语义：默认草稿；只有用户明示「直接发布」才带 status=1，
  * 且 status=1 时确认卡摘要必须带「发布即公开可见」警示行（R63）。
@@ -23,6 +50,8 @@ export function createCreateSiteArticleTool(siteFacade: SiteFacade): AiTool {
       'title 必填；contentMd 为 markdown 正文（≤20 万字符）；summary 省略时自动取正文前 100 字；' +
       'columnId 省略时：本站仅一个栏目则自动使用，否则会回喂栏目清单请你带上 columnId 重试（也可先用 ensure_site_column 创建栏目）；' +
       'tagNames 按名称给出，已存在的标签直接复用、不存在的自动创建。' +
+      'coverPath（可选）= 封面图，必须是本站站点云盘 media/ 目录下**已存在**的图片（如 media/covers/a.png，支持 png/jpg/jpeg/webp/gif）；' +
+      '可先用 list_cloud_files { path: "media/" } 查看可用图片；路径非法或图片不存在会回喂 40105 并附该站 media/ 下可用图片清单。AI 无法上传图片，只能用已有图片。' +
       '注意：本工具建的是**文章（表驱动内容）**，不是站点文件；要改页面/样式请用 write_site_files。',
     parameters: {
       type: 'object',
@@ -39,6 +68,11 @@ export function createCreateSiteArticleTool(siteFacade: SiteFacade): AiTool {
           type: 'array',
           items: { type: 'string' },
           description: '标签名称数组（≤20 个，名称 1~32 字；已存在的复用、不存在的自动创建）',
+        },
+        coverPath: {
+          type: 'string',
+          description:
+            '封面图：站点云盘 media/ 下**已有图片**的相对路径，如 media/covers/a.png（支持 png/jpg/jpeg/webp/gif）。AI 不能上传图片，请先用 list_cloud_files 查看 media/ 下的图片',
         },
         status: {
           type: 'integer',
@@ -59,6 +93,7 @@ export function createCreateSiteArticleTool(siteFacade: SiteFacade): AiTool {
       const status = readNumParam(params, 'status') === 1 ? 1 : 0
       const tagNames = readStrArrayParam(params, 'tagNames')
       const columnId = readNumParam(params, 'columnId')
+      const coverPath = readStrParam(params, 'coverPath')
 
       try {
         const target = await resolveToolSite(siteFacade, ctx.user.userId, params)
@@ -80,6 +115,16 @@ export function createCreateSiteArticleTool(siteFacade: SiteFacade): AiTool {
         if (tagNames.length > 0) {
           lines.push(`标签：${tagNames.join('、')}（已存在的复用，不存在的自动创建）`)
         }
+        if (coverPath) {
+          // R72：执行前先解析封面，让用户在确认卡上就看到「图是否存在」
+          const cover = await siteFacade.resolveCoverPath(BigInt(ctx.user.userId), target.site.id, coverPath)
+          if (cover.ok) {
+            lines.push(`封面：${cover.path}`)
+          } else {
+            const hint = cover.availableImages.slice(0, 3).join('、')
+            lines.push(`封面：${coverPath}（⚠️ ${cover.message}${hint ? `；可用图片：${hint}` : ''}）`)
+          }
+        }
         lines.push(`字数：${countWordsR14(contentMd)}`)
         lines.push(`状态：${articleStatusText(status)}`)
         if (status === 1) {
@@ -100,6 +145,14 @@ export function createCreateSiteArticleTool(siteFacade: SiteFacade): AiTool {
       try {
         const target = await resolveToolSite(siteFacade, ctx.user.userId, params)
         if (!target.ok) return target.feed
+        // R72：封面通道（media/ 前缀 + 真实图片存在性校验，失败回喂 40105 + 可用图片清单）
+        const coverInput = readStrParam(params, 'coverPath')
+        let coverPath: string | undefined
+        if (coverInput) {
+          const cover = await resolveCoverOrFeed(siteFacade, ctx.user.userId, target.site.id, coverInput)
+          if (!cover.ok) return cover.feed
+          coverPath = cover.path
+        }
         const article = await siteFacade.createArticle(BigInt(ctx.user.userId), target.site.id, {
           columnId: readNumParam(params, 'columnId'),
           title,
@@ -107,6 +160,7 @@ export function createCreateSiteArticleTool(siteFacade: SiteFacade): AiTool {
           summary: readStrParam(params, 'summary'),
           tagNames: readStrArrayParam(params, 'tagNames'),
           status: readNumParam(params, 'status') === 1 ? 1 : 0,
+          coverPath,
         })
         return {
           ok: true,
@@ -116,6 +170,7 @@ export function createCreateSiteArticleTool(siteFacade: SiteFacade): AiTool {
           columnId: article.columnId,
           columnName: article.columnName,
           tagNames: article.tagNames,
+          coverPath: article.coverPath,
           status: article.status,
           wordCount: article.wordCount,
         }

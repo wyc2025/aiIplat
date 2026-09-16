@@ -14,6 +14,8 @@ import type { CreateArticleDto, UpdateArticleDto, UpdateArticleStatusDto } from 
 import { SiteArticleService, ArticleQueryDto } from '../article/article.service'
 import { SiteColumnService } from '../column/column.service'
 import { SiteTagService } from '../tag/tag.service'
+import { SiteCommentService, type CommentReplyResult } from '../comment/comment.service'
+import { AuditCommentDto, CommentQueryDto } from '../comment/dto/comment.dto'
 import type { CreateSiteDto, UpdateSiteDto } from '../manage/dto/site.dto'
 import { SiteManageService, type SiteView } from '../manage/manage.service'
 
@@ -47,6 +49,14 @@ export const AI_READ_MAX_BYTES = 64 * 1024
 export const AI_ARTICLE_PAGE_MAX = 20
 /** AI 单次 ensure 标签数上限（P5 §20.1） */
 export const AI_TAG_MAX = 20
+/** AI 评论列表单页上限（P6 §21.2：与文章同口径） */
+export const AI_COMMENT_PAGE_MAX = 20
+/** AI 单次批量审核评论数上限（P6 §21.2 / API-P6 §13.4.2） */
+export const AI_COMMENT_BATCH_MAX = 20
+/** 封面图片扩展名白名单（P6 R72） */
+export const SITE_COVER_IMAGE_EXTS: ReadonlySet<string> = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif'])
+/** 封面校验失败时回喂的可用图片清单条数上限（P6 R72：附前 10 条引导模型换图） */
+export const AI_COVER_HINT_MAX = 10
 
 /** 当前用户的某个站点信息（rootFolderId 保持 bigint 供域内机械操作，出域序列化由调用方转字符串） */
 export interface MySiteInfo {
@@ -108,6 +118,12 @@ export const AI_ARTICLE_READ_MAX_BYTES = 64 * 1024
  */
 export { countWordsR14 } from '../article/article.service'
 
+/**
+ * 评论正文/作者回复字数上限（P6 R71；口径单一来源在 comment.service.ts）。
+ * 同 countWordsR14 先例：经门面转出供 ai 域工具复用，ai 域不得直接 import 站点域内实现（铁律 6）。
+ */
+export { COMMENT_CONTENT_MAX } from '../comment/comment.service'
+
 /** 文章列表查询入参（AI 工具参数 → ArticleQueryDto 的薄映射） */
 export interface ArticleListParams {
   columnId?: number
@@ -135,6 +151,8 @@ export interface SiteArticleItem {
   columnName: string
   title: string
   summary: string | null
+  /** 封面相对站点根路径（P6 T79 起出口径；未设为 null） */
+  coverPath: string | null
   tagIds: string[]
   tagNames: string[]
   wordCount: number
@@ -148,7 +166,7 @@ export interface SiteArticleItem {
   truncated?: boolean
 }
 
-/** 文章创建入参（AI 口径：默认草稿，status=1 才发布；tagNames 走 ensure 语义） */
+/** 文章创建入参（AI 口径：默认草稿，status=1 才发布；tagNames 走 ensure 语义；coverPath 须 R72 校验通过） */
 export interface CreateArticleInput {
   columnId?: number
   title: string
@@ -156,16 +174,26 @@ export interface CreateArticleInput {
   summary?: string
   tagNames?: string[]
   status?: number
+  coverPath?: string
 }
 
-/** 文章更新入参（部分更新；tagNames 提供即整体替换） */
+/** 文章更新入参（部分更新；tagNames 提供即整体替换；coverPath 传空串 = 清除封面） */
 export interface UpdateArticleInput {
   title?: string
   contentMd?: string
   columnId?: number
   summary?: string
   tagNames?: string[]
+  coverPath?: string
 }
+
+/**
+ * 封面解析结果（P6 T79 / R72）：与 resolveSite 同风格——不抛异常，失败信息显式回喂给模型。
+ * 失败时附该站 media/ 下可用图片清单（前 10 条），引导模型换图。
+ */
+export type CoverResolveResult =
+  | { ok: true; path: string }
+  | { ok: false; errorCode: number; message: string; availableImages: string[] }
 
 /** ensure 语义结果（存在复用 / 不存在创建，幂等） */
 export interface EnsureResult {
@@ -173,6 +201,33 @@ export interface EnsureResult {
   name: string
   created: boolean
 }
+
+/** 评论列表查询入参（AI 工具参数 → CommentQueryDto 的薄映射） */
+export interface CommentListParams {
+  auditStatus?: number
+  articleId?: number
+  keyword?: string
+  pageNo?: number
+  pageSize?: number
+}
+
+/** 评论条目（出域形态；内容原样返回，截断由工具层按摘要口径处理） */
+export interface SiteCommentItem {
+  id: string
+  articleId: string
+  articleTitle: string
+  nickname: string
+  content: string
+  auditStatus: number
+  replyContent: string | null
+  replyAt: Date | null
+  createdAt: Date
+}
+
+/** 批量审核逐条结果（部分成功语义） */
+export type CommentBatchResult =
+  | { id: number; ok: true; auditStatus: number }
+  | { id: number; ok: false; errorCode: number; message: string }
 
 /** 删站影响面（R66 确认卡摘要：三段影响中的「N 篇文章/栏目/标签/评论」） */
 export interface SiteDeleteImpact {
@@ -212,6 +267,7 @@ export class SiteFacade {
     private readonly articleService: SiteArticleService,
     private readonly columnService: SiteColumnService,
     private readonly tagService: SiteTagService,
+    private readonly commentService: SiteCommentService,
   ) {}
 
   /** 用户是否已开通站点（有 site_site 行即 true）；删除用户前预检，与 cloud hasFiles 并列 */
@@ -446,6 +502,8 @@ export class SiteFacade {
       status,
       ...(input.summary ? { summary: input.summary } : {}),
       ...(tags.length > 0 ? { tagIds: tags.map((t) => Number(t.id)) } : {}),
+      // R72：封面路径（已由工具层经 resolveCoverPath 校验；域内仍保留 media/ 前缀兜底）
+      ...(input.coverPath ? { coverPath: input.coverPath } : {}),
     }
     const created = await this.articleService.create(userId, dto)
     return this.composeArticle(userId, siteId, BigInt(created.id))
@@ -459,6 +517,8 @@ export class SiteFacade {
     if (input.contentMd !== undefined) dto.contentMd = input.contentMd
     if (input.columnId !== undefined) dto.columnId = input.columnId
     if (input.summary !== undefined) dto.summary = input.summary
+    // R72：封面（显式空串 = 清除封面，article.service 口径 '' → null）
+    if (input.coverPath !== undefined) dto.coverPath = input.coverPath
     if (input.tagNames !== undefined) {
       // 提供即整体替换：显式空数组 = 清空该文章全部标签（articleService.update 会整体重建关联）
       dto.tagIds =
@@ -479,6 +539,38 @@ export class SiteFacade {
     const dto: UpdateArticleStatusDto = { status: status === 1 ? 1 : 0 }
     await this.articleService.updateStatus(userId, id, dto)
     return this.composeArticle(userId, siteId, id)
+  }
+
+  /**
+   * 封面通道校验（P6 T79 / R72，不抛异常、返回判定对象）：
+   * ① `media/` 前缀 → ② 解析到该站云盘真实文件（属主 + 未删除 + 可公开访问 + 非目录）
+   * → ③ 扩展名 ∈ 图片白名单（png/jpg/jpeg/webp/gif）。
+   * 任一失败返回 `{ ok:false, errorCode:40105, message, availableImages }`，
+   * 其中 availableImages = 该站 media/ 下已有图片（前 10 条），引导模型换图（不抛栈）。
+   * 说明：仅站点根直连的 media/ 路径有效（路径规范化复用 CloudFacade 逐段下行解析，≤10 层）。
+   */
+  async resolveCoverPath(userId: bigint, siteId: bigint, coverPath: string): Promise<CoverResolveResult> {
+    const site = await this.requireOwnedSite(userId, siteId)
+    const path = (coverPath ?? '').trim()
+    const fail = async (message: string): Promise<CoverResolveResult> => ({
+      ok: false,
+      errorCode: ErrorCode.SiteRootUnavailable,
+      message,
+      availableImages: await this.listCoverCandidates(site.rootFolderId),
+    })
+
+    if (!path.startsWith('media/')) {
+      return fail('封面必须位于站点 media/ 目录内（形如 media/covers/a.png）')
+    }
+    const ext = extOfName(path)
+    if (!SITE_COVER_IMAGE_EXTS.has(ext)) {
+      return fail('封面仅支持图片（png/jpg/jpeg/webp/gif）；请先上传图片或换用已有图片')
+    }
+    const hit = await this.cloudFacade.resolvePublicPath(site.rootFolderId, path)
+    if (!hit || hit.isDir === 1) {
+      return fail('封面文件不存在、是目录或当前不可公开访问（站点 media/ 下的图片才会被站点页面加载）')
+    }
+    return { ok: true, path }
   }
 
   /** 栏目 ensure（幂等）：同名同父命中即返回现有（created=false），否则创建（R6 层级校验在域内） */
@@ -555,6 +647,85 @@ export class SiteFacade {
     return results
   }
 
+  // ==================== P6 §21.2 评论（list / audit 批量 / reply） ====================
+  // 评论域内既有服务已实现属主反查（评论不存在 40110 / 非属主 40119）与缓存失效，门面只做
+  // 「slug → siteId 已由工具层解析」后的作用域收口与批量编排（R71）。
+
+  /** 评论分页列表（站点作用域；默认全部状态，工具层默认筛待审）：含文章标题与作者回复 */
+  async listComments(
+    userId: bigint,
+    siteId: bigint,
+    params: CommentListParams,
+  ): Promise<{ list: SiteCommentItem[]; total: number; pageNo: number; pageSize: number }> {
+    await this.requireOwnedSite(userId, siteId)
+    const query = new CommentQueryDto()
+    query.siteId = Number(siteId)
+    query.pageNo = params.pageNo ?? 1
+    query.pageSize = Math.min(params.pageSize ?? AI_COMMENT_PAGE_MAX, AI_COMMENT_PAGE_MAX)
+    if (params.auditStatus !== undefined) query.auditStatus = params.auditStatus
+    if (params.articleId !== undefined) query.articleId = params.articleId
+    if (params.keyword) query.keyword = params.keyword
+
+    const result = await this.commentService.list(userId, query)
+    return {
+      list: result.list.map((row) => this.toCommentItem(row)),
+      total: result.total,
+      pageNo: result.pageNo,
+      pageSize: result.pageSize,
+    }
+  }
+
+  /**
+   * 批量审核（≤20，R71/API-P6 §13.4.2）：逐条独立成败（沿用 P5 批次模式），
+   * 单条失败不中断其余；返回逐条结果供工具层汇总报告。
+   */
+  async auditComments(
+    userId: bigint,
+    siteId: bigint,
+    ids: number[],
+    auditStatus: number,
+  ): Promise<CommentBatchResult[]> {
+    await this.requireOwnedSite(userId, siteId)
+    const unique = [...new Set(ids)]
+    if (unique.length === 0) {
+      throw new BusinessException(ErrorCode.ParamInvalid, '请至少提供一条评论 id')
+    }
+    if (unique.length > AI_COMMENT_BATCH_MAX) {
+      throw new BusinessException(ErrorCode.ParamInvalid, `单次最多处理 ${AI_COMMENT_BATCH_MAX} 条评论`)
+    }
+    const results: CommentBatchResult[] = []
+    for (const id of unique) {
+      try {
+        const dto = new AuditCommentDto()
+        dto.auditStatus = auditStatus
+        await this.commentService.audit(userId, BigInt(id), dto, siteId)
+        results.push({ id, ok: true, auditStatus })
+      } catch (e) {
+        if (e instanceof BusinessException) {
+          results.push({ id, ok: false, errorCode: e.code, message: e.message })
+        } else {
+          throw e
+        }
+      }
+    }
+    return results
+  }
+
+  /** 作者回复（内容空串/null = 清除；评论不属本站点 → 40119，R71） */
+  async replyComment(
+    userId: bigint,
+    siteId: bigint,
+    id: bigint,
+    content?: string | null,
+  ): Promise<CommentReplyResult> {
+    return this.commentService.reply(userId, id, content, siteId)
+  }
+
+  /** 单条评论摘要（AI 回复确认卡预热：原评论昵称/内容 + 现有回复；属主与站点归属同链校验） */
+  async getCommentBrief(userId: bigint, siteId: bigint, id: bigint): Promise<CommentReplyResult> {
+    return this.commentService.getCommentBrief(userId, id, siteId)
+  }
+
   // ==================== P5 §20.1 站点生命周期（update / delete） ====================
 
   /** 编辑站点（title/description/newSlug/status/commentAudit；委托 manage.update，slug 校验 40102/40103 同在域内） */
@@ -607,6 +778,34 @@ export class SiteFacade {
     return this.toArticleItem(detail, siteId, tagNames)
   }
 
+  /** 该站 media/ 下已有图片（有界遍历前 10 条，R72 回喂清单） */
+  private async listCoverCandidates(rootFolderId: bigint): Promise<string[]> {
+    try {
+      const { files } = await this.cloudFacade.listSubtreeRaw(rootFolderId)
+      return files
+        .filter((f) => !f.isDir && f.path.startsWith('media/') && SITE_COVER_IMAGE_EXTS.has(extOfName(f.path)))
+        .slice(0, AI_COVER_HINT_MAX)
+        .map((f) => f.path)
+    } catch {
+      return []
+    }
+  }
+
+  /** 评论行 → 出域条目（域内 service 已含 articleTitle，此处只做类型收口与 bigint→string） */
+  private toCommentItem(row: Record<string, unknown>): SiteCommentItem {
+    return {
+      id: String(row.id ?? ''),
+      articleId: String(row.articleId ?? ''),
+      articleTitle: String(row.articleTitle ?? ''),
+      nickname: String(row.nickname ?? ''),
+      content: String(row.content ?? ''),
+      auditStatus: Number(row.auditStatus ?? 0),
+      replyContent: (row.replyContent as string | null) ?? null,
+      replyAt: (row.replyAt as Date | null) ?? null,
+      createdAt: row.createdAt as Date,
+    }
+  }
+
   /** 本站标签 id → 名称映射 */
   private async tagNameMap(userId: bigint, siteId: bigint): Promise<Map<string, string>> {
     const tags = await this.tagService.list(userId, siteId)
@@ -627,6 +826,7 @@ export class SiteFacade {
       columnName: String(item.columnName ?? ''),
       title: String(item.title ?? ''),
       summary: (item.summary as string | null) ?? null,
+      coverPath: (item.coverPath as string | null) ?? null,
       tagIds,
       tagNames: tagIds.map((id) => tagNames.get(id) ?? id),
       wordCount: Number(item.wordCount ?? 0),

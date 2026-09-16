@@ -491,6 +491,7 @@ import { useTable } from '@/hooks/useTable'
 import { useDict, type DictItem } from '@/hooks/useDict'
 import type { DeptItem, RoleItem, UserRow } from '@/types/api'
 import { listToTree } from '@/utils/tree'
+import { confirmDialog } from '@/utils/confirm'
 import { isEmail, isPassword, isPhone } from '@/utils/validate'
 import { usePermissionStore } from '@/stores/permission'
 
@@ -673,7 +674,7 @@ async function handleStatusChange(row: UserRow, status: number) {
 
 // ========== 重置密码 ==========
 async function handleResetPassword(row: UserRow) {
-  await ElMessageBox.confirm(`确认重置用户「${row.username}」的密码吗？`, '提示', { type: 'warning' })
+  if (!(await confirmDialog(`确认重置用户「${row.username}」的密码吗？`, '提示', { type: 'warning' }))) return
   const res = await resetUserPassword(row.id)
   ElMessageBox.alert(`新密码：${res.password}，请立即复制保存，此密码仅展示一次。`, '重置成功', {
     confirmButtonText: '我已保存',
@@ -708,7 +709,7 @@ async function handleAssignSubmit() {
 
 // ========== 删除 ==========
 async function handleDelete(row: UserRow) {
-  await ElMessageBox.confirm(`确认删除用户「${row.username}」吗？`, '提示', { type: 'warning' })
+  if (!(await confirmDialog(`确认删除用户「${row.username}」吗？`, '提示', { type: 'warning' }))) return
   await deleteUser(row.id)
   ElMessage.success('删除成功')
   load()
@@ -765,16 +766,12 @@ async function openQuota(row: UserRow) {
 /** 按公式值修正（P4F R61）：显式二次确认 → 只写 used → 重载弹窗数据 */
 async function handleReconcileFix() {
   if (!quotaRow.value || !quotaReconcile.value) return
-  try {
-    await ElMessageBox.confirm(
-      `确认按公式值修正配额？当前值 ${formatBytes(Number(quotaReconcile.value.stored))} → 公式值 ${formatBytes(Number(quotaReconcile.value.expected))}（差额 ${quotaDiffText.value}）`,
-      '配额对账修正',
-      { type: 'warning' },
-    )
-  } catch {
-    // 用户取消：ElMessageBox 以 reject 表示取消，必须吞掉否则 Vue 报未处理的事件处理错误
-    return
-  }
+  const confirmed = await confirmDialog(
+    `确认按公式值修正配额？当前值 ${formatBytes(Number(quotaReconcile.value.stored))} → 公式值 ${formatBytes(Number(quotaReconcile.value.expected))}（差额 ${quotaDiffText.value}）`,
+    '配额对账修正',
+    { type: 'warning' },
+  )
+  if (!confirmed) return
   quotaFixing.value = true
   try {
     await fixUsageReconcile(quotaRow.value.id)

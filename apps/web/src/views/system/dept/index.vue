@@ -137,7 +137,8 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { confirmDialog } from '@/utils/confirm'
 import { Plus } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import { createDept, deleteDept, getDeptList, updateDept } from '@/api/system/dept'
@@ -223,7 +224,7 @@ async function handleSubmit() {
 }
 
 async function handleDelete(row: DeptItem) {
-  await ElMessageBox.confirm(`确认删除部门「${row.name}」吗？`, '提示', { type: 'warning' })
+  if (!(await confirmDialog(`确认删除部门「${row.name}」吗？`, '提示', { type: 'warning' }))) return
   await deleteDept(row.id)
   ElMessage.success('删除成功')
   load()

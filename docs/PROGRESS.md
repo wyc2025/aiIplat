@@ -2,23 +2,38 @@
 
 > 本文件由 AI 在每完成一个任务后更新。开工前先读本文件，从"进行中 / 下一个待办"继续。
 
-## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32），P4a 个人网站模块全部完成（T33~~T40），P4b（AI 编写站点 + 在线编辑器 + 模板库）全部完成（T41~~T45），P4c（云盘公开机制 + 批量拖拽上传 + 在线解压）全部完成（T46~~T50），**P4c 走查补丁 W1~~W4 已套（纯文档）**，**P4d（云盘操作增强 + 分享升级 + 公开语义分流）全部完成（T52~~T58）\**，\**P4e（多站点配额化 + 删站 + AI 多站语义 + sid 日志脱敏）全部完成（T59~~T65）**，**P4F（云盘清账：回收站自动清理 + 配额对账 + 历史小瑕疵 + P4e 走查补丁 W1~~W4）全部完成（T66~~T70）**，**P5（AI 能力扩展：云盘 5 + 站点 CMS 7 + 站点生命周期 2 工具，工具总数 11→25 + 预算动态化）全部完成（T71~~T76）**
+## 当前状态：P1 底座全部完成（T1~~T10），P2a AI 模块（对话 + 套餐积分）全部完成（T11~~T18），P2b 工具调用 Agent 化全部完成（T19~~T24），P3 云盘模块全部完成（T25~~T32），P4a 个人网站模块全部完成（T33~~T40），P4b（AI 编写站点 + 在线编辑器 + 模板库）全部完成（T41~~T45），P4c（云盘公开机制 + 批量拖拽上传 + 在线解压）全部完成（T46~~T50），**P4c 走查补丁 W1~~W4 已套（纯文档）**，**P4d（云盘操作增强 + 分享升级 + 公开语义分流）全部完成（T52~~T58）\**，\**P4e（多站点配额化 + 删站 + AI 多站语义 + sid 日志脱敏）全部完成（T59~~T65）**，**P4F（云盘清账：回收站自动清理 + 配额对账 + 历史小瑕疵 + P4e 走查补丁 W1~~W4）全部完成（T66~~T70）**，**P5（AI 能力扩展：云盘 5 + 站点 CMS 7 + 站点生命周期 2 工具，工具总数 11→25 + 预算动态化）全部完成（T71~~T76）\**，\**P6（按需注入 + 评论代审代回 + 封面通道 + 体验三件套，工具总数 25→28）全部完成（T77~~T82）**
 
 ## 里程碑总览
 
-| 阶段 | 目标                                                       | 状态   |
-| ---- | ---------------------------------------------------------- | ------ |
-| P1   | 后台管理底座                                               | 已完成 |
-| P2a  | AI 模块：对话 + 套餐积分（ai 域）                          | 已完成 |
-| P2b  | AI 模块：工具调用 Agent 化                                 | 已完成 |
-| P3   | 云盘模块（cloud 域）                                       | 已完成 |
-| P4a  | 个人网站：开放站点 + 文章模块（site 域）                   | 已完成 |
-| P4b  | 个人网站：AI 编写站点 + 在线编辑器 + 模板库                | 已完成 |
-| P4c  | 云盘：公开机制 + 批量拖拽上传 + 在线解压                   | 已完成 |
-| P4d  | 云盘：移动/批量/打包下载 + 分享升级 + 公开语义分流         | 已完成 |
-| P4e  | 多站点（配额化 + AI 工具单数语义改造 + 删站并入）          | 已完成 |
-| P4F  | 云盘清账：回收站自动清理 + 配额对账 + 小瑕疵打包           | 已完成 |
-| P5   | AI 能力扩展：云盘/CMS/生命周期工具 + 预算动态化（25 工具） | 已完成 |
+| 阶段 | 目标                                                                               | 状态   |
+| ---- | ---------------------------------------------------------------------------------- | ------ |
+| P1   | 后台管理底座                                                                       | 已完成 |
+| P2a  | AI 模块：对话 + 套餐积分（ai 域）                                                  | 已完成 |
+| P2b  | AI 模块：工具调用 Agent 化                                                         | 已完成 |
+| P3   | 云盘模块（cloud 域）                                                               | 已完成 |
+| P4a  | 个人网站：开放站点 + 文章模块（site 域）                                           | 已完成 |
+| P4b  | 个人网站：AI 编写站点 + 在线编辑器 + 模板库                                        | 已完成 |
+| P4c  | 云盘：公开机制 + 批量拖拽上传 + 在线解压                                           | 已完成 |
+| P4d  | 云盘：移动/批量/打包下载 + 分享升级 + 公开语义分流                                 | 已完成 |
+| P4e  | 多站点（配额化 + AI 工具单数语义改造 + 删站并入）                                  | 已完成 |
+| P4F  | 云盘清账：回收站自动清理 + 配额对账 + 小瑕疵打包                                   | 已完成 |
+| P5   | AI 能力扩展：云盘/CMS/生命周期工具 + 预算动态化（25 工具）                         | 已完成 |
+| P6   | 按需注入（手册两段式 + 工具路由）+ 评论代审代回 + 封面通道 + 体验三件套（28 工具） | 已完成 |
+
+## P6 任务拆解（按需注入 + 评论代审代回 + 文章封面 + 体验三件套）
+
+> PRD-P6-AI-UX / API-P6-增补（已并入 API §13）/ ARCHITECTURE-P6-增补（已并入主文档 §21）。
+> 决策 D67~~D72、规则 R69~~R74；**新依赖 1 个**：`@codemirror/merge`（D71 铁律 7 特批）；**新 HTTP 端点 1 个**：作者回复评论；**错误码零新增**；工具总数 25 → 28。
+
+| 编号 | 任务                                                                                                                                                                                                                                                                  | 状态   | 完成日期   |
+| ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ---------- |
+| T77  | 按需注入（D67/D68/R69/R70）：手册两段式（通用版 md + 能力清单代码常量，按权限动态注入）+ 工具确定性路由（tool.groups 6 组 28 工具 + 关键词表 + 无命中全量兜底 + 孤儿工具校验）+ 分段核查脚本 `pnpm check:ai` + 实算日志扩展（groups/count/toolsBudget/historyBudget） | 已完成 | 2026-09-15 |
+| T78  | 评论能力（D69/R71/R74）：site_comment 加 reply_content/reply_at 迁移 + `PUT /api/site/comment/:id/reply` + 开放层评论携带回复 + SiteFacade 评论层 + AI 评论三件套（list/audit/reply）+ 管理端回复弹窗与列 + 默认模板作者回复块                                        | 已完成 | 2026-09-15 |
+| T79  | 文章封面通道（D70/R72）：create/update_site_article 加 coverPath + `SiteFacade.resolveCoverPath` 四步校验链（media/ 前缀 + 真实图片行 + 可公开访问 + 扩展名白名单，失败回喂 40105 + media/ 可用图清单前 10）                                                          | 已完成 | 2026-09-15 |
+| T80  | 体验三件套（D71/R73）：模板预览图（三张静态资产 + template.json#preview + previewUrl + 卡片占位降级）+ 编辑器只读 diff 视图（@codemirror/merge 异步加载）+ 格式按钮（粗体/斜体/链接，两处 markdown 面）                                                               | 已完成 | 2026-09-15 |
+| T81  | 搭车（D72）：回收站顶层归集排除头像旧行（parent_id=-1）+ ElMessageBox.confirm 全仓统一为 `confirmDialog` 封装（30 处调用点，取消静默）                                                                                                                                | 已完成 | 2026-09-15 |
+| T82  | 收口：DB 级验证 28/28 + `pnpm check:ai` 16/16 + 双端静态检查零错 + web 构建分包核查 + 文档回写（ARCHITECTURE §21 并入 + §1.1/§5/§8/§9/§12 修订 / API §13 并入 / PLATFORM-GUIDE 两段式落档 / 三份 P6 文档标注已并入 / PROGRESS）                                       | 已完成 | 2026-09-15 |
 
 ## P5 任务拆解（AI 能力扩展：云盘工具 + 代发内容 + 站点生命周期 + 预算动态化）
 
@@ -250,7 +265,7 @@
 
 ## 进行中
 
-（空；P4F 全部完成（T66~~T70），等待用户验收；下一阶段未定（PRD 路线图剩余：P5 个人网站进阶 / P6 自定义域名等））
+（空；P6 全部完成（T77~~T82），等待用户验收；下一阶段未定（PRD 路线图剩余：P7 功能分享市场 / 评论楼中楼 / 自定义域名等））
 
 ## 遗留问题
 
@@ -275,10 +290,14 @@
 18. ~~（2026-09-13 浏览器走查观察到）顶栏头像图片请求 401：`GET /api/cloud/file/avatar/:id` 挂 `cloud:file:list` 需登录态，而页面用 `<img src>` 加载无法携带 `Authorization` 头 → 控制台稳定报 401，顶栏实际落回昵称首字母兜底~~ **已处理（2026-09-13，方案 C：前端 Blob + objectURL）**：新增 `api/cloud/file.ts#fetchAvatarBlob`（走 axios 带 token，剥 `/api` 前缀避免双前缀）+ `useUserStore` 增 `avatarUrl`（`syncAvatar()` 幂等取图、竞态丢弃、换头像/登出 `revokeObjectURL` 回收、失败静默回退首字母），`Navbar.vue` / `profile/index.vue` 改消费 `avatarUrl`，上传成功走 `userStore.setAvatar()`。实测：登录后顶栏与个人中心头像均为 `blob:` 且控制台 **零错误**（原 401 消失）；端点侧带 token 200 / 匿名 401（`image/png`，69B）。**升级触发条件**：接 MinIO/OSS 后改预签名 URL（可 `<img>` 直连 + 浏览器缓存 + 列表内展示他人头像），只需替换 `fetchAvatarBlob` 实现，组件与 store 契约不变。
     **旁证（候选方案「把头像当公开资源走 public_token」已实测否决）**：头像行 `parent_id = -1`（`AVATAR_PARENT_ID` 虚拟父目录，避免污染根目录列表），而 `PubService.assertAncestorsNotBlocked`（pub.service.ts:186）从 `row.parentId` 上溯、**祖先行缺失即 40400** → `-1` 查不到行必然阻断。A/B 实测（对照组 = 根目录 t.txt）：对照建链后 `GET /api/pub/f/{token}/info` → code 0；头像 `POST /api/cloud/file/86/public` **建链成功**（`assertOwned` 不校验 parentId）但 `info`/`download` 全 **40400**（「能生成、永远打不开」的静默失败）；DB 直查确认 `id=86 parent_id=-1`。若将来要走公开 URL，需改判定链（把 -1 视作根）或给头像真实隐藏目录。测试后两个文件均已恢复（is_public=0 / token=null），临时脚本已删
 
-19. （P4F 发现）**既有 `ElMessageBox.confirm` 取消未捕获**：取消以 Promise reject 结束，`await ElMessageBox.confirm(...)` 若不在 try/catch 内，Vue 会往 console 报「Unhandled error during execution of component event handler」。P4F 新写的对账修正按钮已按 try/catch 写；**既有页面（用户删除等）保留原写法未动**（铁律 4），如需统一收敛另起小任务
-20. （P4F 观察）**回收站列表可能包含头像旧行**：`RecycleService.findTopLevelDeleted` 只按 `deletedAt` 过滤、未排除 `parent_id = -1` 的头像行，换过头像的用户在回收站会看到一条 `avatar-*.png`（P3 起既有）。影响小（可彻底删除，且 30 天后自动清理）；如要收敛，在顶层归集处排除 `AVATAR_PARENT_ID` 即可
+19. ~~（P4F 发现）**既有 `ElMessageBox.confirm` 取消未捕获**：取消以 Promise reject 结束，`await ElMessageBox.confirm(...)` 若不在 try/catch 内，Vue 会往 console 报「Unhandled error during execution of component event handler」~~ **已处理（P6 T81，2026-09-15）**：抽公共封装 `web/src/utils/confirm.ts#confirmDialog`（内置 try/catch，取消静默返回 false），全仓 30 处调用点统一改走封装，`ElMessageBox.confirm` 现仅存在于封装内部；`ElMessageBox.alert/prompt` 不受影响（仍直接调用，alert/prompt 无取消语义）
+20. ~~（P4F 观察）**回收站列表可能包含头像旧行**：`RecycleService.findTopLevelDeleted` 只按 `deletedAt` 过滤、未排除 `parent_id = -1` 的头像行~~ **已处理（P6 T81，2026-09-15）**：顶层归集查询加 `parentId: { not: AVATAR_PARENT_ID }`，头像旧行不再出现在回收站列表；30 天自动清理通道不变（仍清理该行且沿用 `refundUsed: false` 口径）
 21. （P4F 归因）**22,751 字节 used 历史差额已定位**：诊断显示差额全部落在「未删除行」段（`active = 71 行/64,451,408`、`recycled = 0`、`revertedAvatars = 0`，`diff = +22,751`），属 P3/T49 时期一次性漂移、非持续泄漏（详见 T66~~T70 记录与 ARCHITECTURE §19.3）。**是否写回由用户决定**：管理侧「调整云盘配额」弹窗内点「按公式值修正」即可（写入前有二次确认，本期未自动改数据）
 22. （环境，本机）① `tsc`/`vue-tsc` 带上增量缓存（`*.tsbuildinfo`）时偶发崩溃/OOM，**本轮验证统一加 `--incremental false`**；② IDE 注入的 `NODE_OPTIONS`（safe-delete shim）会让 `tsc` 在 30MB 堆即崩，**跑构建/类型检查前先 `$env:NODE_OPTIONS=''`**，该 shim 清空后 `nest build` 可直接成功（遗留 2 的「需先手工清 dist」不再复现）；③ 实测**不要额外加大堆**（`--max-old-space-size=6144` 反而更易触发 `Fatal process out of memory: Zone`），本机稳定组合 = `NODE_OPTIONS=''` + `--incremental false`：`pnpm --filter @iplat/api exec tsc --noEmit --incremental false -p tsconfig.build.json` / `pnpm --filter @iplat/web exec vue-tsc --noEmit --incremental false`（双端均 0 错）；④ 长期运行（>2 天）的 vite dev server 的 esbuild 服务会失效（`The service is no longer running`），表现为**页面白屏且 console 无任何报错**——重启 dev server 即恢复（P4F 浏览器复验时遇到并已重启）
+
+23. ~~（P6）**真机 E2E（PRD-P6 验收 11）未跑**~~ **已完成（2026-09-15，用户授权后执行）**：真实模型（deepseek-v4-flash）+ 真 SSE 走通「审评论 → 回评论 → 写文章带封面 → 发布」**27/27 全绿、零上游错误**（详见 T82 完成记录第 3 条）；测试数据全部清理、`used` 回基线 64,428,657；**真实消耗套餐积分 91 分（910 → 1001）如实登记**（同 P5 先例，不回收）
+24. （P6）模板预览图（`apps/web/public/templates/*/preview.png`，3 张 ≈1.5MB）为 AI 生成的界面示意图，非真实截图；如需贴近实际渲染效果可直接替换文件（建议 4:3、单张 ≤400KB），`template.json#preview` 开关与前端占位逻辑无需改动
+25. （P6，已登记 §21.6）编辑器 diff 为「打开时快照 ↔ 当前编辑内容」只读对比；后端在线编辑无版本号/乐观锁（更新行语义，最后写入者胜），故无「服务端更新冲突」检测，AI 覆盖确认卡的「对比」按钮按 R73 降级口径未做（需先有按站点路径读旧内容的接口）
 
 ## 完成记录
 
@@ -1218,6 +1237,56 @@
 4. 文章工具不支持封面（见偏差 6）；若后续开放封面，需先解决 AI 无图片上传通道的问题。
 5. 评论代审/代管、AI 删文章（需先给文章加回收站语义）、工具按场景分包下发——均已登记 §20.7 演进预留。
 
+### T77~T82 完成记录（2026-09-15）：P6 按需注入 + 评论代审代回 + 封面通道 + 体验三件套（P6 收官）
+
+**T77 按需注入（D67/D68/R69/R70）**：
+
+1. **手册两段式**：`SystemPromptService.build` 改为「助手设定（静态常量）+ 通用版手册（`docs/PLATFORM-GUIDE.md` 全文，静态）+ 能力清单（动态，按权限逐项）+ 用户上下文」；常量与纯函数抽到 `chat/prompt.sections.ts`（零 Nest 依赖，供核查脚本 import）。
+   `docs/PLATFORM-GUIDE.md` 重写为**通用版**（平台简介/角色与权限语义/通用规则/功能入口/工具使用原则）：实测 **999 字符 ≤1000**（含助手设定），全部能力细节移入代码常量表。
+2. **能力清单 `chat/capability.manifest.ts`**：17 行（`key / perms / text / tools`），注入条件 = `PermissionService.hasPermission`；与工具注册表**三方同源**（每个工具恰被一行覆盖、能力行 perms 与工具 perms 一致）；实测 admin 17 行 / 644 字符，无角色用户仅 1 行（个人账号）。
+3. **工具确定性路由 `tool/tool.groups.ts`**：`TOOL_GROUPS` 6 组 28 工具（common 3 / system 4 / siteFile 3 / siteCms 10 / siteLifecycle 3 / cloud 5）+ `KEYWORD_TO_GROUPS` 词根表 + `resolveToolGroups`；下发链 = **权限过滤 → 组路由**（无命中全量兜底；孤儿工具恒保留）；确认回填链路按会话最近一条 user 消息路由。
+4. **孤儿/同源校验**：`ToolBootstrap` 启动 warn（孤儿/陈旧分组）+ `scripts/check-ai-prompt.ts` 硬失败版（`pnpm --filter @iplat/api check:ai`，**16/16 通过**：三阈值 / 归组 / 同源 / 路由样例）。
+5. **实算日志**：每轮 info `[AI] tools injected: groups=… count=x/28`；`ai.debugAi`（env `DEBUG_AI=1`）时 debug 记命中关键字；历史预算 debug 行同步带 `groups=`（toolsBudget/historyBudget 同条）。
+
+**T78 评论代审代回（D69/R71/R74）**：
+
+1. **DB**：迁移 `20260915100000_add_site_comment_reply`（`reply_content varchar(500) null` + `reply_at datetime null`，一级回复：每条至多一条、改 = 更新、空 = 清除）。
+2. **后端**：`PUT /api/site/comment/:id/reply`（`site:comment:audit` + 操作日志；DTO `@Length(0,500)` + service 兜底）；`SiteCommentService` 增 `reply`/`getCommentBrief`，`findOwnedComment` 增可选 `expectedSiteId`（AI 链路跨站 40119）；`list` 条目与**开放层评论**均携带 `replyContent/replyAt`（开放层查询恒 `audit_status=1`，R71）；**SiteFacade 评论层** `listComments`（pageSize ≤20）/`auditComments`（≤20 逐条独立成败）/`replyComment`/`getCommentBrief`（SiteFacadeModule 增 imports CommentModule）。
+3. **AI 评论三件套**（siteCms 组，均 `site:comment:audit`）：`list_site_comments`（read，status 字符串枚举 pending/approved/rejected/all，内容超 60 字截断）/`audit_site_comments`（write，ids 1~20 + action，确认卡 = 条数 + 通过/驳回 + 公开影响 + 站点）/`reply_site_comment`（write，空串 = 清除，确认卡 = 原评论昵称 + 内容截断 30 字 + 现有回复 + 新回复）。工具总数 **25 → 28**。
+4. **前端**：管理端评论页增「作者回复」列 + 「回复/改回复」FormDialog（回显原评论与已有回复，清空保存 = 删除回复）；默认模板文章详情渲染「作者回复」块（textContent 转义，有 `replyContent` 才渲染）；三套模板 README.txt 契约补 `replyContent/replyAt`。存量站点模板不受影响（用户代码，不渲染即不显示）。
+
+**T79 文章封面通道（D70/R72）**：`create/update_site_article` 增 `coverPath`（update 空串 = 清除）；新增 `SiteFacade.resolveCoverPath`（不抛异常，返回判定对象）：`media/` 前缀 → `CloudFacade.resolvePublicPath` 解析为真实图片行（属主 + 未删除 + 非目录 + 可公开访问）→ 扩展名白名单 `{png,jpg,jpeg,webp,gif}`；失败回喂 `{ ok:false, errorCode:40105, message, availableImages（该站 media/ 图片前 10 条）, hint }`。`SiteArticleItem` 出口径增 `coverPath`。
+
+**T80 体验三件套（D71/R73）**：
+
+1. **模板预览图**：三张静态预览图（`apps/web/public/templates/{default,portfolio,card}/preview.png`，Vite 构建直出）+ 三份 `template.json#preview = "preview.png"` + `GET /api/site/templates` 增 `previewUrl`（缺图 null）+ 模板卡片 `<el-image>` 与 `#error` 占位（不裂图）。
+2. **编辑器 diff**：`FileEditorDialog` 增「对比改动」（markdown 且有改动可用）；左 = 打开时快照、右 = 当前内容，两侧 `EditorState.readOnly.of(true)` + `highlightChanges` + gutter，**只读不合并**；`@codemirror/merge` 按需 `await import()`（**铁律 7 特批依赖**，构建产物独立异步 chunk，实测首屏不加载）；保存后刷新快照并关闭对比。
+3. **格式按钮**：`FileEditorDialog`（仅 `.md`）与文章正文工具栏各一组「粗体/斜体/链接」（选区包裹 `**`/`*`/`[](url)`，无选区插占位；零依赖）。
+
+**T81 搭车（D72）**：① `RecycleService.findTopLevelDeleted` 排除 `parent_id = -1`（头像旧行不再出现在回收站顶层；30 天自动清理通道不变）；② 新增公共资产 `web/src/utils/confirm.ts#confirmDialog`（内置 try/catch，取消/关闭静默返回 false），**全仓 30 处 `ElMessageBox.confirm` 调用点统一改走封装**（raw confirm 仅存在于封装内部；销 P4f 遗留 19）。
+
+**T82 收口验证（三层全绿）**：
+
+1. **DB 级 28/28 通过**（Nest 应用上下文 + 真实 MySQL/Redis，编译产物运行；跑完清理、`used` 精确回基线 64,428,657、无孤儿评论/临时用户/残留文件）：手册按权限裁剪（admin 1691 字符 / 无权限用户 1097，后者不含任何站点能力行）、28 工具归组无孤儿、路由命中（下发 13/28 含 create_site_article）与无命中全量兜底、评论 list/audit/reply（trim、覆盖不新增行、空串清除、开放层携带回复、超长 40001、批量 >20 40001、跨站与他人评论 40119）、封面四条失败链（非 media/ 前缀 / 非图片 / 不存在 + 清单）+ 真实图片行通过 + createArticle 落库 + updateArticle 空串清除、回收站顶层不含头像行。
+2. **静态与构建**：`pnpm check:ai` 16/16；`tsc --noEmit`（api）、`eslint`（双端）、`vue-tsc --noEmit`（web）**零错**；`vite build` 通过（38s）且 `@codemirror/merge` 落在独立异步 chunk、`dist/templates/*/preview.png` 已随构建产出。
+3. **浏览器复验（agent-browser + 真实 Chromium，dev server + API 临时实例）**：模板预览图 3/3 加载、评论回复全流程（写入 → 开放 API 字段 → 清除）、编辑器 diff 只读双栏高亮与切换、确认框取消后 console/errors 全空、格式按钮按选区包裹语法；测试动作全部取消/清除，未落库（文章正文与 `t.txt` 零变化），临时服务与截图已清理。
+4. **真机端到端（PRD-P6 验收 11，用户授权后执行）27/27 通过**：真实模型 deepseek-v4-flash + 真 SSE（`/api/ai/chat` + `/api/ai/tool/confirm`）跑通「审评论 → 回评论 → 写文章带封面 → 发布」五回合：
+   - 回合 1「帮我看看有没有待审核的评论」→ 模型**自主**对名下 3 个站点各调一次 `list_site_comments`（read 自动执行），正确报出 1 条待审；
+   - 回合 2 审核通过 → 确认卡「批量通过评论：1 条（#22）+ 公开影响 + 目标站点」→ 通过后 `audit_status=1`；
+   - 回合 3 作者回复 → 确认卡含**原评论昵称 + 内容截断 + 回复内容**（R71）→ 落库 `reply_content`，开放 API 返回 `replyContent/replyAt`；
+   - 回合 4 写文章带封面 → 模型自动选栏目「我的博客」、确认卡含「封面：media/p6-cover.png / 字数 157 / 状态：草稿」→ 落库 `coverPath` 正确、状态草稿；
+   - 回合 5 发布 → 确认卡 → `status=1`，开放层文章详情返回 `coverUrl=/api/open/wyc/media/p6-cover.png`；
+   - 全链 **零上游错误**（每回合 error 事件均为空，总结均正常产出）；测试数据（文章/评论/会话/消息/用量/工具调用/上传封面行与物理文件）全部清理，`used` 精确回基线 64,428,657；**真实消耗积分 91 分（910 → 1001）**。
+5. **文档回写**：ARCHITECTURE **§21 全节并入**（21.1 按需注入 / 21.2 评论 / 21.3 封面 / 21.4 体验三件套 / 21.5 搭车 / 21.6 演进 / 21.7 偏差与验证）+ §1.1 依赖白名单、§5 与 §14.2 site_comment 两列、§8 `DEBUG_AI`、§9 资产表 10 行、§12.2/§12.3/§12.4 修订；API **§13 全节并入**（含实现口径纠偏：分组表、错误码、评论工具参数）+ 头部覆盖行 + §12.2 两行随 coverPath 修订；PLATFORM-GUIDE 两段式落档；三份 P6 文档标注「已并入」；PROGRESS 本节 + 遗留 23~25。
+
+**本期偏差（8 条，已登记 ARCHITECTURE §21.7）**：① 分组口径以 §21.1 为准（API-P6 §13.6 原表含未注册工具，已作废）；② 回复端点返回超集（doc 写 `{ok:true}`）；③ 模板预览图落点改 web 侧 `public/templates`（避免新增静态端点与二进制双份）；④ 错误码实际口径（回复超长 40001 / 评论不存在 40110 / 跨站 40119；API-P6 的 40107、40101 与实际码表冲突）；⑤ diff 入口无「服务端更新冲突」后端依据（在线编辑为更新行语义，无版本号）→ 按 API-P6 §13.7 落为会话内快照对比；⑥ 格式按钮落点两处 markdown 面；⑦ 评论工具 `status` 用字符串枚举（比数字更适合模型）；⑧ 封面校验含「可公开访问」判定（避免给模型一张页面加载不到的图）。
+
+**遗留（非阻塞）**：
+
+1. **真机 E2E（验收 11）未跑**：PRD-P6 验收 11 要求真实模型走「审评论 → 回评论 → 写文章带封面 → 发布」链路（不额外耗积分则需用户授权，P5 同类验证消耗 311 分）；本轮已完成 DB 级全链验证与静态/构建核查，真机链路待用户授权或自行把玩。
+2. 模板预览图为 AI 生成的示意图（非真实截图），如需更贴近实际渲染效果可替换 `apps/web/public/templates/*/preview.png`（尺寸建议 4:3、≤400KB）。
+3. 编辑器 diff 为「打开时快照 ↔ 当前内容」；无服务端版本比对（后端无版本号机制，见偏差 ⑤），AI 覆盖确认卡的「对比」按钮按 R73 降级口径未做（登记 §21.6 演进预留）。
+
 ---
 
 ## 更新规则（AI 必读）
@@ -1233,3 +1302,4 @@
 > 2026-09-12：P4c 走查补丁 W1~~W4 已套用（纯文档，无代码改动、无回归）：W1 API.md §8 去阶段标注改「## 8. P4c：云盘公开链接 + 公开访问端点 + 在线解压」并删头部过渡注/各小节 (T46)/(T49) 标注；W2 术语统一（30009 文案与 API §5.5 章节名改「分享链接」+ P3/P4c 双含义口径注、ARCHITECTURE §4.7 配置表 `CLOUD_PUBLIC_SHARE_RATE_LIMIT` 注释改「分享（cloud_share）限流」并注明未实现保留占位）；W3 ARCHITECTURE §16.2 MIME 行末补三份白名单分置对照（transfer 预览 / site open/mime.ts / pub-mime.ts，域边界优先）；W4 §16.2 限流补硬编码 120/60 决议（瘦版定值，演进升配置组）。观察 1 处置（双「取消公开」语义）已并入 PLATFORM-GUIDE 字数核查流程，随 T58 手册更新落档。
 > 2026-09-14：**P4e 走查补丁 W1~~W4 已套用**（纯文档，无回归）+ R62：W1 API.md §6.2 删 mine 三行并加迁址注（348/417 行同步指向 §10.2/§10.3）；W2 ARCHITECTURE 四处 mine 路径注释改 `/api/site/manage/:id/apply-template`（§15.7 的未开通 40101 同步为 40119）；W3 三处错误码总表收齐 30020/40118/40119（§14.11 注明 40117 属 P4c 开放层码故不连续）；W4 §1 winston 行改 Nest Logger 实况；R62 用户管理云盘「配额」按钮对 admin 行放开（浏览器实测可见可开）。补丁按 P4e 走查报告 §6.3「命名空间调整后」的最终目标执行。
 > 2026-09-15：\**P5 收官（T71~~T76）**：AI 工具 11 → 25（云盘 5 / 站点 CMS 7 / 站点生命周期 2），零新 HTTP 端点、零新错误码、零新依赖；门面扩展（SiteFacade CMS 层 + 生命周期、CloudFacade 云盘根基点原语）；预算动态化（`ai.maxToolRounds` 配置化 + system/tools 实测扣减 + usage 口径扩展）；文档并入 ARCHITECTURE §20 / API §12，PLATFORM-GUIDE 压缩改写 1976 字。**三层验证全绿**：静态结构 48/48 + 工具×真库 53/53 + 真实模型端到端 16/16（deepseek-v4-flash 真 SSE，含 25 工具下的工具选择、连续确认卡、草稿语义与删站级联），双端静态检查 0 错误，测试数据零残留（used 精确回基线）。**真机发现并修复 1 个缺陷**：确认链路「连续 assistant 消息」触发 DeepSeek 思考模式 400（§20.6 第 9 条，受控实验定位 + 合并修复，修复前每轮 1 次、修复后 0 次）。
+> 2026-09-15：\**P6 收官（T77~~T82）**：手册两段式（通用版 999 字静态 + 能力清单 644 字按权限动态，合注 ≤2000 硬约束保持）+ 工具确定性路由（6 组 28 工具，无命中全量兜底，孤儿工具启动告警/脚本硬失败）+ 评论代审代回（`reply_content/reply_at` 迁移 + 回复端点 + 开放层携带回复 + AI 评论三件套）+ 文章封面通道（coverPath 四步校验链 + 媒体图清单回喂）+ 体验三件套（模板预览图 / `@codemirror/merge` 只读 diff / 格式按钮）+ 搭车两项（回收站排除头像行 / `confirmDialog` 全仓统一 30 处）。**新依赖 1 个**（D71 特批）、**新端点 1 个**、**错误码零新增**、工具 25 → 28。**四层验证全绿**：`pnpm check:ai` 16/16 + DB 级 28/28 + 浏览器复验（预览图/回复流程/diff 只读/取消零告警/格式按钮）+ **真机端到端 27/27**（deepseek-v4-flash 真 SSE，「审评论 → 回评论 → 写文章带封面 → 发布」五回合零上游错误）；测试数据零残留、`used` 精确回基线 64,428,657，真实消耗积分 91 分（如实登记）。文档并入 ARCHITECTURE §21 / API §13，PLATFORM-GUIDE 落档为通用版段。

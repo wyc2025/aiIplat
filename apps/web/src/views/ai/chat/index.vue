@@ -214,6 +214,7 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { confirmDialog } from '@/utils/confirm'
 import { Plus, EditPen, Delete } from '@element-plus/icons-vue'
 import type { ElScrollbar } from 'element-plus'
 import {
@@ -371,7 +372,7 @@ async function renameConversation(c: ConversationItem) {
 }
 
 async function removeConversation(c: ConversationItem) {
-  await ElMessageBox.confirm(`确认删除会话「${c.title}」吗？`, '提示', { type: 'warning' })
+  if (!(await confirmDialog(`确认删除会话「${c.title}」吗？`, '提示', { type: 'warning' }))) return
   await deleteConversation(c.id)
   ElMessage.success('删除成功')
   if (currentConversationId.value === c.id) {

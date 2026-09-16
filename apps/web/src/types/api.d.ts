@@ -352,11 +352,13 @@ export interface SiteQuotaInfo {
   used: number
 }
 
-/** 模板列表项（P4b T44；id = 模板目录名） */
+/** 模板列表项（P4b T44；id = 模板目录名；previewUrl 见 P6 T80） */
 export interface SiteTemplateItem {
   id: string
   name: string
   description: string
+  /** 预览图静态地址（缺图为 null，卡片渲染占位） */
+  previewUrl: string | null
 }
 
 /** 应用模板的逐文件结果（部分成功语义；action 为 created/overwritten） */
@@ -421,5 +423,8 @@ export interface SiteCommentItem {
   ip: string
   /** 0 待审核 / 1 已通过 / 2 已驳回 */
   auditStatus: number
+  /** 作者回复（P6 D69：一级回复，未回复为 null） */
+  replyContent: string | null
+  replyAt: string | null
   createdAt: string
 }

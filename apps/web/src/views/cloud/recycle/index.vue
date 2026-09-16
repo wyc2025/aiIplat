@@ -114,7 +114,8 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { confirmDialog } from '@/utils/confirm'
 import { Delete, FolderOpened, Document } from '@element-plus/icons-vue'
 import ProTable from '@/components/ProTable/index.vue'
 import { formatSize, formatTime } from '@/utils/format'
@@ -170,13 +171,13 @@ async function onRestore(row: CloudRecycleItem) {
   reload()
 }
 async function onPurge(row: CloudRecycleItem) {
-  await ElMessageBox.confirm(`彻底删除「${row.name}」？不可恢复`, '提示', { type: 'warning' })
+  if (!(await confirmDialog(`彻底删除「${row.name}」？不可恢复`, '提示', { type: 'warning' }))) return
   await purgeRecycle(Number(row.id))
   ElMessage.success('已彻底删除')
   reload()
 }
 async function onClear() {
-  await ElMessageBox.confirm('确认清空回收站？全部文件将永久删除', '提示', { type: 'warning' })
+  if (!(await confirmDialog('确认清空回收站？全部文件将永久删除', '提示', { type: 'warning' }))) return
   await clearRecycle()
   ElMessage.success('已清空')
   reload()

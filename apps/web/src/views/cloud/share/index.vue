@@ -247,7 +247,8 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useClipboard } from '@vueuse/core'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { confirmDialog } from '@/utils/confirm'
 import { Refresh, Search } from '@element-plus/icons-vue'
 import ProTable from '@/components/ProTable/index.vue'
 import { formatSize, formatTime } from '@/utils/format'
@@ -315,7 +316,7 @@ async function onCopy(row: CloudShare) {
   }
 }
 async function onStop(row: CloudShare) {
-  await ElMessageBox.confirm('停止后链接即刻失效，确认？', '提示', { type: 'warning' })
+  if (!(await confirmDialog('停止后链接即刻失效，确认？', '提示', { type: 'warning' }))) return
   await stopShare(Number(row.id))
   ElMessage.success('已停止')
   reload()

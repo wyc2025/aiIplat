@@ -175,7 +175,9 @@ export class RecycleService {
    */
   private async findTopLevelDeleted(userId: bigint) {
     const deleted = await this.prisma.cloudFile.findMany({
-      where: { userId, deletedAt: { not: null } },
+      // P6 T81/D72：排除头像旧行（parent_id = -1，AVATAR_PARENT_ID）——它们是不可达虚拟父目录下的
+      // 内部行，用户不可还原/清理，故不出现在回收站列表；30 天自动清理仍照常处理（R59 通道不变）。
+      where: { userId, deletedAt: { not: null }, parentId: { not: AVATAR_PARENT_ID } },
     })
     if (deleted.length === 0) return []
 

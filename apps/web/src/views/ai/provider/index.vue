@@ -360,7 +360,8 @@
 
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { confirmDialog } from '@/utils/confirm'
 import { Plus } from '@element-plus/icons-vue'
 import ProTable from '@/components/ProTable/index.vue'
 import FormDialog from '@/components/FormDialog/index.vue'
@@ -501,7 +502,12 @@ async function handleProviderSubmit() {
 }
 
 async function handleProviderDelete(row: ProviderItem) {
-  await ElMessageBox.confirm(`确认删除厂商「${row.name}」吗？其下模型将一并无法使用。`, '提示', { type: 'warning' })
+  const confirmed = await confirmDialog(
+    `确认删除厂商「${row.name}」吗？其下模型将一并无法使用。`,
+    '提示',
+    { type: 'warning' },
+  )
+  if (!confirmed) return
   await deleteProvider(row.id)
   ElMessage.success('删除成功')
   if (currentProvider.value?.id === row.id) {
@@ -593,7 +599,7 @@ async function handleModelSubmit() {
 }
 
 async function handleModelDelete(row: ModelItem) {
-  await ElMessageBox.confirm(`确认删除模型「${row.displayName}」吗？`, '提示', { type: 'warning' })
+  if (!(await confirmDialog(`确认删除模型「${row.displayName}」吗？`, '提示', { type: 'warning' }))) return
   await deleteModel(row.id)
   ElMessage.success('删除成功')
   loadModels()

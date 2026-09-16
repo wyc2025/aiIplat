@@ -649,6 +649,10 @@ model SiteComment {
   auditStatus Int      @default(0) @map("audit_status") @db.TinyInt
   /// 提交者 IP（R8 取值口径）
   ip          String   @map("ip") @db.VarChar(50)
+  /// 作者回复内容（P6 D69：一级回复，每条评论至多一条；NULL = 无回复）
+  replyContent String? @map("reply_content") @db.VarChar(500)
+  /// 作者回复时间（与 replyContent 同生同灭）
+  replyAt     DateTime? @map("reply_at")
   createdAt   DateTime @default(now()) @map("created_at")
 
   /// 逻辑关联 site_article（relationMode=prisma，无物理 FK）

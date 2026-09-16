@@ -34,6 +34,7 @@
 | Axios                | 双 token 静默刷新、单飞行重试                         |
 | markdown-it          | AI 消息渲染                                           |
 | CodeMirror 6         | 云盘文本文件在线编辑（按语言分包加载）                |
+| @codemirror/merge    | 在线编辑器只读差异对比（按需异步加载，P6）            |
 
 **后端 `apps/api`**
 
@@ -125,7 +126,9 @@ pnpm dev:web           # 前端 http://localhost:5173
 | [docs/P4D/PRD-P4D-CLOUD.md](./docs/P4D/PRD-P4D-CLOUD.md) / [ARCHITECTURE-P4D-增补](./docs/P4D/ARCHITECTURE-P4D-增补.md)   | P4d 移动/批量/打包下载 + 分享升级 + 语义分流        |
 | [docs/P4E/PRD-P4E-SITE.md](./docs/P4E/PRD-P4E-SITE.md) / [ARCHITECTURE-P4E-增补](./docs/P4E/ARCHITECTURE-P4E-增补.md)     | P4e 多站点（配额化）+ 删站 + AI 多站语义 + sid 脱敏 |
 | [docs/P4F/PRD-P4F-CLOUD.md](./docs/P4F/PRD-P4F-CLOUD.md) / [ARCHITECTURE-P4F-增补](./docs/P4F/ARCHITECTURE-P4F-增补.md)   | P4F 云盘清账：回收站自动清理 + 配额对账 + 小瑕疵    |
-| [docs/PLATFORM-GUIDE.md](./docs/PLATFORM-GUIDE.md)                                                                        | 平台使用手册（注入 AI system prompt）               |
+| [docs/P5/PRD-P5-AI.md](./docs/P5/PRD-P5-AI.md) / [ARCHITECTURE-P5-增补](./docs/P5/ARCHITECTURE-P5-增补.md)                | P5 AI 能力扩展：云盘/CMS/生命周期工具（25 个）      |
+| [docs/P6/PRD-P6-AI-UX.md](./docs/P6/PRD-P6-AI-UX.md) / [ARCHITECTURE-P6-增补](./docs/P6/ARCHITECTURE-P6-增补.md)          | P6 按需注入 + 评论代审代回 + 封面通道 + 体验三件套  |
+| [docs/PLATFORM-GUIDE.md](./docs/PLATFORM-GUIDE.md)                                                                        | 平台手册**通用版**（注入 AI system prompt 第一段）  |
 | [docs/PROGRESS.md](./docs/PROGRESS.md)                                                                                    | 进度台账（任务拆解与完成记录，AI 每次交付后更新）   |
 
 ## 路线图
@@ -138,7 +141,9 @@ pnpm dev:web           # 前端 http://localhost:5173
 - [x] 个人网站（支持 AI 生成站点）
 - [x] 多站点（P4e：站点数配额 + 站点列表/删站 + AI 多站语义 + 日志 sid 脱敏）
 - [x] 云盘清账（P4F：回收站自动清理 / 配额对账 / 历史小瑕疵 + P4e 走查补丁）
-- [ ] AI 定时任务、真实支付接入、RAG 知识库
+- [x] AI 能力扩展（P5：云盘 5 + 站点 CMS 7 + 站点生命周期 2 工具 + 预算动态化，工具总数 25）
+- [x] AI 按需注入与体验打磨（P6：手册两段式 + 工具确定性路由 + 评论代审代回 + 文章封面通道 + 模板预览图/编辑器 diff/格式按钮，工具总数 28）
+- [ ] 功能分享市场（MCP server 化）、评论楼中楼、AI 定时任务、真实支付接入、RAG 知识库
 
 ## License
 

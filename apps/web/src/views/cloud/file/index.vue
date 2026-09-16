@@ -725,7 +725,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { confirmDialog } from '@/utils/confirm'
 import { useClipboard } from '@vueuse/core'
 import { Upload, FolderAdd, Refresh, FolderOpened, Document, Select, DocumentCopy } from '@element-plus/icons-vue'
 import ProTable from '@/components/ProTable/index.vue'
@@ -1010,15 +1011,12 @@ function onPick(e: Event) {
 // 在线解压（P4c T49：zip → 同目录包名文件夹；同步执行，timeout 0）
 const unzippingId = ref('')
 async function onUnzip(row: CloudFile) {
-  try {
-    await ElMessageBox.confirm(
-      `确认解压「${row.name}」？将在当前目录创建同名文件夹，解压内容进入该文件夹（同名自动 "(1)"）`,
-      '在线解压',
-      { type: 'info' },
-    )
-  } catch {
-    return
-  }
+  const confirmed = await confirmDialog(
+    `确认解压「${row.name}」？将在当前目录创建同名文件夹，解压内容进入该文件夹（同名自动 "(1)"）`,
+    '在线解压',
+    { type: 'info' },
+  )
+  if (!confirmed) return
   unzippingId.value = row.id
   try {
     const res = await unzipFile(Number(row.id))
@@ -1076,7 +1074,7 @@ async function submitRename() {
 
 // 删除（软删入回收站）
 async function onRemove(row: CloudFile) {
-  await ElMessageBox.confirm(`确认删除「${row.name}」？将移入回收站`, '提示', { type: 'warning' })
+  if (!(await confirmDialog(`确认删除「${row.name}」？将移入回收站`, '提示', { type: 'warning' }))) return
   await removeFile(Number(row.id))
   ElMessage.success('已删除')
   reload()
@@ -1137,15 +1135,12 @@ async function onCopyPublicLink(row: CloudFile) {
 
 /** 取消公开（R27：token 轮换，旧链接立即失效；重新公开生成新链接） */
 async function onCancelPublic(row: CloudFile) {
-  try {
-    await ElMessageBox.confirm(
-      `确认取消公开「${row.name}」？旧公开链接将立即失效，重新公开会生成新链接`,
-      '提示',
-      { type: 'warning' },
-    )
-  } catch {
-    return
-  }
+  const confirmed = await confirmDialog(
+    `确认取消公开「${row.name}」？旧公开链接将立即失效，重新公开会生成新链接`,
+    '提示',
+    { type: 'warning' },
+  )
+  if (!confirmed) return
   try {
     await cancelPublicLink(Number(row.id))
     ElMessage.success('已取消公开')
@@ -1259,13 +1254,10 @@ async function copyShare() {
 }
 
 async function onStopShare() {
-  try {
-    await ElMessageBox.confirm('停止后访客将无法访问该链接，确认停止？', '提示', {
-      type: 'warning',
-    })
-  } catch {
-    return
-  }
+  const confirmed = await confirmDialog('停止后访客将无法访问该链接，确认停止？', '提示', {
+    type: 'warning',
+  })
+  if (!confirmed) return
   try {
     await stopShare(Number(shareId.value))
     ElMessage.success('已停止分享')
@@ -1386,13 +1378,12 @@ async function doMove(targets: Array<{ id: string }>, targetParentId: number): P
       else moved++
     }
     if (pending.length > 0) {
-      try {
-        await ElMessageBox.confirm(
-          '目标目录处于公开状态，移入后内容将对外可见（可被公开访问）。确认继续？',
-          '公开继承警告',
-          { type: 'warning', confirmButtonText: '仍然移入', cancelButtonText: '取消' },
-        )
-      } catch {
+      const confirmed = await confirmDialog(
+        '目标目录处于公开状态，移入后内容将对外可见（可被公开访问）。确认继续？',
+        '公开继承警告',
+        { type: 'warning', confirmButtonText: '仍然移入', cancelButtonText: '取消' },
+      )
+      if (!confirmed) {
         // 用户取消：已移动的保留，未执行项留在剪切板便于改投他处
         clipRemove(targets.filter((t) => !pending.includes(t)).map((t) => t.id))
         if (moved > 0) reload()
@@ -1452,13 +1443,10 @@ function batchMoveToClipboard(): void {
 async function batchRemove(): Promise<void> {
   const rows = selectedRows.value
   if (rows.length === 0) return
-  try {
-    await ElMessageBox.confirm(`确认删除选中的 ${rows.length} 项？将移入回收站`, '提示', {
-      type: 'warning',
-    })
-  } catch {
-    return
-  }
+  const confirmed = await confirmDialog(`确认删除选中的 ${rows.length} 项？将移入回收站`, '提示', {
+    type: 'warning',
+  })
+  if (!confirmed) return
   batchBusy.value = true
   const failures: Array<{ name: string; reason: string }> = []
   let ok = 0
@@ -1523,15 +1511,12 @@ function buildPackFilename(): string {
 
 /** 站点子树内：设为私有（is_public → 2 显式阻断，R45） */
 async function onSetPrivate(row: CloudFile): Promise<void> {
-  try {
-    await ElMessageBox.confirm(
-      `确认将「${row.name}」设为私有？其内容将不再对外公开。`,
-      '设为私有',
-      { type: 'warning' },
-    )
-  } catch {
-    return
-  }
+  const confirmed = await confirmDialog(
+    `确认将「${row.name}」设为私有？其内容将不再对外公开。`,
+    '设为私有',
+    { type: 'warning' },
+  )
+  if (!confirmed) return
   try {
     await setFilePublic(Number(row.id), false)
     ElMessage.success('已设为私有')

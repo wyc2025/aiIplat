@@ -214,7 +214,8 @@
 
 <script setup lang="ts">
 import { nextTick, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox, ElTree } from 'element-plus'
+import { ElMessage, ElTree } from 'element-plus'
+import { confirmDialog } from '@/utils/confirm'
 import { Plus } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import {
@@ -316,7 +317,7 @@ async function handleSubmit() {
 
 // ========== 删除（后端校验：被用户引用时禁删） ==========
 async function handleDelete(row: RoleItem) {
-  await ElMessageBox.confirm(`确认删除角色「${row.name}」吗？`, '提示', { type: 'warning' })
+  if (!(await confirmDialog(`确认删除角色「${row.name}」吗？`, '提示', { type: 'warning' }))) return
   await deleteRole(row.id)
   ElMessage.success('删除成功')
   load()

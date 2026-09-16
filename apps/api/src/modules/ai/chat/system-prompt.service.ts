@@ -2,45 +2,68 @@ import { Injectable, Logger, type OnModuleInit } from '@nestjs/common'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AuthUser } from '../../../gateway/guards/jwt.strategy'
+import { PermissionService } from '../../../gateway/services/permission.service'
 import { UserService } from '../../system/user/user.service'
-
-/** 助手设定（固定文案，见 ARCHITECTURE §12.4） */
-const ASSISTANT_IDENTITY = '你是 iplat 平台内置 AI 助手，可使用提供的工具帮助用户查询信息、操作系统。'
-
-/** 工具使用原则（固定文案） */
-const TOOL_RULES = [
-  '工具使用原则：',
-  '- read 类工具可直接执行并返回结果；',
-  '- write 类工具必须先向用户展示操作内容、经用户明确确认后才能执行；',
-  '- 当用户的需求无法用现有工具完成时，引导用户到左侧菜单手动操作，禁止编造不存在的功能或结果。',
-].join('\n')
+import {
+  CAPABILITY_MANIFEST,
+  pickCapabilityRows,
+  renderCapabilityList,
+  type CapabilityRow,
+} from './capability.manifest'
+import { composeSystemPrompt, textLength } from './prompt.sections'
 
 /**
- * System Prompt 服务（T23）。
- * 职责：启动时把 docs/PLATFORM-GUIDE.md 全文读入内存缓存（文件变更重启生效），
- * 并拼装完整 system prompt（助手设定 + 手册 + 用户上下文 + 工具原则）。
+ * System Prompt 服务（T23；P6 T77 改两段式 / D67 / R69，ARCHITECTURE §21.1）。
+ *
+ * 职责：
+ * 1. 启动时把 `docs/PLATFORM-GUIDE.md`（**通用版段**）读入内存缓存（文件变更重启生效）；
+ * 2. 每次对话按 `build(user)` 拼装：助手设定（静态）+ 通用版（静态）+ 能力清单（按权限动态）
+ *    + 用户上下文；总长仍受 ≤2000 字硬约束（分段阈值见 scripts/check-ai-prompt.ts）。
  */
 @Injectable()
 export class SystemPromptService implements OnModuleInit {
   private readonly logger = new Logger(SystemPromptService.name)
 
-  constructor(private readonly userService: UserService) {}
+  constructor(
+    private readonly userService: UserService,
+    private readonly permissionService: PermissionService,
+  ) {}
 
-  /** 手册全文缓存 */
+  /** 通用版手册全文缓存 */
   private guide = ''
 
   onModuleInit(): void {
     this.guide = this.loadGuide()
-    this.logger.log(`已加载平台手册（${this.guide.length} 字符）`)
+    const capabilityChars = textLength(renderCapabilityList(CAPABILITY_MANIFEST))
+    this.logger.log(
+      `已加载平台手册通用版（${textLength(this.guide)} 字符）+ 能力清单常量（${CAPABILITY_MANIFEST.length} 行 / ` +
+        `全量 ${capabilityChars} 字符，按权限动态注入）`,
+    )
+  }
+
+  /** 通用版手册原文（核查脚本/排查用，只读） */
+  get guideText(): string {
+    return this.guide
   }
 
   /**
-   * 拼装完整 system prompt（顺序固定：设定 → 手册 → 用户上下文 → 工具原则）。
-   * 用户上下文含昵称、角色名、当前日期；不注入权限标识明细（权限由工具过滤兜底）。
+   * 拼装完整 system prompt（顺序固定：助手设定 → 通用版 → 能力清单 → 用户上下文）。
+   * 能力清单按当前用户权限逐项注入（R69）：无权限的能力行不出现，AI 不会向用户承诺做不到的事。
    */
   async build(user: AuthUser): Promise<string> {
-    const context = await this.buildUserContext(user)
-    return [ASSISTANT_IDENTITY, this.guide, context, TOOL_RULES].filter(Boolean).join('\n\n')
+    const [rows, context] = await Promise.all([this.capabilitiesFor(user), this.buildUserContext(user)])
+    const capabilityList = renderCapabilityList(rows)
+    const prompt = composeSystemPrompt({ guide: this.guide, capabilityList, userContext: context })
+    this.logger.debug(
+      `system prompt 分段：通用版=${textLength(this.guide)} 能力清单=${textLength(capabilityList)}` +
+        `（${rows.length}/${CAPABILITY_MANIFEST.length} 项）总长=${textLength(prompt)}`,
+    )
+    return prompt
+  }
+
+  /** 当前用户可见的能力行（按权限过滤，供核查/排查复用） */
+  async capabilitiesFor(user: AuthUser): Promise<CapabilityRow[]> {
+    return pickCapabilityRows((perms) => this.permissionService.hasPermission(user.userId, perms))
   }
 
   /** 用户上下文：昵称、角色名列表、当前日期 */
@@ -59,7 +82,7 @@ export class SystemPromptService implements OnModuleInit {
     return `当前用户信息：昵称「${nickname}」，角色：${roleText}，当前日期：${today}。`
   }
 
-  /** 读手册：优先项目根 docs/PLATFORM-GUIDE.md，失败降级为空（不阻断启动） */
+  /** 读通用版手册：优先项目根 docs/PLATFORM-GUIDE.md，失败降级为空（不阻断启动） */
   private loadGuide(): string {
     const candidates = [
       join(process.cwd(), '../../docs/PLATFORM-GUIDE.md'),
@@ -73,7 +96,7 @@ export class SystemPromptService implements OnModuleInit {
         // 尝试下一个路径
       }
     }
-    this.logger.warn('未找到 docs/PLATFORM-GUIDE.md，system prompt 将不含手册内容')
+    this.logger.warn('未找到 docs/PLATFORM-GUIDE.md，system prompt 将不含通用版手册内容')
     return ''
   }
 }

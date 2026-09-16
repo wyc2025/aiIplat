@@ -168,6 +168,20 @@
           content.className = 'content'
           setText(content, comment.content) // textContent 转义，防 XSS
           li.appendChild(content)
+          // P6：作者回复（replyContent 非空才渲染；一级回复，无点赞/再回复）
+          if (comment.replyContent) {
+            var reply = document.createElement('div')
+            reply.className = 'reply'
+            var replyLabel = document.createElement('span')
+            replyLabel.className = 'reply-label'
+            setText(replyLabel, '作者回复')
+            reply.appendChild(replyLabel)
+            var replyText = document.createElement('p')
+            replyText.className = 'reply-content'
+            setText(replyText, comment.replyContent) // textContent 转义，防 XSS
+            reply.appendChild(replyText)
+            li.appendChild(reply)
+          }
           var time = document.createElement('p')
           time.className = 'time'
           setText(time, formatDate(comment.createdAt))

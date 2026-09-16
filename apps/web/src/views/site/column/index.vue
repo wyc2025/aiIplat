@@ -151,7 +151,8 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { confirmDialog } from '@/utils/confirm'
 import { Plus } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import ProTable from '@/components/ProTable/index.vue'
@@ -267,7 +268,8 @@ async function submit() {
 }
 
 async function onRemove(row: SiteColumnItem) {
-  await ElMessageBox.confirm(`确认删除栏目「${row.name}」？`, '提示', { type: 'warning' })
+  const confirmed = await confirmDialog(`确认删除栏目「${row.name}」？`, '提示', { type: 'warning' })
+  if (!confirmed) return
   try {
     await removeColumn(Number(row.id))
     ElMessage.success('已删除')

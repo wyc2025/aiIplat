@@ -24,6 +24,8 @@
 | 环境          | Node ≥ 20，pnpm 9                         |                                                                                                                    |
 | Markdown 渲染 | markdown-it                               | 仅用于 AI 回复渲染；渲染输出必须防 XSS（不允许 raw HTML）                                                          |
 
+**P6 新依赖白名单（仅此 1 个，已在 PRD-P6 D71 特批）**：`@codemirror/merge`（编辑器只读差异对比视图；按需 `await import()` 异步加载，不进首屏包，§21.4）。
+
 ### 1.2 后端（apps/api）
 
 | 类别       | 选型                                           | 约束                                                                                |
@@ -622,7 +624,7 @@ apps/api/src/
 
 ### site_ 域表（P4a 六表 + P4e 配额表，DDL 详见 §14.2 / §18.1）
 
-`site_site`（站点，**P4e 起每用户多行**，slug unique，root_folder_id/media_folder_id 关联 cloud_file，status/comment_audit 开关，create_time/update_time；`user_id` 唯一索引已于 P4e 解除 → 普通索引 `idx_site_user(user_id)`）、`site_column`（栏目树 ≤3 级，索引 (site_id,parent_id)）、`site_tag`（unique(site_id,name)）、`site_article`（含 cover_path/word_count/view_count/status/published_at，索引 (site_id,status,published_at) 与 (site_id,column_id)，无 deleted_at——R7 物理删除）、`site_article_tag`（unique(article_id,tag_id)+双索引）、`site_comment`（audit_status/ip，索引 (article_id,audit_status) 与 (site_id,audit_status)）、**`site_quota`（P4e 新增，user_id PK + quota int，站点数上限，懒创建，照 `cloud_usage` 先例）**。
+`site_site`（站点，**P4e 起每用户多行**，slug unique，root_folder_id/media_folder_id 关联 cloud_file，status/comment_audit 开关，create_time/update_time；`user_id` 唯一索引已于 P4e 解除 → 普通索引 `idx_site_user(user_id)`）、`site_column`（栏目树 ≤3 级，索引 (site_id,parent_id)）、`site_tag`（unique(site_id,name)）、`site_article`（含 cover_path/word_count/view_count/status/published_at，索引 (site_id,status,published_at) 与 (site_id,column_id)，无 deleted_at——R7 物理删除）、`site_article_tag`（unique(article_id,tag_id)+双索引）、`site_comment`（audit_status/ip，**P6 增 reply_content/reply_at 一级作者回复**，索引 (article_id,audit_status) 与 (site_id,audit_status)）、**`site_quota`（P4e 新增，user_id PK + quota int，站点数上限，懒创建，照 `cloud_usage` 先例）**。
 `cloud_file` 加列 `is_public tinyint default 0`（三态语义，见 §4.8 / §14.2）。全部 relationMode="prisma" 逻辑外键，域内仅 article→column/articleTags/comments 三条 Prisma relation，跨域一律逻辑外键。
 
 ### 索引约定
@@ -746,6 +748,8 @@ P4a 增补（site 配置组，见 `apps/api/src/config/site.config.ts`，均有�
 - `SITE_OPEN_API_RATE_LIMIT`：开放数据限流（次/分/IP，默认 60）
 - `SITE_COMMENT_RATE_LIMIT`：评论提交限流（次/分/IP，默认 10）
 
+P6 增补（ai 配置组，见 `apps/api/src/config/ai.config.ts`，D68）：`DEBUG_AI`（工具路由明细日志开关，显式 `1`/`true` 才开，默认关；开启后 debug 级输出命中关键字明细，§21.1）。
+
 P5 增补（ai 配置组，见 `apps/api/src/config/ai.config.ts`，D65）：
 
 - `AI_MAX_TOOL_ROUNDS`：单轮用户消息的工具调用轮次上限（默认 3，**上限 10** 防失控；越界/非法一律回退默认值）。此前为 chat.service 硬编码常量 `MAX_TOOL_ROUNDS`，P5 起改为配置组读取（每次现读，改配置无需重启）
@@ -794,8 +798,8 @@ main.ts 增补：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 函数�
 | MarkdownView                                                | web/src/components/MarkdownView                      | markdown-it 渲染封装（禁 raw HTML）；T39 由 ai 域提升为公共组件（site 文章编辑预览复用）                                                                                                                                                  | 已建（T17），已提升（T39）        |
 | AiTool / ToolRegistry                                       | api/src/modules/ai/tool                              | 工具类型与注册表（新增工具 = tools/ 下加一个文件并注册）                                                                                                                                                                                  | 已建（T19）                       |
 | PermissionService                                           | api/src/gateway/services                             | 权限判定共用服务（PermissionGuard 与工具层同源）                                                                                                                                                                                          | 已建（T19）                       |
-| PLATFORM-GUIDE                                              | docs/PLATFORM-GUIDE.md                               | AI 平台手册，注入 system prompt；功能变更必须同步更新                                                                                                                                                                                     | 已建（T23）                       |
-| SystemPromptService                                         | api/src/modules/ai/chat                              | system prompt 拼装（手册缓存 + 用户上下文 + 工具原则）                                                                                                                                                                                    | 已建（T23）                       |
+| PLATFORM-GUIDE                                              | docs/PLATFORM-GUIDE.md                               | AI 平台手册**通用版**（system prompt 第一段，静态注入 ≤1000 字）；功能变更必须同步更新；能力细节自 P6 起移入 `capability.manifest.ts`（§21.1）                                                                                            | 已建（T23），P6 改两段式          |
+| SystemPromptService                                         | api/src/modules/ai/chat                              | system prompt 拼装（助手设定 + 通用版手册缓存 + **按权限动态能力清单** + 用户上下文；P6 §21.1）                                                                                                                                           | 已建（T23）                       |
 | ToolConfirmCard                                             | web/src/views/ai/components                          | 确认卡片组件（参数摘要 + 确认/取消 + 过期态）                                                                                                                                                                                             | 已建（T24）                       |
 | ToolResultTag                                               | web/src/views/ai/components                          | 工具结果折叠标签                                                                                                                                                                                                                          | 已建（T24）                       |
 | SiteFacade                                                  | api/src/modules/site/facade                          | 跨域门面：hasSite（R13 删用户预检）+ P4b 站点语义校验层（getMySiteInfo / invalidateSitePaths / listFiles / readFile / writeFiles，§15.3）；SiteFacadeModule 独立注册随 SiteModule 导出                                                    | 已建（T33/T41）                   |
@@ -846,6 +850,16 @@ main.ts 增补：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 函数�
 | tool-params.ts | api/src/modules/ai/tool/tools | 工具入参整形三件套 readStrParam / readStrArrayParam / readNumParam（云盘/CMS/生命周期 14 个工具共用；模型参数不可信，统一整形后再透传门面） | 已建（T72） |
 | ai 配置组 + 预算动态化 | api/src/config/ai.config.ts、api/src/modules/ai/chat/chat.service.ts | `ai.maxToolRounds`（env `AI_MAX_TOOL_ROUNDS`，默认 3 上限 10）替代硬编码；历史截取预算 = maxContext − 输出预留 25% − system 实测 − tools schema 实测 − 当前消息，低于 2000 字符保底并告警；每轮 debug 日志记实算值（§20.3/R67） | 已建（T75） |
 | R14 字数口径转出 | api/src/modules/site/facade/site-facade.service.ts | `export { countWordsR14 }`（口径单一来源仍在 article.service.ts）：AI 工具确认卡需在**执行前**展示字数，经门面模块转出而非跨域直插站点域内部文件（铁律 6） | 已建（T73） |
+| prompt.sections.ts | api/src/modules/ai/chat | system prompt 分段拼装纯函数（助手设定文案 + composeSystemPrompt + textLength；零 Nest 依赖，供核查脚本直接 import，§21.1） | 已建（T77） |
+| capability.manifest.ts | api/src/modules/ai/chat | **能力清单常量表**（17 行：能力名 + 注入权限 + 一行文案 + 覆盖工具；`pickCapabilityRows` 按权限过滤 / `renderCapabilityList` 渲染）；与工具注册表三方同源，机械核查 | 已建（T77） |
+| tool.groups.ts | api/src/modules/ai/tool | **工具分组与确定性路由**（TOOL_GROUPS 6 组 28 工具 / KEYWORD_TO_GROUPS 词根 / resolveToolGroups / checkToolGroupCoverage 孤儿与陈旧校验） | 已建（T77） |
+| check-ai-prompt（`pnpm check:ai`） | apps/api/scripts/check-ai-prompt.ts | 手册分段三阈值 + 工具归组全覆盖 + 能力清单同源 + 路由样例机械核查（失败退出码 1；`pnpm --filter @iplat/api check:ai`） | 已建（T77） |
+| SiteFacade 评论层扩展（P6） | api/src/modules/site/facade | listComments / auditComments（≤20 逐条独立成败）/ replyComment / getCommentBrief（全部收 siteId；SiteFacadeModule 增 imports SiteCommentModule） | 已建（T78） |
+| SiteFacade.resolveCoverPath（P6） | api/src/modules/site/facade | 封面判定对象（R72：media/ 前缀 + 真实图片行 + 可公开访问 + 扩展名白名单；失败附 media/ 可用图片前 10 条） | 已建（T79） |
+| AI 评论三件套 | api/src/modules/ai/tool/tools | list_site_comments / audit_site_comments / reply_site_comment（D69 代审 + 代回；跨站评论 40119） | 已建（T78） |
+| confirmDialog | web/src/utils/confirm.ts | **确认弹窗全仓唯一入口**（内置 try/catch，取消/关闭静默返回 false）；全仓 30 处 ElMessageBox.confirm 调用点已统一（§21.5） | 已建（T81） |
+| @codemirror/merge 只读对比 | web/src/views/cloud/components/FileEditorDialog.vue | 「对比改动」= 打开时快照 ↔ 当前编辑内容 只读双栏（highlightChanges + gutter，不做合并编辑）；包按需 `await import()`（独立异步 chunk，§21.4） | 已建（T80），依赖白名单（D71 特批） |
+| 模板预览图资产 | web/public/templates/{default,portfolio,card}/preview.png + api/assets/site-templates/*/template.json#preview | 三套模板预览图（Vite 构建直出 `/templates/{id}/preview.png`）；API 列表按 template.json#preview 返回 previewUrl（缺图 null → 卡片占位） | 已建（T80） |
 
 ### Redis Key 增补约定（写入 RedisKey 常量）
 
@@ -910,7 +924,7 @@ export interface AiTool {
 
 ### 12.2 调用流程（chat.service 编排）
 
-1. 引擎层扩展：ProviderService.streamChat 当前仅传 messages，本期扩展 `tools` 参数透传与上游 `tool_calls` 事件解析（EngineStreamEvent 新增事件类型）。模型 `support_tool=1` 且存在可用工具时携带 `tools`（**按当前用户权限过滤后的子集**，无权限工具不下发；**过滤后为空则不携带 tools 字段**，空数组会触发部分厂商 400）；工具 schema 本身占用上下文，与历史消息共用 max_context 预算（**P5 起改为实测扣减，见 §20.3**）。注意：**tool_calls 在流式 delta 中分片下发**（function.arguments 逐段追加），引擎层需累积分片、聚合至 finish_reason=tool_calls 后再解析执行，禁止读到就解析
+1. 引擎层扩展：ProviderService.streamChat 当前仅传 messages，本期扩展 `tools` 参数透传与上游 `tool_calls` 事件解析（EngineStreamEvent 新增事件类型）。模型 `support_tool=1` 且存在可用工具时携带 `tools`（**按当前用户权限过滤后的子集**，无权限工具不下发；**过滤后为空则不携带 tools 字段**，空数组会触发部分厂商 400）；工具 schema 本身占用上下文，与历史消息共用 max_context 预算（**P5 起改为实测扣减，见 §20.3**）。**P6 起下发链为两道串联：权限过滤 → 组路由（`tool.groups.ts`，无命中全量兜底，见 §21.1）**。注意：**tool_calls 在流式 delta 中分片下发**（function.arguments 逐段追加），引擎层需累积分片、聚合至 finish_reason=tool_calls 后再解析执行，禁止读到就解析
 2. 上游返回 tool_calls → 逐个处理：
    - 执行前再次校验 perms（防缓存间隙），无权限 → 20015 结果回喂模型告知。权限判定逻辑不得复制：从 PermissionGuard 抽出共用的 PermissionService（gateway 层），守卫与工具层都调它
    - read：执行 handler → 结果作为 `role: "tool"` 消息追加 → 再次调用上游（**轮次上限取 `ai.maxToolRounds`，P5 起配置化、默认 3、上限 10**，超限截断并提示）
@@ -925,17 +939,20 @@ export interface AiTool {
 - ai 域工具需要 system 域能力时，**只允许注入 system 域模块 export 出来的 Service**（如 UserService、OnlineService、RoleService）
 - ai 域工具操作个人网站时，**只注入 site 域门面 SiteFacade**（P4b 站点三件套 §15.2 + P5 CMS/生命周期七件套 §20.1；ToolModule imports SiteModule）
 - ai 域工具操作云盘时，**只注入 cloud 域门面 CloudFacade**（P5 云盘五件套 §20.1；ToolModule imports CloudModule）
+- ai 域工具操作站点评论/封面时同样**只经 SiteFacade**（P6 评论三件套与 `resolveCoverPath`，§21.2/§21.3）；跨域复用常量（如评论字数上限）经门面 re-export，禁止直插站点域内部文件
 - system 域各模块需在 module 的 `exports` 中显式声明可被外部使用的 Service；未导出 = 私有
 - handler 禁止直接操作其他域的表、禁止绕过 Service 写旁路逻辑
 
-### 12.4 system prompt 结构（chat.service 拼装，顺序固定）
+### 12.4 system prompt 结构（chat.service 拼装，顺序固定；**P6 T77 改两段式，见 §21.1**）
 
 ```
 1. 助手设定（固定文案：你是 iplat 平台内置 AI 助手，可使用提供的工具帮助用户操作系统……）
-2. docs/PLATFORM-GUIDE.md 全文（启动时读入内存缓存，文件变更重启生效）
-3. 当前用户上下文：昵称、角色名列表、当前日期（不注入权限标识明细，权限由工具过滤兜底）
-4. 工具使用原则：read 类直接执行；write 类必须先经用户确认；不确定的操作路径引导用户查看菜单，禁止编造
+2. 通用版手册：docs/PLATFORM-GUIDE.md 全文（启动时读入内存缓存，文件变更重启生效；≤1000 字，压缩后的平台简介/角色权限/通用规则/功能入口/工具原则）
+3. 能力清单（P6 新增，动态）：capability.manifest.ts 按当前用户权限逐项注入，一行一项（≤1200 字；无权限项不出现）
+4. 当前用户上下文：昵称、角色名列表、当前日期（不注入权限标识明细，权限由工具过滤兜底）
 ```
+
+> 合注总长硬约束 ≤2000 字符（分段阈值与机械核查见 §21.1）。工具使用原则自 P6 起写在通用版手册内（不再单列常量）。
 
 ---
 
@@ -993,7 +1010,7 @@ apps/api/assets/site-templates/ # 模板库（P4b T44 迁移自单数 site-templ
 
 **site_article_tag**：`id` / `article_id` / `tag_id`；`unique(article_id,tag_id)` + 双索引。
 
-**site_comment —— 评论**：`id` / `site_id` / `article_id` / `nickname` varchar32 / `content` varchar500 / `audit_status`（0 待审 1 通过 2 驳回）/ `ip` varchar50 / `created_at`；索引 `(article_id,audit_status)`、`(site_id,audit_status)`。
+**site_comment —— 评论**：`id` / `site_id` / `article_id` / `nickname` varchar32 / `content` varchar500 / `audit_status`（0 待审 1 通过 2 驳回）/ `ip` varchar50 / **`reply_content` varchar500 null（P6 T78 作者回复，一级回复：每条至多一条，空 = NULL）** / **`reply_at` datetime null（与 reply_content 同生同灭）** / `created_at`；索引 `(article_id,audit_status)`、`(site_id,audit_status)`。
 
 **cloud_file 变更**：`is_public tinyint default 0` **三态**：0=继承父目录（新建默认）/ 1=显式公开（站点根恒为 1）/ 2=显式阻断。公开性上溯判定见 14.4。域内 Prisma relation 仅 article→column / articleTags / comments 三条，跨域一律逻辑外键。
 
@@ -1762,3 +1779,147 @@ historyBudget = max_context − 输出预留(25%) − systemBudget − toolsBudg
 | AI 删除文章        | 需先给文章加回收站语义 | 现为物理删除（R7）不可恢复，故不给工具；加软删后可照 `delete_cloud_files` 模式补齐 |
 | 工具按场景分包下发 | 工具数再翻倍           | 预算实测 debug 日志是触发依据；可在 getAvailableTools 前按意图粗分类后再过滤       |
 | 云盘二进制写入     | 用户诉求               | 需先解决上传通道与审核语义（当前 AI 产出只有文本）                                 |
+
+---
+
+## 21. 按需注入 + 评论代审代回 + 封面通道 + 体验三件套（P6，自 docs/P6/ARCHITECTURE-P6-增补.md 并入；增补文档保留为历史细节参考）
+
+> 编号与 `docs/P6/PRD-P6-AI-UX.md` 对齐（D67~~D72 / R69~~R74 / T77~T82）。
+> **新依赖 1 个**：`@codemirror/merge`（D71 铁律 7 特批，前端按需异步加载）；**新 HTTP 端点 1 个**：作者回复评论（§21.2）；
+> **错误码零新增**（复用 40001/40105/40110/40119 与既有权限码）；工具总数 **25 → 28**。
+
+### 21.1 按需注入：手册两段式 + 工具确定性路由（T77，D67/D68/R69/R70）
+
+**手册两段式**——`SystemPromptService.build(user)` 拼装顺序（§12.4 修订点）：
+
+```
+system prompt = 助手设定（静态，prompt.sections.ASSISTANT_IDENTITY）
+              + 通用版手册（静态，docs/PLATFORM-GUIDE.md 全文，启动时读入缓存）
+              + 能力清单（动态，按当前用户权限逐项注入，一行一项）
+              + 用户上下文（昵称/角色/当前日期，现状不变）
+```
+
+- **能力清单数据源 = 代码常量表** `modules/ai/chat/capability.manifest.ts`（`CAPABILITY_MANIFEST`：`key / perms / text / tools`）。
+  与工具注册表**三方同源**：每个已注册工具恰好被一个能力行覆盖，且能力行 `perms` 与该工具 `perms` 完全一致；`perms: null` = 登录即可（恒注入）。
+  注入条件 = `PermissionService.hasPermission`；无权限项**不出现**（AI 不向用户承诺做不到的事，R69）
+- **分段字数阈值（机械核查，UTF-8 字符口径 `[...text].length`）**：通用版（助手设定 + 手册）≤1000 / 能力清单 ≤1200 / 合注总长 ≤2000。
+  实测：通用版 **999**、能力清单 **644**（17 行）、admin 实际 prompt **1691**（含用户上下文）
+- 核查脚本 = `apps/api/scripts/check-ai-prompt.ts`（`pnpm --filter @iplat/api check:ai`）：三阈值 + 工具归组 +
+  能力清单同源 + 路由样例 + 写工具能力行登记，**任一不过即退出码 1**
+
+**工具确定性路由（形态 A）**——下发链两道串联，顺序不可颠倒：
+
+```
+权限过滤（现状）→ 组路由（tool.groups.ts）→ 携带 tools 调上游
+```
+
+- 分组常量 `TOOL_GROUPS`（6 组 / 28 工具，与注册表同源）：
+
+  | 组            | 工具数 | 工具                                                                                                                 |
+  | ------------- | ------ | -------------------------------------------------------------------------------------------------------------------- |
+  | common        | 3      | get_my_profile / update_my_profile / get_my_credits（无 perms，恒下发）                                              |
+  | system        | 4      | get_online_users / kick_user / search_users / list_roles                                                             |
+  | siteFile      | 3      | list_site_files / read_site_file / write_site_files                                                                  |
+  | siteCms       | 10     | list/read/create/update/publish_site_article + ensure_site_column / ensure_site_tags + list/audit/reply_site_comment |
+  | siteLifecycle | 3      | create_site / update_site / delete_site                                                                              |
+  | cloud         | 5      | list/read/write_cloud_file + move_cloud_files + delete_cloud_files                                                   |
+
+  > 命名说明：P5 文档中的 `create` 组自本期起称 **siteCms / siteLifecycle / siteFile**（拆分后名实相符）；API.md §13.6 的常量表以本节为准。
+
+- 命中 = **当前用户消息**（不含历史）经 `KEYWORD_TO_GROUPS` 词根匹配 → 命中组并集 ∪ common；**无命中 = 全量兜底**（宁可多花 token，不让 AI 说不会）；
+  未归组工具（孤儿）出于安全一律保留（启动 warn + 核查脚本硬失败）
+- 确认回填链路（`/ai/tool/confirm`）的 routingText = 该会话**最近一条 user 消息**（与 chat 链路同一路由函数，行为一致）
+- **观测日志**：每轮 info `[AI] tools injected: groups=… count=x/28`；`DEBUG_AI=1` 时 debug 补记命中关键字与权限内工具数；
+  历史预算 debug 行同步记 `groups=`（与 toolsBudget/historyBudget 同一条，R67 口径扩展）
+- **演进阈值**：`toolsBudget > max_context × 20%` → 评估形态 B（meta-tool 搜索路由），见 §21.6
+
+### 21.2 评论作者回复 + AI 评论三件套（T78，D69/R71/R74）
+
+**DB**：`site_comment` 增 `reply_content varchar(500) null` + `reply_at datetime null`（一级回复：每条评论至多一条，改回复 = 更新这两列；清空 = 置 NULL）。
+迁移 `20260915100000_add_site_comment_reply`。
+
+**后端**：
+
+- 管理端 `PUT /api/site/comment/:id/reply`（`site:comment:audit`，`@OperationLog('个人网站','回复评论')`）：
+  body `{ content }` trim 后 ≤500 字（DTO `@Length(0,500)` + service 兜底），**空串/null = 清除回复**；
+  返回 `{ ok: true, id, nickname, content, replyContent, replyAt }`（超集：前端不回读也能更新，见 §21.7 偏差 2）
+- `SiteCommentService`：`list` 条目加 `replyContent/replyAt`；新增 `reply`（写回复并失效 `site:data:{siteId}:*`）与 `getCommentBrief`；
+  `findOwnedComment(userId, id, expectedSiteId?)` 增可选站点校验（AI 链路跨站评论 = 40119，管理端不传即保持现状）
+- 开放层 `/api/open/:slug/api/articles/:id/comments` 条目增 `replyContent/replyAt`（查询恒为 `audit_status=1`，故回复可见性与评论一致，R71）
+- **SiteFacade 评论层**（SiteFacadeModule 增 imports SiteCommentModule，CommentModule 增 exports）：
+  `listComments(userId, siteId, { auditStatus?, articleId?, pageNo?, pageSize? })`（pageSize ≤20）/ `auditComments(userId, siteId, ids[], auditStatus)`（≤20，逐条独立成败）/
+  `replyComment(userId, siteId, id, content?)` / `getCommentBrief(userId, siteId, id)`
+
+**AI 工具 3 个**（siteCms 组，均 `site:comment:audit`）：
+
+| 工具                  | risk  | 入参                                                                                            | 摘要 / 返回要点                                                                |
+| --------------------- | ----- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `list_site_comments`  | read  | `{ slug?, status?（pending 默认/approved/rejected/all）, articleId?, page?, pageSize?（≤20） }` | 内容超 60 字截断（`contentTruncated`）；含文章标题/状态/回复                   |
+| `audit_site_comments` | write | `{ slug?, ids: number[]（1~20）, action: approve\|reject }`                                     | 确认卡 = 条数 + 通过/驳回 + 公开影响 + 目标站点；执行逐条汇总 succeeded/failed |
+| `reply_site_comment`  | write | `{ slug?, id, content（≤500，空串=清除） }`                                                     | 确认卡 = 原评论昵称 + 内容截断 30 字 + 现有回复 + 新回复（R71）                |
+
+**前端**：管理端评论页新增「作者回复」列 + 行内「回复/改回复」（FormDialog，回显原评论与已有回复）；默认模板（site-templates/default）文章详情渲染「作者回复」块（有 `replyContent` 才渲染，textContent 转义）
+三套模板 README.txt 的评论契约同步补 `replyContent/replyAt` 字段说明。**存量站点模板是用户代码，不渲染即不显示（不受影响）**。
+
+### 21.3 文章封面通道（T79，D70/R72）
+
+- 工具参数：`create_site_article` / `update_site_article` 增 `coverPath`（update 传空串 = 清除封面）
+- **SiteFacade.resolveCoverPath(userId, siteId, coverPath)**：不抛异常，返回判定对象
+  `{ ok: true, path } | { ok: false, errorCode: 40105, message, availableImages }`；校验链：`media/` 前缀 →
+  `CloudFacade.resolvePublicPath` 解析为该站云盘真实文件（属主 + 未删除 + 可公开访问 + 非目录）→ 扩展名 ∈ `{png,jpg,jpeg,webp,gif}`（`SITE_COVER_IMAGE_EXTS`）；
+  失败时附该站 `media/` 下已有图片清单（有界遍历前 10 条，`AI_COVER_HINT_MAX`）引导模型换图
+- 模型发现图：既有 `list_cloud_files { path: "media/" }`（零新增通道）；AI 无图片上传能力，只能引用已有图
+- 出口径：`SiteArticleItem` 增 `coverPath`（创建/更新/读取均返回，便于模型自我核对）
+
+### 21.4 体验三件套（T80，D71/R73）
+
+1. **模板预览图**：三张静态预览资产 + `template.json#preview` 填文件名 + `GET /api/site/templates` 响应增 `previewUrl`
+   （缺省/缺图 = null，前端渲染占位）；模板卡片 `<el-image>` + `#error` 占位（不裂图）。
+   **资产落点为 web 侧 `apps/web/public/templates/{id}/preview.png`**（Vite 构建直出 `/templates/{id}/preview.png`）——
+   避免为静态图新增 API 端点，也避免二进制资产双份（见 §21.7 偏差 3）
+2. **编辑器 diff 视图**：`FileEditorDialog` 增「对比改动」入口（**所有文本文件**，有改动或已在对比态时可用），
+   左 = **打开时快照**（旧），右 = **当前编辑内容**（新），两侧 `EditorState.readOnly.of(true)` 只读、`highlightChanges` + 行内 gutter，
+   **不做三路合并/不做编辑合并**（R73）；`@codemirror/merge` 按需 `await import()`（构建产物独立 chunk，不阻塞首屏）；保存后关闭对比并刷新快照
+3. **格式按钮**：markdown 编辑面快捷插入——`FileEditorDialog`（仅 `.md`）与文章编辑器正文工具栏各一组「粗体 `**`／斜体 `*`／链接 `[](url)`」，
+   选区包裹 + 无选区插占位文本，**零依赖**
+
+### 21.5 搭车两项（T81，D72）
+
+- **回收站排除头像旧行**：`RecycleService.findTopLevelDeleted` 查询加 `parentId: { not: AVATAR_PARENT_ID }`（-1 是不可达虚拟父目录下的内部行，用户不可还原/清理）；
+  30 天自动清理通道**不变**（仍清理头像旧行，且沿用 `refundUsed: false` 口径，§19.2）
+- **确认弹窗全仓统一**：新增公共资产 `confirmDialog(message, title?, options?)`（`web/src/utils/confirm.ts`）——
+  `ElMessageBox.confirm` 取消/关闭/ESC 以 reject 结束，封装内 try/catch 后返回布尔；**全仓 30 处调用点全部改走本封装**（`ElMessageBox.confirm` 仅存在于封装内部），
+  调用方统一写 `if (!(await confirmDialog(...))) return`，不再各自 try/catch（销 P4f 遗留 19）
+
+### 21.6 演进预留（本期不做，架构不堵路）
+
+| 项                           | 触发条件                                      | 预留设计                                                                                   |
+| ---------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| 形态 B（meta-tool 搜索路由） | `toolsBudget > max_context × 20%`（实算日志） | 路由层已收敛在 `tool.groups.ts` + `getAvailableTools` 两点，替换为 meta-tool 不改工具实现  |
+| 评论楼中楼（多级 parent_id） | 社区语义明确后                                | 现为一级回复（`reply_content` 单列）；升级需改表 + 开放层契约 + 模板                       |
+| AI 图片生成/上传通道         | 上游具备图片产出能力                          | 现只能引用云盘已有图（R72）；通道落地后 `coverPath` 参数无需变更                           |
+| AI 覆盖确认卡「对比」按钮    | 需要时                                        | 确认卡 params 已含新内容，缺旧内容来源；站点文件无按路径读接口（R73 允许降级为纯文本对照） |
+| MCP server 化                | P7 功能分享市场一并讨论（用户已拍板）         | 工具注册表 + 门面已是稳定接口层，可作为 MCP 工具源                                         |
+
+### 21.7 实现偏差与验证登记（T82）
+
+| #   | 项                               | 说明                                                                                                                                                                                            |
+| --- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | 分组口径以 §21.1 为准            | API-P6 §13.6 的常量表与真实注册表不符（含 navigate_page/list_users 等不存在的工具）；实现按 ARCHITECTURE §21.1 六组，API.md §13.6 已按实现改写                                                  |
+| 2   | 回复端点返回超集                 | API-P6 §13.1 写「返回 `{ok:true}`」；实现返回 `{ok, id, nickname, content, replyContent, replyAt}`（兼容超集，前端不依赖）                                                                      |
+| 3   | 模板预览图落点                   | ARCHITECTURE-P6 增补写 `assets/site-templates/*/preview.png`；实现落在 web 侧 `public/templates/{id}/preview.png`（构建直出，零新端点、零二进制双份），`template.json#preview` 仍为单一开关     |
+| 4   | 错误码实际口径                   | API-P6 表格的 40107「content 超 500」与 40101「无权限」均与实际码表不符：回复超长 → **40001**（DTO + service 双校验）；评论不存在 → **40110**、跨站/非属主 → **40119**；无权限 → 全局权限守卫码 |
+| 5   | 「服务端更新冲突」入口无后端依据 | 在线编辑为更新行语义（最后写入者胜，§15.5），无版本号/乐观锁；故 diff 入口按 API-P6 §13.7「会话内版本切换」落地为「打开时快照 ↔ 当前内容」只读对比（R73 允许）                                  |
+| 6   | 格式按钮落点两处                 | R73/D71 未指定编辑器归属：`FileEditorDialog`（仅 .md）与文章正文工具栏各一组，均为 markdown 面                                                                                                  |
+| 7   | 评论工具 status 用字符串枚举     | API-P6 §13.4.1 的 `status` 字符串枚举更适合模型（ARCHITECTURE §21.2 原写 `auditStatus` 数字）；实现取字符串枚举，内部映射 0/1/2/all                                                             |
+| 8   | 封面校验含「可公开访问」         | R72 只要求「真实存在且属当前用户」；实现复用 `resolvePublicPath`（含公开性上溯），避免给模型一张页面加载不到的封面图                                                                            |
+
+**真机浏览器复验（agent-browser + 真实 Chromium，对 dev server + API）**：站点设置页三套模板预览图全部加载（1024×768）；评论管理页出现「作者回复」列，回复弹窗回显原评论 → 保存后列显示回复、按钮变「改回复」→ 开放 API 返回 `replyContent/replyAt` → 清空保存后回复被清除（原状恢复）；在线编辑器（t.txt）改动后「对比改动」呈现只读双栏差异（新增行绿色高亮、无改动侧无标记，向对比面板输入无效 = 只读生效），「返回编辑」可切回；脏检查关闭弹窗 → 取消（继续编辑）后 `agent-browser errors/console` **均为空**（确认框取消零告警）；文章编辑正文工具栏「粗体/斜体/链接」按选区正确包裹 `**` / `[](https://)`（占位文本兜底）且取消未落库（文章正文与 `t.txt` 均零变化）。
+
+**真机端到端（验收 11，真实模型 deepseek-v4-flash + 真 SSE）27/27 通过**：「审评论 → 回评论 → 写文章带封面 → 发布」五回合零上游错误——回合 1 模型自主对名下 3 个站点各调 `list_site_comments` 并报出待审 1 条；回合 2 审核确认卡（条数 + 公开影响 + 站点）→ `audit_status=1`；回合 3 回复确认卡含原评论昵称/内容截断/回复内容 → 落库并在开放 API 返回；回合 4 模型自动选栏目、确认卡含封面行与字数 → 草稿落库 `coverPath` 正确；回合 5 发布 → `status=1` 且开放层返回 `coverUrl`。测试数据全清、`used` 回基线，真实消耗积分 91 分（如实登记）。
+
+**验证（真实 MySQL/Redis + Nest 应用上下文，测试数据跑完清理、`used` 精确回基线 64,428,657）**：28 项全绿——
+手册两段式按权限裁剪（admin 17 行 / 无权限用户 1 行、1691 ≤ 2000）、28 工具归组无孤儿、路由命中与全量兜底、
+评论 list/audit/reply（含 trim、覆盖不新增行、空串清除、开放层携带回复）、超长 40001 / 批量 >20 40001 / 跨站与非属主 40119、
+封面四条失败链 + 真实图片通过 + create 落库 + update 空串清除、回收站顶层不含头像旧行；
+`pnpm check:ai` 16/16；`tsc --noEmit` / `eslint`（双端）/ `vue-tsc` 零错；`vite build` 产物含 `@codemirror/merge` 独立异步 chunk（首屏不加载）。

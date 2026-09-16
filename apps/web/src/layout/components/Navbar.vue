@@ -60,11 +60,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessageBox } from 'element-plus'
 // ElMessageBox 为 JS 调用（非模板组件），需显式引入样式（含遮罩层 overlay）
 import 'element-plus/es/components/message-box/style/css'
 import 'element-plus/es/components/overlay/style/css'
 import { ArrowDown, Expand, Fold, Setting } from '@element-plus/icons-vue'
+import { confirmDialog } from '@/utils/confirm'
 import { logout } from '@/api/system/auth'
 import { usePermissionStore } from '@/stores/permission'
 import { useSettingsStore } from '@/stores/settings'
@@ -93,14 +93,12 @@ async function handleCommand(command: string) {
     return
   }
   if (command === 'logout') {
-    // confirm 点取消会 reject，需捕获避免未处理的 Promise 异常
-    const confirmed = await ElMessageBox.confirm('确认退出登录吗？', '提示', {
+    // 取消静默（P6 T81：统一走 confirmDialog 封装，不再各自 catch）
+    const confirmed = await confirmDialog('确认退出登录吗？', '提示', {
       type: 'warning',
       confirmButtonText: '退出',
       cancelButtonText: '取消',
     })
-      .then(() => true)
-      .catch(() => false)
     if (!confirmed) return
     try {
       await logout()
