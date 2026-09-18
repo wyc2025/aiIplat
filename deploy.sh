@@ -16,16 +16,44 @@ echo '[2/6] 解压新产物'
 tar -xzf "$PKG" -C "$APP_DIR"
 echo 'extracted'
 
-echo '[3/6] 构建镜像'
+echo '[3/7] 构建镜像'
 if [ "$NO_BUILD" = '--no-build' ]; then echo 'skip build'; else docker compose build api; fi
 
-echo '[4/6] 数据库迁移（幂等）'
+echo '[4/7] 迁移前数据库备份'
+# 存在删列等破坏性迁移时，只回滚 dist 是救不回数据结构的，
+# 所以每次跑 migrate deploy 之前先落一份全量快照（压缩，保留最近 7 份）
+BAK_DIR=/opt/iplat-db-backups
+TS=$(date +%Y%m%d-%H%M%S)
+if command -v gzip >/dev/null 2>&1; then
+  BAK_FILE="$BAK_DIR/iplat-$TS.sql.gz"
+  PACK='gzip'
+else
+  BAK_FILE="$BAK_DIR/iplat-$TS.sql"
+  PACK='cat'
+fi
+mkdir -p "$BAK_DIR"
+# MYSQL_ROOT_PASSWORD 用单引号包住，交给容器内 shell 展开，宿主机不必再配一份明文密码
+if ! docker compose exec -T mysql bash -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqldump -uroot --single-transaction --routines --triggers --events --default-character-set=utf8mb4 iplat' | "$PACK" >"$BAK_FILE"; then
+  echo 'backup failed (mysql 容器未运行或无权限), removing partial file'
+  rm -f "$BAK_FILE"
+  exit 1
+fi
+if [ ! -s "$BAK_FILE" ]; then
+  echo 'backup file is empty, aborting deploy before migration'
+  rm -f "$BAK_FILE"
+  exit 1
+fi
+ls -1t "$BAK_DIR"/iplat-*.sql* 2>/dev/null | tail -n +8 | xargs -r rm -f
+echo "backup ok: $BAK_FILE ($(du -h "$BAK_FILE" | cut -f1))"
+# 回滚：gunzip -c "$BAK_FILE" | docker compose exec -T mysql bash -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot iplat'
+
+echo '[5/7] 数据库迁移（幂等）'
 docker compose run --rm --entrypoint sh api -c 'cd /app/apps/api && npx prisma migrate deploy'
 
-echo '[5/6] 重启服务'
+echo '[6/7] 重启服务'
 docker compose up -d api nginx
 
-echo '[6/6] 健康检查'
+echo '[7/7] 健康检查'
 OK=0
 for i in $(seq 1 30); do
   code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/api/docs || true)
