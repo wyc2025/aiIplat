@@ -863,6 +863,8 @@ main.ts 增补：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 函数�
 | 模板预览图资产 | web/public/templates/{default,portfolio,card}/preview.png + api/assets/site-templates/*/template.json#preview | 三套模板预览图（Vite 构建直出 `/templates/{id}/preview.png`）；API 列表按 template.json#preview 返回 previewUrl（缺图 null → 卡片占位） | 已建（T80） |
 | AppLogo | web/src/components/AppLogo | 平台图标（内联 SVG，与 `public/favicon.svg` 同几何，`size` prop）；侧边栏与登录页唯一品牌图标来源，禁止各页自绘 | 已建（W2） |
 | secret-box.util | api/src/common/utils/secret-box.util.ts | 短口令可逆密钥箱（AES-256-GCM：encryptSecret / decryptSecret / deriveKey，iv12+tag16 布局，异常一律返回 null）；当前用于分享提取码回显，密钥由调用方从配置派生（§23.2） | 已建（W5） |
+| file-ticket | api/src/modules/cloud/transfer/file-ticket.ts | 私有文件直链票据（HMAC-SHA256 无状态签名：createFileTicket / verifyFileTicket / FILE_TICKET_TTL_MS=2h；恒定时间比较；§23.4） | 已建（W7） |
+| downloadByUrl | web/src/utils/download.ts | 直链下载（URL 自带票据/公开 token 时交给浏览器原生下载：零内存驻留 + 断点续传；与 saveBlob 的分工见 §23.4） | 已建（W7） |
 
 ### Redis Key 增补约定（写入 RedisKey 常量）
 
@@ -1768,7 +1770,7 @@ modules/cloud/admin/
 
 ---
 
-## 23. P7 走查补丁（W1~~W6：站点与云盘 6 项实测缺陷 / 体验修复）
+## 23. P7 走查补丁（W1~~W7：站点与云盘 7 项实测缺陷 / 体验修复）
 
 > 来源：用户实测反馈（2026-09-18）。任务记录见 PROGRESS「P7 走查补丁」小节；接口契约变更同步 API §9.5。
 > 原则：不改契约的只动前端；必须动契约的（提取码回显）以「加列 + 加返回字段」的兼容方式落地，旧数据不迁移、不报错。
@@ -1803,9 +1805,21 @@ modules/cloud/admin/
 - 载入进度可见（`previewFileBlob(id, onProgress)` → `v-loading` 文案显示百分比与已传大小），大文件不再「无反馈转圈」；
 - `<video>/<img>` 绑 `@error` → 明确提示「浏览器不支持该编码（如 H.265）」并给出「下载查看」按钮。
 
-### 23.4 可选增强（未做，待决策）
+### 23.4 预览/下载直链票据（W7，已落地）
 
-私有文件的原生 `<video src>` 流式播放要求请求携带 Authorization，而原生媒体子请求无法带自定义头。若要「秒开 + 拖动进度条」，需引入**短期预览票据**：登录态签发（绑定 userId + fileId、TTL 5 分钟的 HMAC 签名 URL）+ 新增 `@Public` 票据校验端点，前端把票据 URL 直接交给 `<img>/<video>/<iframe>`。当前以「全量 blob + 进度提示 + 失败兜底」替代。
+问题：私有预览/下载走 axios 全量 Blob —— 必须整包下完才能播放、无法拖动进度、整包驻留 JS 堆（大文件在移动端易崩）、每次预览都重新拉全量。
+
+方案（两步、无状态）：
+
+1. `GET /api/cloud/file/ticket/:id`（登录态 + `cloud:file:list`）→ 校验文件归属后签发**单文件**票据，返回 `{ previewUrl, downloadUrl, expiresIn }`（绝对路径，含 `/api` 前缀，供浏览器直连）；
+2. `GET /api/cloud/file/stream/:id?ticket=&uid=&exp=&mode=inline|attachment`（`@Public` + `@SkipTransform`）→ 校验签名与过期后，**复用既有 `preview` / `download` 输出链**（白名单、Content-Type 兜底、Range/206、管道错误兜底全部同源，不写第二份实现）。
+
+- 票据：`HMAC-SHA256(secret, "fileId.userId.exp")` → base64url；`uid`/`exp` 随 URL 携带（签名覆盖二者，篡改必然失败）；secret 复用 `jwt.accessSecret`，**无状态、不落库、零新依赖/环境变量**（`transfer/file-ticket.ts`）；
+- TTL **2 小时**：必须覆盖整段播放/下载会话，否则中途的 Range 请求会校验失败；
+- 安全边界：票据不是 access token，只对单个文件有效；校验失败统一按 30001 返回（不泄露存在性）；`timingSafeEqual` 恒定时间比较；nginx 访问日志不含查询串（P4E T64 脱敏口径），票据不落 access_log；
+- 限流：该 `@Public` 端点单独放宽到 600 次/分/IP（拖动进度条会触发多次 Range 请求，避免挤占全局 300/分额度）；
+- 前端：预览 `<img>/<video>/<iframe>` 直接用 `previewUrl`；下载用 `downloadByUrl(downloadUrl)`（浏览器原生下载，文件名走后端 `Content-Disposition`）；`@error` 时自动重取一次票据（应对 2h 过期），仍失败才提示并给下载出口；
+- 保留 Blob 通道：在线编辑器读文本原文仍走 `previewFileBlob`（文本 ≤2MB 最直接）；批量打包下载仍是 POST + `saveBlob`（需请求体）。
 
 ### 23.5 W2 平台图标（公共资产）
 

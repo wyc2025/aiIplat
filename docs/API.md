@@ -234,8 +234,12 @@ Content-Type: application/json　Accept: text/event-stream
 | POST | /api/cloud/file/upload       | cloud:file:upload | multipart，字段名 `file`，query 带 `parentId`；单文件 ≤100MB（30004）；配额校验（30003）；同名自动"(1)"；多文件 = 前端逐文件调用（并发 ≤3）。挂 @OperationLog |
 | GET  | /api/cloud/file/preview/:id  | cloud:file:list   | 流式预览：白名单类型 inline + 真实 mime，**支持 Range**；非白名单返回 30005；文本 >2MB 返回 30005                                                             |
 | GET  | /api/cloud/file/download/:id | cloud:file:list   | 流式下载（attachment + 原文件名），支持 Range                                                                                                                 |
+| GET  | /api/cloud/file/ticket/:id   | cloud:file:list   | 签发预览/下载直链票据（W7）：校验归属后返回 `{ previewUrl, downloadUrl, expiresIn }`（2h、单文件、HMAC，无状态）                                              |
+| GET  | /api/cloud/file/stream/:id   | 免登录（@Public） | 票据直链流：query `ticket` + `uid` + `exp` + `mode=inline\|attachment`；校验签名与过期后复用 preview/download 输出链（Range 生效）；独立限流 600 次/分/IP     |
 
-三者均校验数据归属当前用户（30001）。
+前两者校验数据归属当前用户（30001）。
+
+**票据直链（W7）**：签名素材 `fileId.userId.exp`，HMAC-SHA256（secret 复用 `jwt.accessSecret`）；票据失效统一返回 30001「预览链接已失效」。前端把 `previewUrl` 交给 `<img>/<video>/<iframe>`、`downloadUrl` 交给浏览器原生下载 —— Range 秒开、可拖动进度、断点续传、零内存驻留。在线编辑器读文本原文仍走 `preview/:id`（Blob，文本 ≤2MB）。
 
 ### 5.4 回收站
 
