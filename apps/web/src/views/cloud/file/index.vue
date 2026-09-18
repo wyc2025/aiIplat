@@ -597,9 +597,9 @@
       top="5vh"
       @closed="closePreview"
     >
+      <!-- 内容区：票据直链（W7）——浏览器原生加载，支持 Range（秒开 / 拖动进度 / 零内存驻留） -->
       <div
         v-loading="previewLoading"
-        :element-loading-text="previewLoadingText"
         class="v-cf-preview"
       >
         <img
@@ -639,7 +639,7 @@
           show-icon
           :closable="false"
           title="该文件无法在线播放/显示"
-          description="常见原因是浏览器不支持该编码格式（如 H.265/HEVC），或文件较大尚未传输完成。请下载后用本地播放器查看。"
+          description="常见原因是浏览器不支持该编码格式（如 H.265/HEVC）。请下载后用本地播放器查看。"
         />
       </div>
       <template
@@ -759,7 +759,7 @@ import UploadQueue from './UploadQueue.vue'
 import { useUploadQueue } from './useUploadQueue'
 import { useMoveClipboard } from './useMoveClipboard'
 import { formatSize, formatTime } from '@/utils/format'
-import { saveBlob } from '@/utils/download'
+import { saveBlob, downloadByUrl } from '@/utils/download'
 import {
   listFiles,
   filePath,
@@ -772,8 +772,7 @@ import {
   cancelPublicLink,
   setFilePublic,
   unzipFile,
-  previewFileBlob,
-  downloadFileBlob,
+  getFileTicket,
 } from '@/api/cloud/file'
 import { createShare, stopShare, extendShare, updateSharePassword } from '@/api/cloud/share'
 import type { CloudFile, BreadcrumbItem } from '@/types/api'
@@ -910,11 +909,10 @@ const previewVisible = ref(false)
 const previewRow = ref<CloudFile | null>(null)
 const previewUrl = ref('')
 const previewLoading = ref(false)
-/** 载入进度文案（音视频体积大时给用户明确反馈，替代"一直转圈"） */
-const previewLoadingText = ref('')
 /** 图片/视频解码失败标记（编码不受支持时给下载出口） */
 const previewMediaFailed = ref(false)
-let previewObjectUrl = ''
+/** 首次加载失败（票据过期等）时已自动重取一次，避免 onMediaError 死循环 */
+const previewRetried = ref(false)
 
 // ========== 在线编辑（P4b T43） ==========
 /** 在线编辑文本扩展名白名单（§15.12：与后端 EDITABLE_TEXT_EXTS / site 域 SITE_FILE_TEXT_EXTS 同集，以架构增补为准对齐） */
@@ -996,51 +994,55 @@ async function openPreview(row: CloudFile) {
   previewRow.value = row
   previewVisible.value = true
   previewMediaFailed.value = false
-  previewLoadingText.value = ''
-  // 不支持在线预览的类型不拉流，直接走下载引导
+  previewRetried.value = false
+  previewUrl.value = ''
+  // 不支持在线预览的类型不取票据，直接走下载引导
   if (!isImage(row) && !isVideo(row) && !isText(row)) return
+  await loadPreviewUrl(row)
+}
+
+/** 取直链票据并赋给 <img>/<video>/<iframe>：浏览器原生请求，Range 生效（秒开/可拖动） */
+async function loadPreviewUrl(row: CloudFile) {
   previewLoading.value = true
   try {
-    // 音视频/图片体积大：显示传输进度，用户能分辨「在下载」而不是「卡住」
-    const withProgress = isImage(row) || isVideo(row)
-    const blob = await previewFileBlob(Number(row.id), (loaded, total) => {
-      if (!withProgress) return
-      previewLoadingText.value = total
-        ? `载入中 ${Math.floor((loaded / total) * 100)}%（${formatSize(loaded)} / ${formatSize(total)}）`
-        : `载入中 ${formatSize(loaded)}`
-    })
-    previewObjectUrl = URL.createObjectURL(blob)
-    previewUrl.value = previewObjectUrl
+    const { previewUrl: url } = await getFileTicket(Number(row.id))
+    previewUrl.value = url
   } catch {
     // 错误已由拦截器提示；同时给下载出口
     previewMediaFailed.value = true
   } finally {
     previewLoading.value = false
-    previewLoadingText.value = ''
   }
 }
 
-/** 图片/视频解码失败（编码格式浏览器不支持、内容损坏等）→ 明确提示并停止转圈 */
-function onMediaError() {
-  previewMediaFailed.value = true
+/**
+ * 图片/视频加载失败：常见原因是浏览器不支持该编码（H.265 等）；
+ * 但也可能是票据过期（2h）——先自动重取一次票据，仍失败才提示并给下载出口。
+ */
+async function onMediaError() {
+  if (previewRetried.value || !previewRow.value) {
+    previewMediaFailed.value = true
+    return
+  }
+  previewRetried.value = true
+  await loadPreviewUrl(previewRow.value)
 }
 
-/** 弹框关闭后释放 Blob URL，避免内存泄漏 */
+/** 弹框关闭后清空直链（URL 由后端签发，无需 revoke） */
 function closePreview() {
-  if (previewObjectUrl) {
-    URL.revokeObjectURL(previewObjectUrl)
-    previewObjectUrl = ''
-  }
   previewUrl.value = ''
   previewMediaFailed.value = false
-  previewLoadingText.value = ''
+  previewRetried.value = false
 }
 
+/**
+ * 单文件下载（W7）：走票据直链，由浏览器原生下载——大文件不再整包驻留内存，
+ * 天然支持断点续传与浏览器下载管理；文件名由后端 Content-Disposition 决定。
+ */
 async function download(row: CloudFile) {
   try {
-    const blob = await downloadFileBlob(Number(row.id))
-    // 统一走 saveBlob（P4F T69：延后回收 URL，避免立即 revoke 取消下载）
-    saveBlob(blob, row.name)
+    const { downloadUrl } = await getFileTicket(Number(row.id))
+    downloadByUrl(downloadUrl)
   } catch {
     // 错误已由拦截器提示
   }

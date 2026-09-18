@@ -15,3 +15,20 @@ export function saveBlob(blob: Blob, filename: string): void {
   a.remove()
   window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
+
+/**
+ * 直链下载（P7 走查 W7）：URL 自带票据或公开 token 时，直接交给浏览器原生下载。
+ *
+ * 相比「axios 拉 Blob 再 saveBlob」，省掉整包内存驻留，且天然支持断点续传、进度与浏览器下载管理；
+ * 文件名由后端 `Content-Disposition`（RFC 5987）决定，故 filename 一般不必传。
+ * 注意：URL 是后端地址而非 objectURL，**不要 revoke**。
+ */
+export function downloadByUrl(url: string, filename?: string): void {
+  const a = document.createElement('a')
+  a.href = url
+  if (filename) a.download = filename
+  a.rel = 'noopener'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}

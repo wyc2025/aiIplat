@@ -1,6 +1,6 @@
 import instance, { get, post, put, del } from '@/utils/request'
 import { getAccessToken } from '@/utils/token'
-import type { CloudFile, CloudQuota, CloudFileList, BreadcrumbItem } from '@/types/api'
+import type { CloudFile, CloudQuota, CloudFileList, BreadcrumbItem, CloudFileTicket } from '@/types/api'
 
 /** 目录内容（文件夹在前，文件按修改时间倒序）+ 配额联动 */
 export const listFiles = (parentId: number) =>
@@ -132,24 +132,24 @@ export const unzipFile = (id: number): Promise<{ folderId: string; folderName: s
  * 享受统一的 401 静默刷新与重放。timeout=0：大文件传输不设超时。
  * 响应拦截器对 responseType==='blob' 直接返回 Blob 本体（见 utils/request.ts）。
  */
-/** Blob 流传输进度回调（loaded/total 字节；服务端未给 Content-Length 时 total 为 0） */
-export type BlobProgress = (loaded: number, total: number) => void
-
-export const previewFileBlob = (id: number, onProgress?: BlobProgress): Promise<Blob> =>
+/**
+ * 文本内容以 Blob 拉取（在线编辑器读原文用；文本类 ≤2MB，Blob 最直接）。
+ * 注意：**音视频/图片预览与文件下载不走这里**——已改为「登录态取票据 + 原生直链」（见 getFileTicket），
+ * 以获得 Range 秒开、拖动进度与零内存驻留（P7 走查 W7）。
+ */
+export const previewFileBlob = (id: number): Promise<Blob> =>
   instance.get<Blob>(`/cloud/file/preview/${id}`, {
     responseType: 'blob',
     timeout: 0,
-    // 音视频体积大时给前端一个进度出口（避免用户误以为「卡在转圈」）
-    onDownloadProgress: onProgress
-      ? (event) => onProgress(event.loaded ?? 0, event.total ?? 0)
-      : undefined,
   }) as unknown as Promise<Blob>
 
-export const downloadFileBlob = (id: number): Promise<Blob> =>
-  instance.get<Blob>(`/cloud/file/download/${id}`, {
-    responseType: 'blob',
-    timeout: 0,
-  }) as unknown as Promise<Blob>
+/**
+ * 取预览/下载直链票据（2h、单文件、HMAC 签名）：返回的 URL 直接交给
+ * `<video>/<img>/<iframe>` 与下载链接，由浏览器原生发起请求（支持 Range）。
+ * 该 URL 不是 axios 调用，勿再用 instance 请求这两个流。
+ */
+export const getFileTicket = (id: number): Promise<CloudFileTicket> =>
+  get<CloudFileTicket>(`/cloud/file/ticket/${id}`)
 
 /**
  * 头像流（P3 端点 `GET /cloud/file/avatar/:id`，仅本人可读）。

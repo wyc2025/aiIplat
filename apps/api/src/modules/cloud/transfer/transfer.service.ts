@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import type { Response } from 'express'
 import { ErrorCode } from '../../../common/constants/error-code'
 import { BusinessException } from '../../../common/exceptions/business.exception'
@@ -6,6 +7,7 @@ import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { StorageService } from '../../../infra/storage/storage.service'
 import { FileService, MAX_CHILDREN } from '../file/file.service'
 import { resolvePubMime } from '../public/pub-mime'
+import { createFileTicket, FILE_TICKET_PARAMS, FILE_TICKET_TTL_MS, verifyFileTicket } from './file-ticket'
 
 /** 预览白名单（R7）：图片 */
 const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp'])
@@ -15,15 +17,23 @@ const TEXT_EXTS = new Set(['txt', 'md', 'json', 'js', 'ts', 'vue', 'css', 'xml',
 const MEDIA_EXTS = new Set(['pdf', 'mp4', 'mp3'])
 /** 文本预览大小上限（R7：≤2MB） */
 const TEXT_PREVIEW_MAX_SIZE = 2 * 1024 * 1024
+/** 全局路由前缀（main.ts setGlobalPrefix，直链票据 URL 需要拼绝对路径供浏览器直连） */
+const API_PREFIX = '/api'
 
-/** 上传 / 预览 / 下载（流式，见 ARCHITECTURE-P3 §13.3） */
+/** 上传 / 预览 / 下载（流式，见 ARCHITECTURE-P3 §13.3；票据直链见 §23.7） */
 @Injectable()
 export class TransferService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly cloudFileService: FileService,
+    private readonly config: ConfigService,
   ) {}
+
+  /** 直链票据密钥：复用 jwt.accessSecret（HMAC-SHA256），不新增环境变量 */
+  private get ticketSecret(): string {
+    return this.config.getOrThrow<string>('jwt.accessSecret')
+  }
 
   /**
    * 上传：Multer 已流式落 tmp 区 → 业务校验（归属/数量/配额/同名）→ 移入正式区 → 落 cloud_file + used 记账（R3）。
@@ -181,6 +191,48 @@ export class TransferService {
       disposition: 'attachment',
       contentType: 'application/octet-stream',
     })
+  }
+
+  /**
+   * 签发预览/下载直链票据（P7 走查 W7）：
+   * 登录态接口先校验文件归属，再签发一张 2h 有效的单文件 HMAC 票据，前端把返回的 URL 直接交给
+   * `<video>/<img>/<iframe>` 或下载链接 → 浏览器原生请求（Range / 拖动进度 / 断点续传 / 零内存驻留）。
+   * 返回的是**绝对路径**（含 /api 前缀），供浏览器直连，不走 axios 实例。
+   */
+  async createTicket(userId: bigint, id: bigint) {
+    // 归属校验（含未删除、非目录）：票据只能签给文件属主本人
+    await this.findOwnedFile(userId, id)
+    const { ticket, exp } = createFileTicket(this.ticketSecret, id, userId)
+    const p = FILE_TICKET_PARAMS
+    const query = `${p.ticket}=${ticket}&${p.uid}=${userId.toString()}&${p.exp}=${exp}`
+    return {
+      previewUrl: `${API_PREFIX}/cloud/file/stream/${id.toString()}?${query}&${p.mode}=inline`,
+      downloadUrl: `${API_PREFIX}/cloud/file/stream/${id.toString()}?${query}&${p.mode}=attachment`,
+      expiresIn: Math.floor(FILE_TICKET_TTL_MS / 1000),
+    }
+  }
+
+  /**
+   * 票据直链流（@Public，无登录态）：校验票据 → 复用既有 preview/download 输出链
+   * （白名单校验、Content-Type 兜底、Range/206、管道错误兜底全部同源，避免第二份实现）。
+   * 票据失效统一按「文件不存在」返回（不泄露存在性与原因）。
+   */
+  async streamByTicket(
+    id: bigint,
+    query: { ticket?: string; uid?: string; exp?: string },
+    mode: 'inline' | 'attachment',
+    range: string | null,
+    res: Response,
+  ): Promise<void> {
+    const userId = verifyFileTicket(this.ticketSecret, id, query)
+    if (userId === null) {
+      throw new BusinessException(ErrorCode.CloudFileNotFound, '预览链接已失效，请重新打开')
+    }
+    if (mode === 'attachment') {
+      await this.download(userId, id, range, res)
+      return
+    }
+    await this.preview(userId, id, range, res)
   }
 
   /** 统一流式响应：Range 解析（206/416）+ 管道输出（详见 ARCHITECTURE-P3 §13.3） */

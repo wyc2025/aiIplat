@@ -256,6 +256,16 @@ export interface CloudShareCreateResult {
   hasPassword: boolean
 }
 
+/** 预览/下载直链票据（P7 走查 W7：URL 含 /api 前缀，供浏览器原生直连，支持 Range） */
+export interface CloudFileTicket {
+  /** 预览直链（inline） */
+  previewUrl: string
+  /** 下载直链（attachment，触发浏览器原生下载） */
+  downloadUrl: string
+  /** 有效期（秒） */
+  expiresIn: number
+}
+
 /** 回收站项 */
 export interface CloudRecycleItem {
   id: string

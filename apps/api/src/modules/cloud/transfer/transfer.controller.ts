@@ -1,11 +1,14 @@
 import { Body, Controller, Get, Headers, Param, ParseIntPipe, Post, Query, Res, UploadedFile, UseInterceptors } from '@nestjs/common'
 import { FileInterceptor } from '@nestjs/platform-express'
 import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger'
+import { Throttle } from '@nestjs/throttler'
 import type { Response } from 'express'
 import { CurrentUser } from '../../../gateway/decorators/current-user.decorator'
 import { OperationLog } from '../../../gateway/decorators/operation-log.decorator'
+import { Public } from '../../../gateway/decorators/public.decorator'
 import { RequirePermission } from '../../../gateway/decorators/require-permission.decorator'
 import { SkipTransform } from '../../../gateway/decorators/skip-transform.decorator'
+import { FileStreamQueryDto } from './dto/file-ticket.dto'
 import { PackDownloadDto } from './dto/pack.dto'
 import { UploadQueryDto } from './dto/transfer.dto'
 import { PackService } from './pack.service'
@@ -86,5 +89,34 @@ export class TransferController {
     @Res() res: Response,
   ): Promise<void> {
     await this.transferService.download(BigInt(userId), BigInt(id), range ?? null, res)
+  }
+
+  /**
+   * 直链票据（P7 走查 W7）：登录态签发单文件短票据，前端把返回的 previewUrl/downloadUrl
+   * 交给原生 `<video>/<img>/<iframe>` 与下载链接，从而吃到 Range（秒开 + 拖动进度 + 断点续传 + 零内存驻留）。
+   */
+  @Get('ticket/:id')
+  @RequirePermission('cloud:file:list')
+  @ApiOperation({ summary: '签发预览/下载直链票据（2h、单文件；HMAC，无状态）' })
+  ticket(@CurrentUser('userId') userId: string, @Param('id', ParseIntPipe) id: number) {
+    return this.transferService.createTicket(BigInt(userId), BigInt(id))
+  }
+
+  /**
+   * 票据直链流（@Public：票据即身份，免 Authorization 头）。
+   * 限流单独放宽到 600 次/分/IP：视频拖动进度条会触发多次 Range 请求，用全局 300 会挤占其它接口额度。
+   */
+  @Public()
+  @Throttle({ default: { limit: 600, ttl: 60_000 } })
+  @SkipTransform()
+  @Get('stream/:id')
+  @ApiOperation({ summary: '票据直链流（免登录；inline 预览 / attachment 下载，支持 Range）' })
+  async stream(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: FileStreamQueryDto,
+    @Headers('range') range: string | undefined,
+    @Res() res: Response,
+  ): Promise<void> {
+    await this.transferService.streamByTicket(BigInt(id), query, query.mode ?? 'inline', range ?? null, res)
   }
 }
