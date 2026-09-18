@@ -281,7 +281,12 @@ async function reload() {
   }
 }
 
+/** 跳「站点列表」页（路由由后端菜单注册；菜单缺失时提前提示，避免落 404） */
 function goSiteList() {
+  if (!router.hasRoute('site-site')) {
+    ElMessage.warning('未找到「站点列表」菜单，请先同步后端菜单数据（seed）后重新登录')
+    return
+  }
   router.push('/site/site')
 }
 

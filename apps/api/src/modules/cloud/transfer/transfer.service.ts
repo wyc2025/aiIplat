@@ -5,6 +5,7 @@ import { BusinessException } from '../../../common/exceptions/business.exception
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { StorageService } from '../../../infra/storage/storage.service'
 import { FileService, MAX_CHILDREN } from '../file/file.service'
+import { resolvePubMime } from '../public/pub-mime'
 
 /** 预览白名单（R7）：图片 */
 const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp'])
@@ -162,7 +163,11 @@ export class TransferService {
       throw new BusinessException(ErrorCode.CloudPreviewNotSupported, '文本文件超过 2MB，不支持预览')
     }
     // R7：文本一律 text/plain; charset=utf-8（html/svg 不在白名单，即使伪装 mimetype 也无法内联执行脚本）
-    const contentType = isText ? 'text/plain; charset=utf-8' : (file.mime ?? 'application/octet-stream')
+    // 非文本：优先用库里记录的 mime；历史上传若落了空值/octet-stream（浏览器未给 Content-Type），
+    // 则按扩展名推导真实 MIME（mp4 → video/mp4）；否则 <video>/<img> 会因类型不符拒绝解码（表现为一直转圈）
+    const contentType = isText
+      ? 'text/plain; charset=utf-8'
+      : this.resolvePreviewContentType(file.mime, ext)
     await this.streamToResponse(file, res, range, {
       disposition: 'inline',
       contentType,
@@ -214,7 +219,7 @@ export class TransferService {
         'Content-Range': `bytes ${parsed.start}-${parsed.end}/${size}`,
         'Content-Length': String(length),
       })
-      this.storage.createReadStream(file.storageName, { start: parsed.start, end: parsed.end }).pipe(res)
+      this.pipeStorage(file.storageName, { start: parsed.start, end: parsed.end }, res)
       return
     }
     // 200 全量（无 Range / Range 语法非法时按 RFC 7233 忽略）
@@ -224,7 +229,30 @@ export class TransferService {
       'Content-Disposition': disposition,
       'Content-Length': String(size),
     })
-    this.storage.createReadStream(file.storageName).pipe(res)
+    this.pipeStorage(file.storageName, null, res)
+  }
+
+  /**
+   * 管道输出 + 错误兜底：读流出错（物理文件缺失、磁盘异常）时主动销毁响应。
+   * 不加这段的话连接会一直挂着，前端表现为预览弹框「无限转圈」。
+   */
+  private pipeStorage(storageName: string, range: { start: number; end: number } | null, res: Response) {
+    const stream = range
+      ? this.storage.createReadStream(storageName, { start: range.start, end: range.end })
+      : this.storage.createReadStream(storageName)
+    stream.on('error', () => res.destroy())
+    stream.pipe(res)
+  }
+
+  /**
+   * 非文本预览的 Content-Type（R7 兜底）：库里 mime 可用即用；为空或为 octet-stream 时按扩展名
+   * 推导真实类型（mp4 → video/mp4、png → image/png），推导不出才回退 octet-stream。
+   * 历史数据 mime 落空会让 <video>/<img> 拒绝解码（前端只能转圈），这里兜住。
+   */
+  private resolvePreviewContentType(mime: string | null, ext: string): string {
+    if (mime && mime !== 'application/octet-stream') return mime
+    const resolved = resolvePubMime(ext)
+    return resolved.inline ? resolved.contentType : (mime ?? 'application/octet-stream')
   }
 
   /**

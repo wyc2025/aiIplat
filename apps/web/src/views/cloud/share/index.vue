@@ -84,16 +84,28 @@
           </el-tag>
         </template>
       </el-table-column>
-      <!-- P4d T56：提取码列（仅展示是否设置，密码本体不出后端） -->
+      <!-- 提取码列：仅创建者本人的列表可见明文（后端 AES 密文回显）；历史数据无密文时提示不可回显 -->
       <el-table-column
         label="提取码"
-        width="110"
+        width="180"
       >
         <template #default="{ row }">
+          <template v-if="row.password">
+            <span class="v-share-code">{{ row.password }}</span>
+            <el-button
+              link
+              type="primary"
+              size="small"
+              @click="copyText(row.password, '提取码已复制')"
+            >
+              复制
+            </el-button>
+          </template>
           <span
-            v-if="row.hasPassword"
+            v-else-if="row.hasPassword"
             class="v-share-mask"
-          >••••（已设置）</span>
+            title="历史数据以哈希存储无法回显；在「分享管理」里重新设置提取码后即可查看"
+          >已设置（不可回显）</span>
           <span
             v-else
             class="v-share-none"
@@ -262,8 +274,11 @@ const total = ref(0)
 const pageNo = ref(1)
 const pageSize = ref(999)
 
-/** 状态筛选：'' = 全部（不含已停止）；0 已停止 / 1 有效 / 2 已过期 */
-const filterStatus = ref<number | ''>('')
+/**
+ * 状态筛选：默认「有效」（需求：默认查询有效的公开链接），需要时再切其他档。
+ * '' = 全部（不含已停止）；0 已停止 / 1 有效 / 2 已过期
+ */
+const filterStatus = ref<number | ''>(1)
 const keyword = ref('')
 
 const extendVisible = ref(false)
@@ -307,13 +322,19 @@ function shareUrl(row: CloudShare) {
 // legacy=true：非安全上下文（HTTP 部署，navigator.clipboard 为 undefined）自动降级
 // document.execCommand('copy')；await 等待结果，失败如实提示，不再无条件报"已复制"
 const { copy: copyToClipboard } = useClipboard({ legacy: true })
-async function onCopy(row: CloudShare) {
+
+/** 复制任意文本（分享链接 / 提取码共用；失败如实提示，不无条件报「已复制」） */
+async function copyText(text: string, okText = '已复制') {
   try {
-    await copyToClipboard(shareUrl(row))
-    ElMessage.success('已复制')
+    await copyToClipboard(text)
+    ElMessage.success(okText)
   } catch {
-    ElMessage.error('复制失败，请手动复制链接')
+    ElMessage.error('复制失败，请手动复制')
   }
+}
+
+async function onCopy(row: CloudShare) {
+  await copyText(shareUrl(row), '已复制')
 }
 async function onStop(row: CloudShare) {
   if (!(await confirmDialog('停止后链接即刻失效，确认？', '提示', { type: 'warning' }))) return
@@ -357,5 +378,10 @@ onMounted(reload)
 .v-share-mask {
   color: var(--el-text-color-regular);
   font-size: 12px;
+}
+.v-share-code {
+  font-family: Consolas, Monaco, monospace;
+  letter-spacing: 1px;
+  color: var(--el-text-color-primary);
 }
 </style>

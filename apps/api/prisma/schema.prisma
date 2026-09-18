@@ -482,8 +482,10 @@ model CloudShare {
   fileId     BigInt    @map("file_id")
   /// 随机 URL-safe 串（crypto.randomBytes）
   token        String  @unique @map("token") @db.VarChar(32)
-  /// 提取码哈希（P4d D47/R42：bcrypt，不明文）；NULL = 无密码
+  /// 提取码哈希（P4d D47/R42：bcrypt，供访客校验）；NULL = 无密码
   passwordHash String? @map("password_hash") @db.VarChar(64)
+  /// 提取码可逆密文（AES-256-GCM，仅供创建者本人回显；bcrypt 不可逆，故另存一份）
+  passwordEnc  String? @map("password_enc") @db.VarChar(255)
   /// 下载成功 +1
   visitCount Int       @default(0) @map("visit_count")
   /// null = 永久

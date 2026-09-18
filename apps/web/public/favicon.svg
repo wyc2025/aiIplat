@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="iplat">
+  <!--
+    iplat 平台图标（矢量版，全站唯一来源）：
+    - 蓝→青渐变圆角方块 = 平台底座
+    - 白色小写 i（圆点 + 圆角竖条）= iplat 首字母
+    - 下方白色弧线 = platform（平台/地面），呼应平台化定位
+    与 src/components/AppLogo/index.vue 内联版本保持同一几何参数。
+  -->
+  <defs>
+    <linearGradient id="iplatGradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2563EB" />
+      <stop offset="1" stop-color="#06B6D4" />
+    </linearGradient>
+  </defs>
+  <rect
+    width="512"
+    height="512"
+    rx="112"
+    fill="url(#iplatGradient)"
+  />
+  <circle
+    cx="256"
+    cy="166"
+    r="44"
+    fill="#ffffff"
+  />
+  <rect
+    x="222"
+    y="234"
+    width="68"
+    height="176"
+    rx="34"
+    fill="#ffffff"
+  />
+  <path
+    d="M152 404c34-22 68-33 104-33s70 11 104 33"
+    fill="none"
+    stroke="#ffffff"
+    stroke-width="16"
+    stroke-linecap="round"
+  />
+</svg>

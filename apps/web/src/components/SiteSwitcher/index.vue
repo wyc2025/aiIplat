@@ -31,6 +31,7 @@
 
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { useSiteStore } from '@/stores/site'
 
 /**
@@ -44,7 +45,16 @@ function onChange(id: string | number) {
   siteStore.setCurrent(String(id))
 }
 
+/**
+ * 跳「站点列表」页。该页由后端菜单动态注册（component=site/site/index），
+ * 若菜单数据里没有这条记录（典型场景：线上库未同步 seed），路由不存在，
+ * 直接 push 会落到 catch-all 404。这里提前拦截，给出可操作提示。
+ */
 function goManage() {
+  if (!router.hasRoute('site-site')) {
+    ElMessage.warning('未找到「站点列表」菜单，请先同步后端菜单数据（seed）后重新登录')
+    return
+  }
   router.push('/site/site')
 }
 </script>

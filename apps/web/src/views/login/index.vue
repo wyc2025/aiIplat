@@ -2,13 +2,9 @@
   <div class="v-login">
     <el-card class="v-login-card">
       <div class="v-login-header">
-        <el-icon
-          class="v-login-logo"
-          :size="36"
-          color="#409EFF"
-        >
-          <Platform />
-        </el-icon>
+        <div class="v-login-logo">
+          <AppLogo :size="44" />
+        </div>
         <h1 class="v-login-title">
           iplat
         </h1>
@@ -75,8 +71,9 @@
 import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { FormInstance, FormRules } from 'element-plus'
-import { Lock, Platform, User } from '@element-plus/icons-vue'
+import { Lock, User } from '@element-plus/icons-vue'
 import { login } from '@/api/system/auth'
+import AppLogo from '@/components/AppLogo/index.vue'
 import { setTokens } from '@/utils/token'
 
 const router = useRouter()
@@ -127,6 +124,10 @@ async function handleLogin() {
 .v-login-header {
   text-align: center;
   margin-bottom: 28px;
+}
+.v-login-logo {
+  display: flex;
+  justify-content: center;
 }
 .v-login-title {
   margin: 8px 0 4px;

@@ -599,18 +599,21 @@
     >
       <div
         v-loading="previewLoading"
+        :element-loading-text="previewLoadingText"
         class="v-cf-preview"
       >
         <img
           v-if="isImage(previewRow)"
           :src="previewUrl"
           alt="预览"
+          @error="onMediaError"
         >
         <video
           v-else-if="isVideo(previewRow)"
           :src="previewUrl"
           controls
           style="max-width: 100%"
+          @error="onMediaError"
         />
         <iframe
           v-else-if="isText(previewRow)"
@@ -628,7 +631,28 @@
             点击下载
           </el-button>
         </div>
+        <!-- 解码失败兜底：明确告知原因并给下载出口，不再停留在无限转圈 -->
+        <el-alert
+          v-if="previewMediaFailed"
+          class="v-cf-preview-alert"
+          type="warning"
+          show-icon
+          :closable="false"
+          title="该文件无法在线播放/显示"
+          description="常见原因是浏览器不支持该编码格式（如 H.265/HEVC），或文件较大尚未传输完成。请下载后用本地播放器查看。"
+        />
       </div>
+      <template
+        v-if="previewMediaFailed"
+        #footer
+      >
+        <el-button
+          type="primary"
+          @click="download(previewRow!)"
+        >
+          下载查看
+        </el-button>
+      </template>
     </el-dialog>
 
     <!-- 在线编辑（P4b T43：CodeMirror 6 全屏弹窗） -->
@@ -886,6 +910,10 @@ const previewVisible = ref(false)
 const previewRow = ref<CloudFile | null>(null)
 const previewUrl = ref('')
 const previewLoading = ref(false)
+/** 载入进度文案（音视频体积大时给用户明确反馈，替代"一直转圈"） */
+const previewLoadingText = ref('')
+/** 图片/视频解码失败标记（编码不受支持时给下载出口） */
+const previewMediaFailed = ref(false)
 let previewObjectUrl = ''
 
 // ========== 在线编辑（P4b T43） ==========
@@ -950,12 +978,16 @@ onMounted(() => {
   loadDir(dir)
 })
 
-// 预览类型判断
+// 预览类型判断：mime 优先；历史数据 mime 缺失/落成 octet-stream 时按扩展名兜底，
+// 避免本可预览的文件被误判为「不支持在线预览」
+const PREVIEW_IMAGE_EXTS: ReadonlySet<string> = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'])
+const PREVIEW_VIDEO_EXTS: ReadonlySet<string> = new Set(['mp4', 'webm', 'ogg', 'ogv', 'mov', 'm4v'])
 function isImage(r?: CloudFile | null) {
-  return r?.mime?.startsWith('image/') && r.mime !== 'image/svg+xml'
+  if (r?.mime?.startsWith('image/')) return r.mime !== 'image/svg+xml'
+  return !r?.mime && PREVIEW_IMAGE_EXTS.has((r?.ext ?? '').toLowerCase())
 }
 function isVideo(r?: CloudFile | null) {
-  return r?.mime?.startsWith('video/')
+  return r?.mime?.startsWith('video/') || PREVIEW_VIDEO_EXTS.has((r?.ext ?? '').toLowerCase())
 }
 function isText(r?: CloudFile | null) {
   return r?.mime?.startsWith('text/') || r?.mime === 'application/pdf'
@@ -963,18 +995,34 @@ function isText(r?: CloudFile | null) {
 async function openPreview(row: CloudFile) {
   previewRow.value = row
   previewVisible.value = true
+  previewMediaFailed.value = false
+  previewLoadingText.value = ''
   // 不支持在线预览的类型不拉流，直接走下载引导
   if (!isImage(row) && !isVideo(row) && !isText(row)) return
   previewLoading.value = true
   try {
-    const blob = await previewFileBlob(Number(row.id))
+    // 音视频/图片体积大：显示传输进度，用户能分辨「在下载」而不是「卡住」
+    const withProgress = isImage(row) || isVideo(row)
+    const blob = await previewFileBlob(Number(row.id), (loaded, total) => {
+      if (!withProgress) return
+      previewLoadingText.value = total
+        ? `载入中 ${Math.floor((loaded / total) * 100)}%（${formatSize(loaded)} / ${formatSize(total)}）`
+        : `载入中 ${formatSize(loaded)}`
+    })
     previewObjectUrl = URL.createObjectURL(blob)
     previewUrl.value = previewObjectUrl
   } catch {
-    // 错误已由拦截器提示
+    // 错误已由拦截器提示；同时给下载出口
+    previewMediaFailed.value = true
   } finally {
     previewLoading.value = false
+    previewLoadingText.value = ''
   }
+}
+
+/** 图片/视频解码失败（编码格式浏览器不支持、内容损坏等）→ 明确提示并停止转圈 */
+function onMediaError() {
+  previewMediaFailed.value = true
 }
 
 /** 弹框关闭后释放 Blob URL，避免内存泄漏 */
@@ -984,6 +1032,8 @@ function closePreview() {
     previewObjectUrl = ''
   }
   previewUrl.value = ''
+  previewMediaFailed.value = false
+  previewLoadingText.value = ''
 }
 
 async function download(row: CloudFile) {
@@ -1211,7 +1261,10 @@ async function submitShare() {
     shareExpireText.value = res.expireAt ? new Date(res.expireAt).toLocaleString() : '永久'
     shareHasPassword.value = res.hasPassword
     shareMode.value = 'detail'
-    ElMessage.success('分享成功')
+    // 首次分享是一次性动作：设置确认后直接关闭弹框，不再停在「已分享」详情态；
+    // 需要复制链接/延长/停止时，再从列表「已分享」标签重新打开（openShare 会拉现存有效链接）
+    shareVisible.value = false
+    ElMessage.success('分享成功，可在「分享管理」中查看链接')
     reload()
   } catch {
     // 拦截器提示
@@ -1646,5 +1699,9 @@ watch(
 .v-cf-preview img {
   max-width: 100%;
   max-height: 70vh;
+}
+.v-cf-preview-alert {
+  margin-top: 12px;
+  text-align: left;
 }
 </style>

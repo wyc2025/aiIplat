@@ -232,8 +232,10 @@ export interface CloudShare {
   fileName: string
   /** P4d：源为文件夹时 itemType='folder'（管理页类型列） */
   itemType: 'file' | 'folder'
-  /** P4d：是否设置提取码（不返回密码本体） */
+  /** 是否设置了提取码 */
   hasPassword: boolean
+  /** 提取码明文（仅创建者本人的列表返回；历史数据或密钥轮换后为 null，前端提示不可回显） */
+  password: string | null
   size: string
   /** 源文件是否已被删除（彻底删除/回收站中） */
   fileDeleted: boolean

@@ -4,14 +4,11 @@
     :class="{ collapsed: settingsStore.sidebarCollapsed }"
   >
     <div class="v-logo">
+      <AppLogo :size="22" />
       <span
         v-if="!settingsStore.sidebarCollapsed"
         class="v-logo-text"
       >iplat</span>
-      <span
-        v-else
-        class="v-logo-text"
-      >ip</span>
     </div>
     <el-scrollbar class="v-menu-scroll">
       <el-menu
@@ -33,6 +30,7 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { usePermissionStore } from '@/stores/permission'
 import { useSettingsStore } from '@/stores/settings'
+import AppLogo from '@/components/AppLogo/index.vue'
 import SidebarItem from './SidebarItem.vue'
 
 const route = useRoute()
@@ -60,6 +58,7 @@ const activeMenu = computed(() => route.path)
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   overflow: hidden;
 }
 .v-logo-text {

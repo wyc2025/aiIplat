@@ -132,10 +132,17 @@ export const unzipFile = (id: number): Promise<{ folderId: string; folderName: s
  * 享受统一的 401 静默刷新与重放。timeout=0：大文件传输不设超时。
  * 响应拦截器对 responseType==='blob' 直接返回 Blob 本体（见 utils/request.ts）。
  */
-export const previewFileBlob = (id: number): Promise<Blob> =>
+/** Blob 流传输进度回调（loaded/total 字节；服务端未给 Content-Length 时 total 为 0） */
+export type BlobProgress = (loaded: number, total: number) => void
+
+export const previewFileBlob = (id: number, onProgress?: BlobProgress): Promise<Blob> =>
   instance.get<Blob>(`/cloud/file/preview/${id}`, {
     responseType: 'blob',
     timeout: 0,
+    // 音视频体积大时给前端一个进度出口（避免用户误以为「卡在转圈」）
+    onDownloadProgress: onProgress
+      ? (event) => onProgress(event.loaded ?? 0, event.total ?? 0)
+      : undefined,
   }) as unknown as Promise<Blob>
 
 export const downloadFileBlob = (id: number): Promise<Blob> =>

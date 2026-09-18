@@ -6,6 +6,7 @@ import { randomBytes } from 'node:crypto'
 import type { CloudFile, CloudShare } from '@prisma/client'
 import { ErrorCode } from '../../../common/constants/error-code'
 import { RedisKey } from '../../../common/constants/redis-key'
+import { decryptSecret, deriveKey, encryptSecret } from '../../../common/utils/secret-box.util'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { RedisService } from '../../../infra/redis/redis.service'
@@ -56,6 +57,14 @@ export class ShareService {
     private readonly packService: PackService,
   ) {}
 
+  /**
+   * 提取码回显用密钥（AES-256-GCM）：从 jwt.accessSecret 派生，避免新增环境变量；
+   * 轮换 JWT 密钥会让历史密文解不开（回退为「不可回显」），不影响校验与访客使用。
+   */
+  private get codeKey(): Buffer {
+    return deriveKey(this.config.getOrThrow<string>('jwt.accessSecret'))
+  }
+
   /** 创建分享：文件/文件夹（P4d D48）→ 审核门禁（R9，30010）→ 重复创建返回现存有效链接 */
   async create(userId: bigint, dto: ShareCreateDto) {
     const fileId = BigInt(dto.fileId)
@@ -83,15 +92,18 @@ export class ShareService {
     const expireAt = this.expireDaysToDate(expireDays)
     const token = await this.generateUniqueToken()
     const passwordHash = dto.password ? await bcrypt.hash(dto.password, BCRYPT_ROUNDS) : null
+    // 哈希供访客校验、密文供创建者回显（bcrypt 不可逆），两者同存同改
+    const passwordEnc = dto.password ? encryptSecret(dto.password, this.codeKey) : null
     const created = await this.prisma.cloudShare.create({
-      data: { userId, fileId, token, expireAt, status: 1, passwordHash },
+      data: { userId, fileId, token, expireAt, status: 1, passwordHash, passwordEnc },
     })
     return this.toCreateResult(created)
   }
 
   /**
    * 我的分享列表（不分页，创建时间倒序；status 后端计算：1 有效 / 0 已停止 / 2 已过期）。
-   * P4d 扩展：itemType（file|folder，源为文件夹时供管理页类型列）+ hasPassword（不返回密码本体）。
+   * 扩展：itemType（file|folder，源为文件夹时供管理页类型列）+ hasPassword + password（可回显明文，
+   * 仅本人列表返回；密文AES-GCM，解不开时给 null）。
    */
   async list(userId: bigint, query?: ShareListQueryDto) {
     const shares = await this.prisma.cloudShare.findMany({
@@ -120,6 +132,8 @@ export class ShareService {
         fileName: file?.name ?? '',
         itemType: file?.isDir === 1 ? 'folder' : 'file',
         hasPassword: s.passwordHash != null,
+        // 提取码回显（本人列表）；密文解不开（历史数据 / JWT 密钥轮换）时返回 null，前端按不可回显提示
+        password: decryptSecret(s.passwordEnc, this.codeKey),
         size: file?.size ?? BigInt(0),
         fileDeleted: file?.deletedAt != null || file == null,
         token: s.token,
@@ -178,9 +192,18 @@ export class ShareService {
   async updatePassword(userId: bigint, id: bigint, dto: SharePasswordDto) {
     const share = await this.assertOwnedShare(userId, id)
     const passwordHash = dto.password ? await bcrypt.hash(dto.password, BCRYPT_ROUNDS) : null
-    await this.prisma.cloudShare.update({ where: { id: share.id }, data: { passwordHash } })
+    const passwordEnc = dto.password ? encryptSecret(dto.password, this.codeKey) : null
+    await this.prisma.cloudShare.update({
+      where: { id: share.id },
+      data: { passwordHash, passwordEnc },
+    })
     await this.redis.scanDel(`share:pass:${share.token}:*`)
-    return { id: share.id.toString(), hasPassword: passwordHash !== null }
+    return {
+      id: share.id.toString(),
+      hasPassword: passwordHash !== null,
+      // 回显本次设置的值（前端可直接展示，无需再查列表）
+      password: dto.password ?? null,
+    }
   }
 
   // ==================== 访客侧（@Public） ====================
