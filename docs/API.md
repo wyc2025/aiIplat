@@ -973,6 +973,23 @@ content 超 500 → 40001；评论不存在 → 40110；跨站/非属主 → 401
 | HTTP 端点 | +1         | `PUT /api/site/comment/:id/reply`                              |
 | 前端依赖  | +1         | `@codemirror/merge`（D71 特批，按需异步加载）                  |
 
+## 15. P8：文章创作增强（文件导入 + 一键排版）
+
+> 两个接口均**只解析/排版、不落库**，因此不挂 `@OperationLog`；落库仍走既有 create/update（权限与校验链不变）。
+
+| 方法 | 路径                     | 权限                | 入参                                                                                                | 出参                                                                                                                                                                                                          |
+| ---- | ------------------------ | ------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST | /api/site/article/import | site:article:create | `{ fileId: string }`（云盘文件 id；须本人、未删、`md/markdown/txt`、≤2MB）                          | `{ fileId, filename, title, contentMd, summary, wordCount, matchedTags: [{id,name}], unmatchedTags: string[], warnings: string[], meta: { ext, size, encoding: 'utf8'\|'gbk', format: 'markdown'\|'text' } }` |
+| POST | /api/site/article/format | site:article:update | `{ contentMd: string(≤20万), options?: { structure?, punctuation?, cjkSpacing? } }`（缺省三档全开） | `{ contentMd, changed, stats: { rules: string[], lines, charsBefore, charsAfter } }`                                                                                                                          |
+
+**错误口径**
+
+- 导入：类型不支持 30012；超过 2MB 30013；文件不存在/无权 30001；解析失败（编码/二进制/空内容）40001（message 为可读原因）。
+- 排版：正文超过 20 万字符 40001（与文章正文同口径）。
+
+**解析口径**（与 ARCHITECTURE §24.2 同源）：标题优先 front-matter → 首个 H1 → 文件名；标签只匹配已有、不自动创建；`warnings` 逐条回传供前端提示。
+**排版口径**（与 ARCHITECTURE §24.3 同源）：保护区机制（代码/URL 不被改写）+ 三档规则 + 幂等；`stats.rules` 用于前端提示"改了哪些地方"。
+
 ## 14. P7：站点内容池化（内容归用户 + 多站发表 + 路径美化）
 
 > 决策 D73~~D78 / 规则 R75~~R78，见 `docs/P7/PRD-P7-STORY-DEMAND.md`。增补文档 `docs/P7/API-P7-增补.md` 已并入（保留为历史参考，冲突以本文为准）。

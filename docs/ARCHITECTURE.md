@@ -865,6 +865,8 @@ main.ts 增补：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 函数�
 | secret-box.util | api/src/common/utils/secret-box.util.ts | 短口令可逆密钥箱（AES-256-GCM：encryptSecret / decryptSecret / deriveKey，iv12+tag16 布局，异常一律返回 null）；当前用于分享提取码回显，密钥由调用方从配置派生（§23.2） | 已建（W5） |
 | file-ticket | api/src/modules/cloud/transfer/file-ticket.ts | 私有文件直链票据（HMAC-SHA256 无状态签名：createFileTicket / verifyFileTicket / FILE_TICKET_TTL_MS=2h；恒定时间比较；§23.4） | 已建（W7） |
 | downloadByUrl | web/src/utils/download.ts | 直链下载（URL 自带票据/公开 token 时交给浏览器原生下载：零内存驻留 + 断点续传；与 saveBlob 的分工见 §23.4） | 已建（W7） |
+| FilePicker | web/src/components/FilePicker | 云盘文件选择器（单层下钻 + 扩展名白名单过滤，只产出 `{id,name,ext,size}`，不读内容；文章导入用，其它需要"选云盘文件"的场景复用） | 已建（T88） |
+| DiffView | web/src/components/DiffView | 只读双栏 diff 弹窗（@codemirror/merge 动态 import、随弹窗挂载/销毁；用于"改了再确认"场景，如一键排版预览） | 已建（T89） |
 
 ### Redis Key 增补约定（写入 RedisKey 常量）
 
@@ -1830,6 +1832,63 @@ modules/cloud/admin/
 
 - W3：首次「分享管理」提交成功即关闭弹框（原先切到 detail 态）；需复制链接/延长/停止时再从列表行「分享管理」进入（后端 `findActiveShare` 保证幂等取现存链接）。
 - W6：公开链接页状态筛选默认「有效」（`filterStatus = 1`），下拉仍提供 全部 / 已过期 / 已停止。
+
+## 24. P8：文章创作增强（文件导入 + 一键排版）
+
+> 决策：导入仅支持 Markdown / TXT（零新依赖）；排版默认「结构 + 标点 + 中英间距」三档全开；
+> 应用方式为 diff 预览后确认；本期不给 AI 加工具（AI 对话当前无附件上传能力：chat DTO / 上游组装 / `ai_message` 表均无附件字段，已核实）。
+> **零新依赖、零数据库变更、零错误码新增**；新增 2 个接口 + 2 个前端公共组件。
+
+### 24.1 接口（site 域，均只解析/排版，不落库）
+
+| 方法 | 路径                     | 权限                | 说明                                                                                                                                              |
+| ---- | ------------------------ | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST | /api/site/article/import | site:article:create | body `{ fileId }`；经 CloudFacade 读字节 → 本域解析 → 返回 `{ title, contentMd, summary, wordCount, matchedTags, unmatchedTags, warnings, meta }` |
+| POST | /api/site/article/format | site:article:update | body `{ contentMd, options? }` → `{ contentMd, changed, stats: { rules, lines, charsBefore, charsAfter } }`                                       |
+
+两者都不写库、不挂 `@OperationLog`（读/变换语义、无副作用）；真正的落库仍走既有 create/update，权限与校验链完全不变。
+
+### 24.2 导入解析口径（`article-import.parser.ts`）
+
+- 白名单 `md / markdown / txt`；≤2MB；含 NUL 字节视为二进制拒绝（30012 / 30013 / 40001）；
+- 编码：UTF-8（剥离 BOM）优先；出现替换字符时用 GBK 试解并取替换更少的一方（`iconv-lite`，既有依赖）；
+- 标题优先级：front-matter `title` → 正文首个 `# H1` → 文件名；被当作标题的 H1 从正文移除（避免页面标题重复）；超 100 字截断；
+- front-matter 子集：`title` / `summary|description|excerpt` / `tags`（支持 `[a,b]`、`a, b`、`- a` 三种写法）；解析不了的行只告警忽略；
+- TXT：首行 ≤60 字且不以句末标点结尾 → 视为标题并移除；否则标题落到文件名；
+- 标签：只回**名称**，Service 侧匹配平台已有标签（`matchedTags` / `unmatchedTags`），**不自动创建**；
+- 返回 `warnings`（编码回退、未识别标题、front-matter 异常行、正文为空等），前端逐条提示。
+
+### 24.3 排版规则引擎（`markdown-format.ts`）
+
+- **保护区机制**：代码围栏、行内代码、图片/链接地址、自动链接、行内 HTML、`$...$` 先抽成占位符（`\u0000n\u0001`），所有规则只作用于纯文本，处理完原样还原 —— 避免把 URL 里的 `_` 当强调符、把代码当"中英混排"；
+- 三档可分别开关（默认全开）：① 结构规整（行尾空白、标题/引用空格、列表符号统一 `-`、**按块重建块间空行**、文末单换行）② 标点（`__x__`→`**x**`、`_x_`→`*x*`、中文语境 `...`→`……`）③ 中英间距（汉字 ↔ 字母/数字补一个空格）；
+- **为什么按"块"重建空行**：markdown 中"列表后紧跟非缩进行"会被解析为列表项延续（lazy continuation），逐行插空行容易漏判；分块重建可从结构上杜绝，同时保证段内、列表项之间、引用行之间不插空行；
+- **幂等**：重复排版结果一致；空文档原样返回；
+- 明确不做：标题层级强行调整、表格分隔行对齐、半角→全角标点转换、英文 `...` 替换、行宽折行（避免有损或风格争议）。
+
+### 24.4 前端交互
+
+- **FilePicker**（新公共组件）：单层下钻云盘、按扩展名白名单过滤，只产出 `{ id, name, ext, size }`，不读内容、不落库；
+- **DiffView**（新公共组件）：只读双栏 diff（`@codemirror/merge` 动态 import，文章页首屏不加载编辑器依赖），`@opened` 挂载 / `@closed` 销毁，随弹窗生命周期；
+- 导入入口：工具栏「导入文件」下拉 = 从云盘选择 / 上传本地文件；**本地上传先落到云盘根留档**再解析（不丢源文件）；填表时逐项确认覆盖（标题不同才问、正文非空才问、摘要只在空时补）；
+- 排版入口：工具栏「一键排版」→ 服务端返回结果 → 无改动直接提示；有改动则打开 DiffView → 点「应用排版」才写回 `form.contentMd`（textarea 原生撤销可回退）。
+
+### 24.5 域边界
+
+`SiteArticleModule` imports `CloudFacadeModule`，读文件只经门面。CloudFacade 新增：
+
+```
+readTextFileById(userId, fileId, { exts, maxBytes, purpose })
+  → 以 fileId 定位（前端选择器给的是 id，不必先拼路径）
+  → 白名单与体量上限由调用方传入（cloud 域不硬编码别的域的导入口径）
+  → 返回原始字节（编码探测属"文章语义"，留在 site 域）
+```
+
+### 24.6 明确不做（本期）
+
+- HTML / Word 导入（需转换器或新依赖，未特批）；
+- AI 侧两个工具（`import_site_article` / `format_site_article`）：解析与排版已放在零 Nest 依赖的纯函数模块中，后续接线即可；
+- **AI 对话附件上传**：属独立需求（需上传入口 + `ai_message` 附件列 + 上游多模态 content 组装 + 类型白名单与配额）。
 
 ## 20. AI 能力扩展（P5）：云盘/CMS/生命周期工具 + 预算动态化（自 docs/P5/ARCHITECTURE-P5-增补.md 并入；增补文档保留为历史细节参考）
 
