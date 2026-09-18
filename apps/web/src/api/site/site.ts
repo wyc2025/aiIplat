@@ -157,6 +157,52 @@ export const updateArticleStatus = (id: number, status: number) =>
 
 export const removeArticle = (id: number) => del(`/site/article/${id}`)
 
+// ========== 文章创作增强（P8）：文件导入 + 一键排版（均只解析/排版，不落库） ==========
+
+/** 导入解析结果（字段可直接填入编辑表单） */
+export interface ArticleImportResult {
+  fileId: string
+  filename: string
+  title: string
+  contentMd: string
+  summary: string
+  wordCount: number
+  /** 与平台已有标签匹配上的（前端直接勾选） */
+  matchedTags: Array<{ id: string; name: string }>
+  /** 未匹配的标签名（提示用户，不自动创建） */
+  unmatchedTags: string[]
+  warnings: string[]
+  meta: {
+    filename: string
+    ext: string
+    size: number
+    encoding: 'utf8' | 'gbk'
+    format: 'markdown' | 'text'
+  }
+}
+
+/** 从云盘已有文件导入（md / markdown / txt；≤2MB） */
+export const importArticleFile = (fileId: number) =>
+  post<ArticleImportResult>('/site/article/import', { fileId: String(fileId) })
+
+/** 排版选项（缺省三档全开） */
+export interface ArticleFormatOptions {
+  structure?: boolean
+  punctuation?: boolean
+  cjkSpacing?: boolean
+}
+
+/** 排版结果 */
+export interface ArticleFormatResult {
+  contentMd: string
+  changed: boolean
+  stats: { rules: string[]; lines: number; charsBefore: number; charsAfter: number }
+}
+
+/** 一键排版（不落库；前端 diff 预览确认后再保存文章） */
+export const formatArticle = (contentMd: string, options?: ArticleFormatOptions) =>
+  post<ArticleFormatResult>('/site/article/format', { contentMd, options })
+
 // ========== 评论（site:comment:*，分页；P4E T61 必带 siteId） ==========
 
 export interface CommentQuery {

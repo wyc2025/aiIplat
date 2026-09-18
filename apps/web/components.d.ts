@@ -9,6 +9,7 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     AppLogo: typeof import('./src/components/AppLogo/index.vue')['default']
+    DiffView: typeof import('./src/components/DiffView/index.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElAvatar: typeof import('element-plus/es')['ElAvatar']
     ElBreadcrumb: typeof import('element-plus/es')['ElBreadcrumb']
@@ -58,6 +59,7 @@ declare module 'vue' {
     ElTooltip: typeof import('element-plus/es')['ElTooltip']
     ElTreeSelect: typeof import('element-plus/es')['ElTreeSelect']
     ElUpload: typeof import('element-plus/es')['ElUpload']
+    FilePicker: typeof import('./src/components/FilePicker/index.vue')['default']
     FormDialog: typeof import('./src/components/FormDialog/index.vue')['default']
     MarkdownView: typeof import('./src/components/MarkdownView/index.vue')['default']
     ProTable: typeof import('./src/components/ProTable/index.vue')['default']

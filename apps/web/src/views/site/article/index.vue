@@ -407,6 +407,48 @@
                 hidden
                 @change="onImagePick"
               >
+              <!-- P8 T88：导入已有文件（云盘选择或本地上传，解析后填入表单，不直接落库） -->
+              <el-dropdown
+                trigger="click"
+                @command="onImportCommand"
+              >
+                <el-button
+                  link
+                  type="primary"
+                  size="small"
+                  :loading="importing"
+                >
+                  导入文件
+                  <el-icon><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="cloud">
+                      从云盘选择
+                    </el-dropdown-item>
+                    <el-dropdown-item command="local">
+                      上传本地文件
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+              <input
+                ref="sourceInput"
+                type="file"
+                accept=".md,.markdown,.txt"
+                hidden
+                @change="onSourcePick"
+              >
+              <!-- P8 T89：一键排版（先出 diff 预览，确认后才改写正文） -->
+              <el-button
+                link
+                type="primary"
+                size="small"
+                :loading="formatting"
+                @click="runFormat"
+              >
+                一键排版
+              </el-button>
             </span>
             <el-radio-group
               v-model="form.status"
@@ -480,6 +522,36 @@
         class="v-sa-preview-loading"
       />
     </el-dialog>
+
+    <!-- 从云盘选择要导入的文件（P8 T88：公共组件，按扩展名白名单过滤可选文件） -->
+    <FilePicker
+      v-model:visible="pickerVisible"
+      title="选择要导入的 Markdown / 文本文件"
+      :accept-exts="['md', 'markdown', 'txt']"
+      @select="onPickCloudFile"
+    />
+
+    <!-- 一键排版 diff 预览（P8 T89：只读双栏，确认后才改写正文） -->
+    <DiffView
+      v-model:visible="diffVisible"
+      title="一键排版预览"
+      :before="diffBefore"
+      :after="diffAfter"
+      left-label="排版前"
+      right-label="排版后"
+    >
+      <template #footer>
+        <el-button @click="diffVisible = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          @click="applyFormat"
+        >
+          应用排版
+        </el-button>
+      </template>
+    </DiffView>
   </div>
 </template>
 
@@ -487,10 +559,12 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { confirmDialog } from '@/utils/confirm'
-import { Plus, Refresh } from '@element-plus/icons-vue'
+import { ArrowDown, Plus, Refresh } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import ProTable from '@/components/ProTable/index.vue'
 import MarkdownView from '@/components/MarkdownView/index.vue'
+import FilePicker from '@/components/FilePicker/index.vue'
+import DiffView from '@/components/DiffView/index.vue'
 import { formatTime } from '@/utils/format'
 import {
   listArticles,
@@ -502,7 +576,10 @@ import {
   listColumns,
   listTags,
   setArticleSites,
+  importArticleFile,
+  formatArticle,
 } from '@/api/site/site'
+import type { ArticleImportResult } from '@/api/site/site'
 import { uploadFile } from '@/api/cloud/file'
 import { useSiteStore } from '@/stores/site'
 import type { SiteArticleItem, SiteColumnItem, SiteTagItem } from '@/types/api'
@@ -715,6 +792,141 @@ async function onImagePick(event: Event) {
   } finally {
     imageUploading.value = false
   }
+}
+
+// ========== P8：文件导入（T88）与一键排版（T89） ==========
+
+/** 导入可选类型（与后端白名单一致） */
+const IMPORT_EXTS = ['md', 'markdown', 'txt'] as const
+
+const pickerVisible = ref(false)
+const sourceInput = ref<HTMLInputElement>()
+/** 导入解析中（云盘选择与本地导入共用同一 loading） */
+const importing = ref(false)
+const formatting = ref(false)
+const diffVisible = ref(false)
+const diffBefore = ref('')
+const diffAfter = ref('')
+
+/** 导入入口：从云盘选 / 上传本地文件 */
+function onImportCommand(command: string | number | object): void {
+  if (command === 'cloud') {
+    pickerVisible.value = true
+    return
+  }
+  if (command === 'local') sourceInput.value?.click()
+}
+
+/**
+ * 本地文件导入：**先上传到云盘根留档**，再走同一套解析。
+ * 这样"导入"不会丢掉源文件（可随时重新导入或直接用云盘编辑器改）。
+ */
+async function onSourcePick(event: Event): Promise<void> {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  target.value = ''
+  if (!file) return
+  const ext = (file.name.split('.').pop() ?? '').toLowerCase()
+  if (!IMPORT_EXTS.includes(ext as (typeof IMPORT_EXTS)[number])) {
+    ElMessage.warning('仅支持 .md / .markdown / .txt 文件')
+    return
+  }
+  importing.value = true
+  try {
+    const created = await uploadFile(0, file)
+    await importByFileId(Number(created.id))
+  } catch {
+    // 上传或解析失败：拦截器/业务码已给提示
+  } finally {
+    importing.value = false
+  }
+}
+
+/** 云盘文件选择结果 → 导入解析 */
+async function onPickCloudFile(file: { id: string }): Promise<void> {
+  importing.value = true
+  try {
+    await importByFileId(Number(file.id))
+  } catch {
+    // 拦截器提示
+  } finally {
+    importing.value = false
+  }
+}
+
+async function importByFileId(fileId: number): Promise<void> {
+  const result = await importArticleFile(fileId)
+  await applyImportResult(result)
+}
+
+/**
+ * 把解析结果填进表单：**覆盖前逐项确认**（导入是破坏性动作，可能冲掉正在写的草稿），
+ * 标签只勾选平台已有的（未匹配的提示，不自动创建）。
+ */
+async function applyImportResult(result: ArticleImportResult): Promise<void> {
+  if (result.title && result.title !== form.title) {
+    const overwrite =
+      form.title.trim() === '' ||
+      (await confirmDialog(`将标题覆盖为「${result.title}」？`, '导入确认', { type: 'warning' }))
+    if (overwrite) form.title = result.title
+  }
+
+  if (result.contentMd) {
+    const overwrite =
+      form.contentMd.trim() === '' ||
+      (await confirmDialog('将用导入内容覆盖当前正文，确认继续？', '导入确认', { type: 'warning' }))
+    if (overwrite) form.contentMd = result.contentMd
+  }
+
+  // 摘要仅在没有时补，避免覆盖用户手写的摘要
+  if (result.summary && form.summary.trim() === '') form.summary = result.summary
+
+  if (result.matchedTags.length) {
+    const ids = new Set(form.tagIds)
+    for (const tag of result.matchedTags) ids.add(Number(tag.id))
+    form.tagIds = [...ids]
+  }
+  if (result.unmatchedTags.length) {
+    ElMessage.warning(`未匹配到标签：${result.unmatchedTags.join('、')}（不会自动创建）`)
+  }
+  for (const warning of result.warnings.slice(0, 3)) {
+    ElMessage.warning(warning)
+  }
+  ElMessage.success(`已解析「${result.filename}」，共 ${result.wordCount} 字，请确认后保存`)
+}
+
+/** 一键排版：调接口 → diff 预览 → 用户确认后才改写正文（textarea 原生撤销可回退） */
+async function runFormat(): Promise<void> {
+  if (form.contentMd.trim() === '') {
+    ElMessage.warning('正文为空，无需排版')
+    return
+  }
+  formatting.value = true
+  try {
+    const result = await formatArticle(form.contentMd, {
+      structure: true,
+      punctuation: true,
+      cjkSpacing: true,
+    })
+    if (!result.changed) {
+      ElMessage.success('正文已经足够规整，无需改动')
+      return
+    }
+    diffBefore.value = form.contentMd
+    diffAfter.value = result.contentMd
+    diffVisible.value = true
+  } catch {
+    // 拦截器提示
+  } finally {
+    formatting.value = false
+  }
+}
+
+/** 应用排版结果（用户已在只读 diff 里确认过） */
+function applyFormat(): void {
+  form.contentMd = diffAfter.value
+  diffVisible.value = false
+  ElMessage.success('已应用排版（Ctrl+Z 可撤销）')
 }
 
 function openCreate() {

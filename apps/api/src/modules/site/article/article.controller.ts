@@ -10,6 +10,7 @@ import {
   UpdateArticleDto,
   UpdateArticleStatusDto,
 } from './dto/article.dto'
+import { FormatArticleDto, ImportArticleDto } from './dto/article-tools.dto'
 
 /** 文章管理（site:article:*，API.md §6.2）；状态变更挂 site:article:publish */
 @ApiTags('个人网站-文章管理')
@@ -32,6 +33,25 @@ export class SiteArticleController {
   @ApiOperation({ summary: '文章详情（附加 contentMd）' })
   detail(@CurrentUser('userId') userId: string, @Param('id', ParseIntPipe) id: number) {
     return this.articleService.detail(BigInt(userId), BigInt(id))
+  }
+
+  /**
+   * 从云盘已有文件导入（P8 T88）：把 md/txt 解析成表单字段，**不落库**。
+   * 设计意图：解析结果先交给用户确认，避免"选错文件"直接产出脏文章。
+   */
+  @Post('import')
+  @RequirePermission('site:article:create')
+  @ApiOperation({ summary: '从云盘 md/txt 导入解析（返回标题/正文/摘要/标签建议；只解析不落库）' })
+  importFromFile(@CurrentUser('userId') userId: string, @Body() dto: ImportArticleDto) {
+    return this.articleService.importFromFile(BigInt(userId), dto)
+  }
+
+  /** 一键排版（P8 T89）：正文 → 排版结果（不落库；前端 diff 预览确认后再保存文章） */
+  @Post('format')
+  @RequirePermission('site:article:update')
+  @ApiOperation({ summary: '一键排版（结构 / 标点 / 中英间距三档可开关；只排版不落库）' })
+  format(@Body() dto: FormatArticleDto) {
+    return this.articleService.formatContent(dto)
   }
 
   @Post()

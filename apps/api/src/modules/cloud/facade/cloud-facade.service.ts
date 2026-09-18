@@ -838,6 +838,46 @@ export class CloudFacade {
   }
 
   /**
+   * 按文件 ID 读文本（P8 T88 文章导入用）：供 site 域把「云盘里已有的 md/txt」解析成文章草稿。
+   *
+   * 与 `readUserFile` 的差异：
+   * - 以 **fileId** 定位（前端文件选择器拿到的是 id，不必先拼路径）；
+   * - 扩展名白名单与体积上限**由调用方传入**（cloud 域不硬编码其它域的导入口径）；
+   * - 返回原始字节（编码探测留给调用域：GBK/UTF-8 属于"文章"语义，不是存储语义）。
+   */
+  async readTextFileById(
+    userId: bigint,
+    fileId: bigint,
+    opts: { exts: ReadonlySet<string>; maxBytes: number; purpose?: string },
+  ): Promise<{ id: string; name: string; ext: string; size: number; content: Buffer }> {
+    const row = await this.prisma.cloudFile.findFirst({
+      where: { id: fileId, userId, deletedAt: null },
+    })
+    if (!row || row.isDir === 1 || !row.storageName) {
+      throw new BusinessException(ErrorCode.CloudFileNotFound, '文件不存在或无权访问')
+    }
+    const ext = (row.ext ?? '').toLowerCase()
+    if (!opts.exts.has(ext)) {
+      const allow = [...opts.exts].map((item) => `.${item}`).join(' / ')
+      throw new BusinessException(
+        ErrorCode.CloudFileTypeNotAllowed,
+        `该文件类型不支持${opts.purpose ?? '读取'}（仅支持 ${allow}）`,
+      )
+    }
+    if (Number(row.size) > opts.maxBytes) {
+      const mb = Math.max(1, Math.floor(opts.maxBytes / 1024 / 1024))
+      throw new BusinessException(ErrorCode.CloudContentTooLarge, `文件超过 ${mb}MB 上限`)
+    }
+
+    const chunks: Buffer[] = []
+    for await (const chunk of this.storage.createReadStream(row.storageName)) {
+      chunks.push(Buffer.from(chunk))
+    }
+    const content = Buffer.concat(chunks)
+    return { id: row.id.toString(), name: row.name, ext, size: content.length, content }
+  }
+
+  /**
    * 云盘写文本文件（基点 = 用户云盘根，R64/D22 温和覆盖）：
    * 路径规范（30001）→ 文本白名单（30012）→ 单文件 ≤256KB 文本（30013）→
    * writeFileRaw 全链（mkdir -p / R6 / 同名旧版进回收站 / used 记账 / 配额 30003）。

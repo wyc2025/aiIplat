@@ -8,12 +8,16 @@ import { BusinessException } from '../../../common/exceptions/business.exception
 import { RedisService } from '../../../infra/redis/redis.service'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { UserPageQueryDto } from '../dto/site-id.dto'
+import { CloudFacade } from '../../cloud/facade/cloud-facade.service'
+import { IMPORT_ALLOWED_EXTS, IMPORT_MAX_BYTES, ImportParseError, parseArticleFile } from './article-import.parser'
+import { formatMarkdown } from './markdown-format'
 import type {
   ArticleSitesDto,
   CreateArticleDto,
   UpdateArticleDto,
   UpdateArticleStatusDto,
 } from './dto/article.dto'
+import type { FormatArticleDto, ImportArticleDto } from './dto/article-tools.dto'
 import type { SiteArticle } from '@prisma/client'
 
 /** 文章列表查询（P7 D73：用户级；siteId 降为可选筛选「已发表到该站」） */
@@ -103,6 +107,7 @@ export class SiteArticleService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly cloudFacade: CloudFacade,
   ) {}
 
   /** 分页列表（用户级）：筛选 columnId/tagId/status/keyword + 可选 siteId（按发表过滤） */
@@ -149,6 +154,69 @@ export class SiteArticleService {
     const article = await this.findOwnedArticle(userId, id)
     const [item] = await this.toListItem([article])
     return { ...item, contentMd: article.contentMd }
+  }
+
+  /**
+   * 从云盘已有文件导入文章（P8 T88）：
+   * 经 CloudFacade 读字节（域边界）→ 本域解析（编码探测/标题/摘要/标签）→ 标签名匹配已有标签。
+   * **只解析不落库**：结果填入编辑表单，由用户确认后再走常规 create/update。
+   */
+  async importFromFile(userId: bigint, dto: ImportArticleDto) {
+    const fileId = BigInt(dto.fileId)
+    const file = await this.cloudFacade.readTextFileById(userId, fileId, {
+      exts: IMPORT_ALLOWED_EXTS,
+      maxBytes: IMPORT_MAX_BYTES,
+      purpose: '导入文章',
+    })
+
+    let parsed
+    try {
+      parsed = parseArticleFile(file.content, file.name)
+    } catch (error) {
+      // 解析失败属于"用户可纠正"的问题（类型/编码/内容），转成业务码返回可读原因
+      if (error instanceof ImportParseError) {
+        throw new BusinessException(ErrorCode.ParamInvalid, error.message)
+      }
+      throw error
+    }
+
+    const tags = await this.matchTagsByName(userId, parsed.tagNames)
+    return {
+      fileId: file.id,
+      filename: file.name,
+      title: parsed.title,
+      contentMd: parsed.contentMd,
+      summary: parsed.summary,
+      wordCount: countWordsR14(parsed.contentMd),
+      matchedTags: tags.matched,
+      unmatchedTags: tags.unmatched,
+      warnings: parsed.warnings,
+      meta: parsed.meta,
+    }
+  }
+
+  /**
+   * 一键排版（P8 T89）：纯文本变换，不落库、不改状态。
+   * 规则引擎见 `markdown-format.ts`（保护区机制 + 三档可开关 + 幂等）；
+   * 返回 stats.rules 供前端提示"改了哪些地方"。
+   */
+  formatContent(dto: FormatArticleDto) {
+    const result = formatMarkdown(dto.contentMd, dto.options ?? {})
+    return { contentMd: result.contentMd, changed: result.changed, stats: result.stats }
+  }
+
+  /** 标签名 → 平台已有标签（**只匹配不创建**：导入动作不产生意外数据；未匹配的回给前端提示） */
+  private async matchTagsByName(userId: bigint, names: string[]) {
+    if (names.length === 0) return { matched: [], unmatched: [] }
+    const rows = await this.prisma.siteTag.findMany({
+      where: { userId, name: { in: names } },
+      select: { id: true, name: true },
+    })
+    const hit = new Set(rows.map((row) => row.name))
+    return {
+      matched: rows.map((row) => ({ id: row.id.toString(), name: row.name })),
+      unmatched: names.filter((name) => !hit.has(name)),
+    }
   }
 
   /**
