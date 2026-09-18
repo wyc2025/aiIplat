@@ -598,16 +598,17 @@ apps/api/src/
 
 ### cloud_share —— 公开链接（P3 新增）
 
-| 字段        | 类型               | 说明                                                 |
-| ----------- | ------------------ | ---------------------------------------------------- |
-| id          | bigint PK          |                                                      |
-| user_id     | bigint             | 创建者                                               |
-| file_id     | bigint             | 逻辑关联 cloud_file（仅文件，is_dir=0）              |
-| token       | varchar(32) unique | 随机 URL-safe 串（crypto.randomBytes）               |
-| visit_count | int default 0      | 下载成功 +1                                          |
-| expire_at   | datetime null      | null = 永久                                          |
-| status      | tinyint default 1  | 1 有效 / 0 已停止（过期不置状态，靠 expire_at 判定） |
-| create_time | datetime           |                                                      |
+| 字段         | 类型               | 说明                                                                                          |
+| ------------ | ------------------ | --------------------------------------------------------------------------------------------- |
+| id           | bigint PK          |                                                                                               |
+| user_id      | bigint             | 创建者                                                                                        |
+| file_id      | bigint             | 逻辑关联 cloud_file（仅文件，is_dir=0）                                                       |
+| token        | varchar(32) unique | 随机 URL-safe 串（crypto.randomBytes）                                                        |
+| visit_count  | int default 0      | 下载成功 +1                                                                                   |
+| expire_at    | datetime null      | null = 永久                                                                                   |
+| status       | tinyint default 1  | 1 有效 / 0 已停止（过期不置状态，靠 expire_at 判定）                                          |
+| create_time  | datetime           |                                                                                               |
+| password_enc | varchar(255) null  | 提取码密文（AES-256-GCM，仅供创建者回显；与 P4d 的 `password_hash` 同源，详见 §17.1 / §23.2） |
 
 索引：`@@index([fileId])`、`@@index([userId])`。
 
@@ -860,6 +861,8 @@ main.ts 增补：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 函数�
 | confirmDialog | web/src/utils/confirm.ts | **确认弹窗全仓唯一入口**（内置 try/catch，取消/关闭静默返回 false）；全仓 30 处 ElMessageBox.confirm 调用点已统一（§21.5） | 已建（T81） |
 | @codemirror/merge 只读对比 | web/src/views/cloud/components/FileEditorDialog.vue | 「对比改动」= 打开时快照 ↔ 当前编辑内容 只读双栏（highlightChanges + gutter，不做合并编辑）；包按需 `await import()`（独立异步 chunk，§21.4） | 已建（T80），依赖白名单（D71 特批） |
 | 模板预览图资产 | web/public/templates/{default,portfolio,card}/preview.png + api/assets/site-templates/*/template.json#preview | 三套模板预览图（Vite 构建直出 `/templates/{id}/preview.png`）；API 列表按 template.json#preview 返回 previewUrl（缺图 null → 卡片占位） | 已建（T80） |
+| AppLogo | web/src/components/AppLogo | 平台图标（内联 SVG，与 `public/favicon.svg` 同几何，`size` prop）；侧边栏与登录页唯一品牌图标来源，禁止各页自绘 | 已建（W2） |
+| secret-box.util | api/src/common/utils/secret-box.util.ts | 短口令可逆密钥箱（AES-256-GCM：encryptSecret / decryptSecret / deriveKey，iv12+tag16 布局，异常一律返回 null）；当前用于分享提取码回显，密钥由调用方从配置派生（§23.2） | 已建（W5） |
 
 ### Redis Key 增补约定（写入 RedisKey 常量）
 
@@ -1532,15 +1535,15 @@ P4e/P5/P6 的口径是「文章/栏目/标签属于某个站点」，导致：�
 
 ### 22.2 数据模型变更
 
-| 表                     | 变更                                                                                              |
-| ---------------------- | ------------------------------------------------------------------------------------------------- |
+| 表                     | 变更                                                                                                                                    |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `site_article`         | 删 `site_id`，加 `user_id`；新索引 `idx_article_user_status(user_id,status,published_at)`、`idx_article_user_column(user_id,column_id)` |
-| `site_column`          | 删 `site_id`，加 `user_id`；新索引 `idx_column_user(user_id,parent_id)`                            |
-| `site_tag`             | 删 `site_id`，加 `user_id`；唯一键由 `(site_id,name)` 改为 `uk_tag_user_name(user_id,name)`         |
-| `site_article_publish` | **新增**：`article_id + site_id + is_top + published_at`，唯一键 `(article_id,site_id)`，索引 `(site_id,is_top,published_at)` |
-| `site_column_display`  | **新增**：`column_id + site_id + sort`，唯一键 `(column_id,site_id)`，索引 `(site_id,sort)`         |
-| `site_comment`         | 保留 `site_id`；索引改 `idx_comment_site_article_audit(site_id,article_id,audit_status)`           |
-| `site_site`            | 加 `spa_fallback VARCHAR(64) NULL`（SPA 回退入口，D77；**NULL = 不启用回退，行为与 P7 前一致**）   |
+| `site_column`          | 删 `site_id`，加 `user_id`；新索引 `idx_column_user(user_id,parent_id)`                                                                 |
+| `site_tag`             | 删 `site_id`，加 `user_id`；唯一键由 `(site_id,name)` 改为 `uk_tag_user_name(user_id,name)`                                             |
+| `site_article_publish` | **新增**：`article_id + site_id + is_top + published_at`，唯一键 `(article_id,site_id)`，索引 `(site_id,is_top,published_at)`           |
+| `site_column_display`  | **新增**：`column_id + site_id + sort`，唯一键 `(column_id,site_id)`，索引 `(site_id,sort)`                                             |
+| `site_comment`         | 保留 `site_id`；索引改 `idx_comment_site_article_audit(site_id,article_id,audit_status)`                                                |
+| `site_site`            | 加 `spa_fallback VARCHAR(64) NULL`（SPA 回退入口，D77；**NULL = 不启用回退，行为与 P7 前一致**）                                        |
 
 迁移执行顺序（单事务，R75）：加列 → 建关联表 → 按原 `site_id` 反查站点属主回填 `user_id` → 按原归属写入发表/展示关联 → 建新索引 → 删旧索引与旧列。执行前必须 `mysqldump` 全库备份（已在 migration.sql 头部写明）。
 
@@ -1612,15 +1615,15 @@ P4e/P5/P6 的口径是「文章/栏目/标签属于某个站点」，导致：�
 
 7 个 CMS 工具的**语义调整**（工具总数 28 不变，`pnpm check:ai` 16/16）：
 
-| 工具                        | 变化                                                                                                 |
-| --------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `create_site_article`       | 加 `siteIds?: number[]`；**status=0（草稿）可完全不选站**（只进内容池），status=1（发布）必须能确定发表站点（slug 或 siteIds） |
-| `update_site_article`       | 加 `siteIds?: number[]`（提供即整体替换，空数组 = 全站下架）；slug 由必选降为可选（给了才校验「已发表到该站」） |
-| `publish_site_article`      | slug 可选；**上架且零发表站**时在确认卡与返回值加警示行（提示：尚未发表到任何站点，上架后任何站点都看不到它） |
-| `list_site_articles`        | 列表改用户级 + 可选站点筛选；返回带 `sites`                                                            |
-| `read_site_article`         | 归属校验由「属于该站」改为「已发表到该站」                                                             |
-| `ensure_site_column` / `ensure_site_tags` | 去站点参数（栏目/标签用户级）                                                    |
-| `delete_site`               | 确认卡与返回改口径（下架而非删除内容本体）                                                            |
+| 工具                                      | 变化                                                                                                                           |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `create_site_article`                     | 加 `siteIds?: number[]`；**status=0（草稿）可完全不选站**（只进内容池），status=1（发布）必须能确定发表站点（slug 或 siteIds） |
+| `update_site_article`                     | 加 `siteIds?: number[]`（提供即整体替换，空数组 = 全站下架）；slug 由必选降为可选（给了才校验「已发表到该站」）                |
+| `publish_site_article`                    | slug 可选；**上架且零发表站**时在确认卡与返回值加警示行（提示：尚未发表到任何站点，上架后任何站点都看不到它）                  |
+| `list_site_articles`                      | 列表改用户级 + 可选站点筛选；返回带 `sites`                                                                                    |
+| `read_site_article`                       | 归属校验由「属于该站」改为「已发表到该站」                                                                                     |
+| `ensure_site_column` / `ensure_site_tags` | 去站点参数（栏目/标签用户级）                                                                                                  |
+| `delete_site`                             | 确认卡与返回改口径（下架而非删除内容本体）                                                                                     |
 
 能力清单（`chat/capability.manifest.ts`）文案同步为内容池口径，与工具签名同源（R69）。
 
@@ -1764,6 +1767,55 @@ modules/cloud/admin/
 | 清理并发锁               | 多实例部署 | 现按单实例不加锁（R59）；多实例时需加分布式锁或改用 DB 抢占式扫描                                   |
 
 ---
+
+## 23. P7 走查补丁（W1~~W6：站点与云盘 6 项实测缺陷 / 体验修复）
+
+> 来源：用户实测反馈（2026-09-18）。任务记录见 PROGRESS「P7 走查补丁」小节；接口契约变更同步 API §9.5。
+> 原则：不改契约的只动前端；必须动契约的（提取码回显）以「加列 + 加返回字段」的兼容方式落地，旧数据不迁移、不报错。
+
+### 23.1 W1 站点列表 404（菜单数据未同步）
+
+- 现象：站点设置页 / 站点切换器点「站点管理」跳 `/site/site` → 404。
+- 根因：业务页路由由 `userinfo.menus` 动态注册（`web/src/router/dynamic.ts`）。线上库缺 P4E 新增的「站点列表」菜单记录（该环境未执行 seed），组件虽在产物中却从未注册路由，导航落到 catch-all 404。
+- 两层修复：
+  1. 部署侧：`deploy.sh` 新增 `[6/8] 菜单/权限种子同步（幂等）`，在 `migrate deploy` 之后执行 `npx tsx prisma/seed.ts`。seed 按 `parentId + name` 判重、只补缺失项；失败仅醒目告警不阻断本次部署（代码更新仍生效）。
+  2. 前端防御：`SiteSwitcher` 与站点设置页跳转前用 `router.hasRoute('site-site')` 预检，未注册时提示「菜单未同步」而非静默 404。
+
+### 23.2 W5 提取码回显（可逆存储）
+
+- 问题：提取码过去只存 bcrypt 哈希（D47/R42），不可逆 → 分享者无法查看自己设置的值。
+- 方案：`cloud_share` 加列 `password_enc VARCHAR(255) NULL`（迁移 `20260918000000_cloud_share_password_enc`），与 `password_hash` **同存同改**：
+  - 写：`create` / `updatePassword` 同时写哈希（访客校验链路不变）与密文；
+  - 读：`GET /cloud/share/list` 的 `password`（仅本人列表）；`POST /cloud/share/:id/password` 回显本次设置值；
+  - 密钥：`common/utils/secret-box.util.ts`（AES-256-GCM，iv12 | tag16 | ciphertext 的 base64），密钥由 `jwt.accessSecret` 经 SHA-256 派生，**不新增环境变量**；
+  - 降级：密文缺失（历史数据）/密钥轮换/数据损坏 → 返回 `null`，前端显示「已设置（不可回显）」，不抛错、不阻断列表。
+
+### 23.3 W4 预览加固（mp4 转圈 / 类型误判）
+
+私有预览 `GET /cloud/file/preview/:id`（R7 白名单，inline + Range）：
+
+- **Content-Type 兜底**：库里 `mime` 为空或为 `application/octet-stream` 时按扩展名推导（复用 `resolvePubMime`：mp4→`video/mp4`、png→`image/png`）；否则 `<video>/<img>` 会因类型不符拒绝解码。
+- **管道错误兜底**：`pipeStorage` 在读流 `error` 时 `res.destroy()`，避免响应既不输出数据也不结束（客户端永久挂起 = 一直转圈）。
+
+前端 `views/cloud/file/index.vue`：
+
+- 类型判定加扩展名兜底（`PREVIEW_VIDEO_EXTS` / `PREVIEW_IMAGE_EXTS`），与后端兜底同口径；
+- 载入进度可见（`previewFileBlob(id, onProgress)` → `v-loading` 文案显示百分比与已传大小），大文件不再「无反馈转圈」；
+- `<video>/<img>` 绑 `@error` → 明确提示「浏览器不支持该编码（如 H.265）」并给出「下载查看」按钮。
+
+### 23.4 可选增强（未做，待决策）
+
+私有文件的原生 `<video src>` 流式播放要求请求携带 Authorization，而原生媒体子请求无法带自定义头。若要「秒开 + 拖动进度条」，需引入**短期预览票据**：登录态签发（绑定 userId + fileId、TTL 5 分钟的 HMAC 签名 URL）+ 新增 `@Public` 票据校验端点，前端把票据 URL 直接交给 `<img>/<video>/<iframe>`。当前以「全量 blob + 进度提示 + 失败兜底」替代。
+
+### 23.5 W2 平台图标（公共资产）
+
+- `web/public/favicon.svg`：矢量徽标（蓝→青渐变圆角方块 + 白色 i + 平台弧线）；`index.html` 引为 `icon` / `apple-touch-icon` 并设 `theme-color`；
+- `web/src/components/AppLogo/index.vue`：同几何内联 SVG 组件（`size` prop），侧边栏（折叠恒显图标）与登录页复用；**禁止各页自绘 SVG 或回退 Element 内置图标**。
+
+### 23.6 W3 / W6 前端行为
+
+- W3：首次「分享管理」提交成功即关闭弹框（原先切到 detail 态）；需复制链接/延长/停止时再从列表行「分享管理」进入（后端 `findActiveShare` 保证幂等取现存链接）。
+- W6：公开链接页状态筛选默认「有效」（`filterStatus = 1`），下拉仍提供 全部 / 已过期 / 已停止。
 
 ## 20. AI 能力扩展（P5）：云盘/CMS/生命周期工具 + 预算动态化（自 docs/P5/ARCHITECTURE-P5-增补.md 并入；增补文档保留为历史细节参考）
 
@@ -2049,4 +2101,3 @@ system prompt = 助手设定（静态，prompt.sections.ASSISTANT_IDENTITY）
 评论 list/audit/reply（含 trim、覆盖不新增行、空串清除、开放层携带回复）、超长 40001 / 批量 >20 40001 / 跨站与非属主 40119、
 封面四条失败链 + 真实图片通过 + create 落库 + update 空串清除、回收站顶层不含头像旧行；
 `pnpm check:ai` 16/16；`tsc --noEmit` / `eslint`（双端）/ `vue-tsc` 零错；`vite build` 产物含 `@codemirror/merge` 独立异步 chunk（首屏不加载）。
-

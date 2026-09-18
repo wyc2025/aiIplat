@@ -550,11 +550,13 @@ Content-Type: application/json　Accept: text/event-stream
 
 #### 管理侧（登录态，既有接口扩展）
 
-| 方法 | 路径                          | 说明                                                                                                                       |
-| ---- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| POST | /api/cloud/share/create       | body 加 `password?: string`（4~8 位，留空 = 无密码）；`fileId` 可为**文件夹**（D48）；响应加 `hasPassword: boolean`        |
-| GET  | /api/cloud/share/list         | item 加 `itemType: 'file'\|'folder'`、`hasPassword: boolean`（**不返回密码本体**）                                         |
-| POST | /api/cloud/share/:id/password | 修改 / 移除提取码（body `{ password: string\|null }`，null 或空 = 移除）；响应 `{ id, hasPassword }`；变更后旧访问凭证失效 |
+| 方法 | 路径                          | 说明                                                                                                                                                         |
+| ---- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| POST | /api/cloud/share/create       | body 加 `password?: string`（4~8 位，留空 = 无密码）；`fileId` 可为**文件夹**（D48）；响应加 `hasPassword: boolean`                                          |
+| GET  | /api/cloud/share/list         | item 加 `itemType: 'file'\|'folder'`、`hasPassword: boolean`、`password: string\|null`（**仅本人列表回显明文**；密文解不开时 null）；`status` 缺省排除已停止 |
+| POST | /api/cloud/share/:id/password | 修改 / 移除提取码（body `{ password: string\|null }`，null 或空 = 移除）；响应 `{ id, hasPassword, password }`；变更后旧访问凭证失效                         |
+
+> W5（提取码可见）：`list` 的 `password` 由 `cloud_share.password_enc` 用 AES-256-GCM 解密得到（密钥由 `jwt.accessSecret` 派生），只对分享创建者本人返回；历史数据/密钥轮换后为 `null`，前端按「已设置（不可回显）」展示。访客校验链路仍走 `password_hash`（bcrypt），不受影响。
 
 > 权限：`:id/password` 复用 `cloud:share:create`（分享内容的创建/编辑一体），不新增权限标识与菜单。
 > 注：P3 的 30009「文件夹暂不支持创建分享链接」自 P4d 起不再触发（D48 支持文件夹分享），常量保留备用。
@@ -975,26 +977,26 @@ content 超 500 → 40001；评论不存在 → 40110；跨站/非属主 → 401
 
 ### 14.1 内容端点改用户级（修改既有）
 
-| 方法   | 路径                        | 变化                                                                                                                         |
-| ------ | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| GET    | /api/site/article           | **不再接受 `siteId`**（用户级）。保留可选 `siteId` 作**筛选**（不传 = 内容池全部；传 = 只出已发表到该站的）。列表项带 `sites: [{id,name,slug,isTop}]` |
-| GET    | /api/site/article/:id       | 详情带 `sites`（含每站 `isTop`）；不再有 `siteId` 字段                                                                        |
-| POST   | /api/site/article           | body 去掉 `siteId`，新增 `siteIds?: number[]`（提供即替换发表集合；不传 = 仅入内容池，不发表到任何站）                         |
-| PUT    | /api/site/article/:id       | 新增 `siteIds?: number[]`（提供即替换；**空数组 = 全站下架**，文章本体保留）                                                   |
-| GET    | /api/site/column/list       | **不再接受 `siteId`**（用户级）；列表项带 `sites: [{id,name,slug,sort}]`（展示站点）                                           |
-| POST   | /api/site/column            | body 去掉 `siteId`，新增 `siteIds?: number[]`（不传 = 该用户全部站点可见）                                                    |
-| GET    | /api/site/tag/list          | **不再接受 `siteId`**（用户级）。标签**跟随文章**出现在站点，无需单独挂载                                                     |
-| POST   | /api/site/tag               | body 去掉 `siteId`（`name` 用户级唯一，重名复用既有标签）                                                                     |
-| GET    | /api/site/manage/list       | 站点项 `articleCount` 改为「已发表到本站的文章数」                                                                            |
+| 方法 | 路径                  | 变化                                                                                                                                                  |
+| ---- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET  | /api/site/article     | **不再接受 `siteId`**（用户级）。保留可选 `siteId` 作**筛选**（不传 = 内容池全部；传 = 只出已发表到该站的）。列表项带 `sites: [{id,name,slug,isTop}]` |
+| GET  | /api/site/article/:id | 详情带 `sites`（含每站 `isTop`）；不再有 `siteId` 字段                                                                                                |
+| POST | /api/site/article     | body 去掉 `siteId`，新增 `siteIds?: number[]`（提供即替换发表集合；不传 = 仅入内容池，不发表到任何站）                                                |
+| PUT  | /api/site/article/:id | 新增 `siteIds?: number[]`（提供即替换；**空数组 = 全站下架**，文章本体保留）                                                                          |
+| GET  | /api/site/column/list | **不再接受 `siteId`**（用户级）；列表项带 `sites: [{id,name,slug,sort}]`（展示站点）                                                                  |
+| POST | /api/site/column      | body 去掉 `siteId`，新增 `siteIds?: number[]`（不传 = 该用户全部站点可见）                                                                            |
+| GET  | /api/site/tag/list    | **不再接受 `siteId`**（用户级）。标签**跟随文章**出现在站点，无需单独挂载                                                                             |
+| POST | /api/site/tag         | body 去掉 `siteId`（`name` 用户级唯一，重名复用既有标签）                                                                                             |
+| GET  | /api/site/manage/list | 站点项 `articleCount` 改为「已发表到本站的文章数」                                                                                                    |
 
 > 兼容说明：前端三页面已同步（列表不再传 `siteId`，筛选走新增下拉；参见 ARCHITECTURE §22.8）。后端对仍传 `siteId` 的历史请求按「未知参数」处理（ValidationPipe 口径）。
 
 ### 14.2 发表 / 显隐关联端点（新增）
 
-| 方法 | 路径                            | 权限                 | body                                        | 响应                                              |
-| ---- | ------------------------------- | -------------------- | ------------------------------------------- | ------------------------------------------------- |
-| PUT  | /api/site/article/:id/sites     | `site:article:update`| `{ sites: [{ siteId: number, isTop?: boolean }] }` | `{ ok: true, sites: [{id,name,slug,isTop}] }` |
-| PUT  | /api/site/column/:id/sites      | `site:column:update` | `{ sites: [{ siteId: number, sort?: number }] }`   | `{ ok: true, sites: [{id,name,slug,sort}] }` |
+| 方法 | 路径                        | 权限                  | body                                               | 响应                                          |
+| ---- | --------------------------- | --------------------- | -------------------------------------------------- | --------------------------------------------- |
+| PUT  | /api/site/article/:id/sites | `site:article:update` | `{ sites: [{ siteId: number, isTop?: boolean }] }` | `{ ok: true, sites: [{id,name,slug,isTop}] }` |
+| PUT  | /api/site/column/:id/sites  | `site:column:update`  | `{ sites: [{ siteId: number, sort?: number }] }`   | `{ ok: true, sites: [{id,name,slug,sort}] }`  |
 
 - **替换式**：每次调用以传入集合为最终结果；空数组 = 文章从全部站点下架 / 栏目在所有站点不展示（本体保留在内容池）。
 - **置顶按站独立**：`isTop` 只影响该站内的排序，不影响其他站点。
@@ -1003,10 +1005,10 @@ content 超 500 → 40001；评论不存在 → 40110；跨站/非属主 → 401
 
 ### 14.3 建站与删站（修改既有）
 
-| 方法   | 路径                    | 变化                                                                                                                                            |
-| ------ | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| POST   | /api/site/manage        | body 新增 `publishArticleIds?: 'all' | number[]`（缺省 = `'all'`：把内容池里已发布文章发表到新站；`[]` = 先建空站）。**新 `site_site.spa_fallback`** 由模板 `template.json#spaFallback` 读入 |
-| DELETE | /api/site/manage/:id    | 级联修订：物理删该站评论 + 删该站展示关联；**文章/栏目/标签本体保留**。响应改为 `{ unpublishedArticles, deletedComments, recycledRoot }`（原 `deletedArticles` 已废弃） |
+| 方法   | 路径                 | 变化                                                                                                                                                                    |
+| ------ | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | /api/site/manage     | body 新增 `publishArticleIds?: 'all'                                                                                                                                    | number[]`（缺省 = `'all'`：把内容池里已发布文章发表到新站；`[]`= 先建空站）。**新`site_site.spa_fallback`** 由模板 `template.json#spaFallback` 读入 |
+| DELETE | /api/site/manage/:id | 级联修订：物理删该站评论 + 删该站展示关联；**文章/栏目/标签本体保留**。响应改为 `{ unpublishedArticles, deletedComments, recycledRoot }`（原 `deletedArticles` 已废弃） |
 
 ### 14.4 删除用户预检（修改既有）
 
@@ -1014,11 +1016,11 @@ content 超 500 → 40001；评论不存在 → 40110；跨站/非属主 → 401
 
 ### 14.5 开放层（`/api/open/{slug}/**`，D76/R76）
 
-| 方法 | 路径                                   | 口径                                                                                          |
-| ---- | -------------------------------------- | --------------------------------------------------------------------------------------------- |
-| GET  | /api/open/{slug}/api/articles          | 只出 `site_article_publish` 中本站 + `status=1` 的文章；排序 **`is_top desc, published_at desc`** |
-| GET  | /api/open/{slug}/api/columns           | 只出 `site_column_display` 中本站的栏目；`articleCount` 只计**已发表到本站**的文章             |
-| GET  | /api/open/{slug}/api/tags              | 跟随文章：只出现在本站已有文章引用到的标签（无标签文章 → 空数组，属正常）                     |
+| 方法 | 路径                          | 口径                                                                                              |
+| ---- | ----------------------------- | ------------------------------------------------------------------------------------------------- |
+| GET  | /api/open/{slug}/api/articles | 只出 `site_article_publish` 中本站 + `status=1` 的文章；排序 **`is_top desc, published_at desc`** |
+| GET  | /api/open/{slug}/api/columns  | 只出 `site_column_display` 中本站的栏目；`articleCount` 只计**已发表到本站**的文章                |
+| GET  | /api/open/{slug}/api/tags     | 跟随文章：只出现在本站已有文章引用到的标签（无标签文章 → 空数组，属正常）                         |
 
 ### 14.6 静态资源回退链（`/api/open/{slug}/**`，D77/R78）
 
@@ -1028,23 +1030,23 @@ content 超 500 → 40001；评论不存在 → 40110；跨站/非属主 → 401
 
 ### 14.7 AI 工具契约变化（R77，工具总数 28 不变）
 
-| 工具                   | parameters 变化                                                     | 语义变化                                                                                              |
-| ---------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| create_site_article    | 加 `siteIds?: number[]`                                             | status=0 可免选站（仅入内容池）；status=1 必须能确定发表站点（slug 或 siteIds），否则回喂站点清单 40101 |
-| update_site_article    | 加 `siteIds?: number[]`                                             | siteIds 提供即整体替换（空数组 = 全站下架）；slug 由必选降为可选（传了才校验「已发表到该站」）        |
-| publish_site_article   | slug 降为可选                                                       | 上架且零发表站时，确认卡与返回值带警示行（「上架后任何站点都看不到它」）                              |
-| list_site_articles     | 站点降为筛选                                                        | 列表为用户内容池口径，返回项带 `sites`                                                                |
-| read_site_article      | slug 降为可选                                                       | 校验由「属于该站」改为「已发表到该站」（未发表 → 40400 并提示）                                       |
-| ensure_site_column / ensure_site_tags | 去站点参数                                               | 栏目/标签用户级                                                                                       |
-| delete_site            | 无                                                                  | 确认卡改口径：「下架 N 篇 + 删评论 M 条」，返回 `{ unpublishedArticles, deletedComments, ... }`        |
+| 工具                                  | parameters 变化         | 语义变化                                                                                                |
+| ------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------- |
+| create_site_article                   | 加 `siteIds?: number[]` | status=0 可免选站（仅入内容池）；status=1 必须能确定发表站点（slug 或 siteIds），否则回喂站点清单 40101 |
+| update_site_article                   | 加 `siteIds?: number[]` | siteIds 提供即整体替换（空数组 = 全站下架）；slug 由必选降为可选（传了才校验「已发表到该站」）          |
+| publish_site_article                  | slug 降为可选           | 上架且零发表站时，确认卡与返回值带警示行（「上架后任何站点都看不到它」）                                |
+| list_site_articles                    | 站点降为筛选            | 列表为用户内容池口径，返回项带 `sites`                                                                  |
+| read_site_article                     | slug 降为可选           | 校验由「属于该站」改为「已发表到该站」（未发表 → 40400 并提示）                                         |
+| ensure_site_column / ensure_site_tags | 去站点参数              | 栏目/标签用户级                                                                                         |
+| delete_site                           | 无                      | 确认卡改口径：「下架 N 篇 + 删评论 M 条」，返回 `{ unpublishedArticles, deletedComments, ... }`         |
 
 ### 14.8 编号登记
 
-| 系列      | 本期使用    | 说明                                                                                   |
-| --------- | ----------- | -------------------------------------------------------------------------------------- |
-| 决策      | D73~~D78    | 见 `docs/P7/PRD-P7-STORY-DEMAND.md`                                                     |
-| 需求      | R75~~R78    | 同上                                                                                   |
-| 任务      | T83~~T87    | 见 PROGRESS「P7 任务拆解」                                                              |
-| 错误码    | +1          | **40120**（删除用户仍有站点）；复用 40001/40101/40105/40119/40400                       |
-| HTTP 端点 | +2          | `PUT /api/site/article/:id/sites`、`PUT /api/site/column/:id/sites`                      |
-| AI 工具   | 28（不变）  | 7 个 CMS 工具签名调整；`pnpm check:ai` 16/16                                            |
+| 系列      | 本期使用   | 说明                                                                |
+| --------- | ---------- | ------------------------------------------------------------------- |
+| 决策      | D73~~D78   | 见 `docs/P7/PRD-P7-STORY-DEMAND.md`                                 |
+| 需求      | R75~~R78   | 同上                                                                |
+| 任务      | T83~~T87   | 见 PROGRESS「P7 任务拆解」                                          |
+| 错误码    | +1         | **40120**（删除用户仍有站点）；复用 40001/40101/40105/40119/40400   |
+| HTTP 端点 | +2         | `PUT /api/site/article/:id/sites`、`PUT /api/site/column/:id/sites` |
+| AI 工具   | 28（不变） | 7 个 CMS 工具签名调整；`pnpm check:ai` 16/16                        |
