@@ -81,6 +81,13 @@
 - T92 两工具**零业务复写**：经 `SiteFacade` 复用 REST 同一实现；`format_site_article` 明确「不返回 diff 视图」，要求模型自行核对或复述 `stats.rules`。
 - T94 的 `spaFallback` **只允许两个值**（DTO 收口），避免任意路径造成越权读文件；`NULL` = 关闭 = 与 P7 前行为完全一致（不变量）。
 - T93 快照纯前端（D80）：`localStorage` 不可用时静默降级为仅内存，功能不报错。
+- **T92 实测修订（AI 冒烟发现）**：`import_site_article` 初版只收 `fileId`，而 `list_cloud_files` 按设计只回 `path`（不回 id）→ 模型列完目录无法喂参（实测连调 3 次后卡住）；已补 `path` 寻址（`CloudFacade.readTextFileByPath` 复用 byId 校验链 + `SiteFacade` 双寻址 + `article.service` 抽出 `importFromBytes` 单一解析链），`fileId` 保留、REST 契约零改动。
+
+**AI / 前端实测记录（2026-09-19，本机 Docker + DeepSeek + agent-browser）**
+
+- AI 工具：`format_site_article`（`ai_tool_call` #118）与 `import_site_article`（#124）均 `executed`；模型行为符合 R79——复述命中规则、如实说明未命中项、不假装 diff、只解析不落库、默认草稿待用户确认；
+- T93（浏览器）：一键排版 → diff 预览 → 应用后工具栏出现「撤销排版」→ 点击即回退正文、按钮消失、`localStorage` 快照被消费；
+- T94（浏览器）：站点设置开关可开可关；旧 hash 模板站点开启时命中「需重新应用模板」确认提示，开启后提示常驻，关闭后 `/article/27` 恢复 40400。
 
 **遗留 / 注意**
 

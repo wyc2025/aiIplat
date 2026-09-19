@@ -1932,10 +1932,15 @@ readTextFileById(userId, fileId, { exts, maxBytes, purpose })
 
 两工具均**只解析/排版、不落库、不出确认卡**（read 级），复用 P8 已落地的纯函数模块（零业务复写）：
 
-| 工具                  | perms                 | 入参                      | 返回                                                                          | 复用链                                                                           |
-| --------------------- | --------------------- | ------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `import_site_article` | `site:article:create` | `{ fileId }`              | `title / contentMd / summary / matchedTags / unmatchedTags / warnings / meta` | `SiteFacade.importArticle` → `articleService.importFromFile`（与 REST 同一实现） |
-| `format_site_article` | `site:article:update` | `{ contentMd, options? }` | `{ contentMd, changed, stats }`                                               | `SiteFacade.formatArticle` → `articleService.formatContent`                      |
+| 工具                  | perms                 | 入参                                          | 返回                                                                          | 复用链                                                                                 |
+| --------------------- | --------------------- | --------------------------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `import_site_article` | `site:article:create` | `{ path?, fileId? }`（二选一，**path 优先**） | `title / contentMd / summary / matchedTags / unmatchedTags / warnings / meta` | `SiteFacade.importArticle` → `importFromPath` / `importFromFile`（与 REST 同一解析链） |
+| `format_site_article` | `site:article:update` | `{ contentMd, options? }`                     | `{ contentMd, changed, stats }`                                               | `SiteFacade.formatArticle` → `articleService.formatContent`                            |
+
+> **实测修订（2026-09-19 AI 冒烟）**：初版只收 `fileId`，但 `list_cloud_files` 按 P5 设计只回 `name/path`、**不回 id**——
+> 模型列完目录也喂不进参数（实测连调 3 次目录后卡住）。故补 **path 寻址**：`CloudFacade.readTextFileByPath`
+> （逐段下行解析后**复用 `readTextFileById`** 的白名单/上限/读盘链，无第二份实现）+ `SiteFacade.importArticle` 双寻址 +
+> `article.service` 抽出 `importFromBytes` 单一解析链；`fileId` 保留不变（REST `POST /site/article/import` 契约零改动）。
 
 - 归组 `siteCms`；`KEYWORD_TO_GROUPS` 文章词根补 `导入|排版|format`；
 - 能力清单：两工具分别挂到既有能力行 `site.article.create` / `site.article.update`（perms 与工具完全一致，R69）；**工具总数 30**；

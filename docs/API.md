@@ -1009,10 +1009,14 @@ content 超 500 → 40001；评论不存在 → 40110；跨站/非属主 → 401
 
 ### 16.2 AI 工具契约（新增 2 个，R79）
 
-| 工具                  | perms                 | 风险 | 入参                      | 出参                                                            |
-| --------------------- | --------------------- | ---- | ------------------------- | --------------------------------------------------------------- |
-| `import_site_article` | `site:article:create` | read | `{ fileId: number }`      | 同 §15 import 出参（解析结果，**不落库**）                      |
-| `format_site_article` | `site:article:update` | read | `{ contentMd, options? }` | 同 §15 format 出参（`contentMd / changed / stats`，**不落库**） |
+| 工具                  | perms                 | 风险 | 入参                                      | 出参                                                            |
+| --------------------- | --------------------- | ---- | ----------------------------------------- | --------------------------------------------------------------- |
+| `import_site_article` | `site:article:create` | read | `{ path?, fileId? }`（二选一，path 优先） | 同 §15 import 出参（解析结果，**不落库**）                      |
+| `format_site_article` | `site:article:update` | read | `{ contentMd, options? }`                 | 同 §15 format 出参（`contentMd / changed / stats`，**不落库**） |
+
+> `import_site_article` 的 `path` 口径（P9 实测修订）：云盘相对路径（如 `products/README.txt`），由 `list_cloud_files` 取得——
+> 该工具按 P5 设计只回 `path` 不回 `id`，故 AI 链路以 **path 为主**；`fileId` 保留与 REST 一致（**REST 契约无变化**）。
+> 两条寻址共用同一解析链（导入白名单 / ≤2MB / 编码探测 / 标签只匹配不创建 / 错误码 30001·30012·30013·40001）。
 
 - 归组 `siteCms`；关键词表补 `导入｜排版｜format`；能力清单挂既有能力行 `site.article.create` / `site.article.update`（perms 与工具一致，R69）；
 - `format_site_article` **不提供 diff 视图**：模型须自行核对或向用户复述 `stats.rules`，不得声称有可视化对比；两工具均说明「是否采用由用户确认后再走 create/update 落库」；
