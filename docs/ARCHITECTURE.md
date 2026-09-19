@@ -855,6 +855,7 @@ main.ts 增补：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 函数�
 | capability.manifest.ts | api/src/modules/ai/chat | **能力清单常量表**（17 行：能力名 + 注入权限 + 一行文案 + 覆盖工具；`pickCapabilityRows` 按权限过滤 / `renderCapabilityList` 渲染）；与工具注册表三方同源，机械核查 | 已建（T77） |
 | tool.groups.ts | api/src/modules/ai/tool | **工具分组与确定性路由**（TOOL_GROUPS 6 组 28 工具 / KEYWORD_TO_GROUPS 词根 / resolveToolGroups / checkToolGroupCoverage 孤儿与陈旧校验） | 已建（T77） |
 | check-ai-prompt（`pnpm check:ai`） | apps/api/scripts/check-ai-prompt.ts | 手册分段三阈值 + 工具归组全覆盖 + 能力清单同源 + 路由样例机械核查（失败退出码 1；`pnpm --filter @iplat/api check:ai`） | 已建（T77） |
+| smoke-ai-tools（`pnpm smoke:ai`） | apps/api/scripts/smoke-ai-tools.ts | **AI 工具链路冒烟**（真实对话 → `ai_tool_call` 落库断言：F 排版 / I 导入；退出码 0 全过 / 1 失败 / 2 前置不满足；单用例重试 3 次 + 3s 间隔）；「何时必跑」清单见 PROGRESS「AI 冒烟清单」 | 已建（T95） |
 | SiteFacade 评论层扩展（P6） | api/src/modules/site/facade | listComments / auditComments（≤20 逐条独立成败）/ replyComment / getCommentBrief（全部收 siteId；SiteFacadeModule 增 imports SiteCommentModule） | 已建（T78） |
 | SiteFacade.resolveCoverPath（P6） | api/src/modules/site/facade | 封面判定对象（R72：media/ 前缀 + 真实图片行 + 可公开访问 + 扩展名白名单；失败附 media/ 可用图片前 10 条） | 已建（T79） |
 | AI 评论三件套 | api/src/modules/ai/tool/tools | list_site_comments / audit_site_comments / reply_site_comment（D69 代审 + 代回；跨站评论 40119） | 已建（T78） |
@@ -1946,7 +1947,7 @@ readTextFileById(userId, fileId, { exts, maxBytes, purpose })
 - 能力清单：两工具分别挂到既有能力行 `site.article.create` / `site.article.update`（perms 与工具完全一致，R69）；**工具总数 30**；
 - **口径纪律（R79）**：`format_site_article` **不返回 diff 视图**——description 明确要求模型自行核对或复述 `stats.rules`，不得声称有可视化对比；
   两工具均提示「是否采用由用户确认后再走 `create_site_article` / `update_site_article` 落库」；
-- 核查：`pnpm check:ai` **16/16**（工具 30 / 能力清单 804/1200 / 通用版 872/1000 / 合注 1727/2000）。
+- 核查：`pnpm check:ai` **16/16**（工具 30 / 能力清单 804/1200 / 通用版 970/1000 / 合注 1825/2000）；真实链路 `pnpm smoke:ai` 实测 F/I 两项均 `executed`（见 §25.6）。
 
 ### 25.4 T94 站点 SPA 回退开关（D81/R81）
 
@@ -1970,7 +1971,8 @@ readTextFileById(userId, fileId, { exts, maxBytes, purpose })
 
 - 接口三场景逻辑链逐条核对（§25.2 C1）：`/about`（真实目录无斜杠）→ 301；`/article/9`（虚拟路径）→ 回退 200；`/missing.js`（带扩展名）→ 40400；
 - 存量站点（`spa_fallback IS NULL`）行为零变化；
-- `pnpm --filter @iplat/api check:ai` 16/16；`tsc` / `vue-tsc` / ESLint 零错。
+- `pnpm --filter @iplat/api check:ai` 16/16；`tsc` / `vue-tsc` / ESLint 零错；
+- **可重跑冒烟（T95）**：`pnpm --filter @iplat/api smoke:ai` —— 真实对话 + `ai_tool_call` 落库断言（本轮实测 F #134 / I #135 均 `executed`）；「改了工具链就必须跑」的触发条件与判据见 PROGRESS「AI 冒烟清单」。
 
 ## 20. AI 能力扩展（P5）：云盘/CMS/生命周期工具 + 预算动态化（自 docs/P5/ARCHITECTURE-P5-增补.md 并入；增补文档保留为历史细节参考）
 
