@@ -10,6 +10,7 @@ import {
   type SubtreeEntry,
 } from '../../cloud/facade/cloud-facade.service'
 import type { CreateArticleDto, UpdateArticleDto, UpdateArticleStatusDto } from '../article/dto/article.dto'
+import type { FormatOptionsDto } from '../article/dto/article-tools.dto'
 // 注意：以下 Service 必须为值导入（Nest 需构造函数实参做 DI；type-only 导入会被擦除成 Function）
 import { SiteArticleService, ArticleQueryDto } from '../article/article.service'
 import { SiteColumnService } from '../column/column.service'
@@ -585,6 +586,23 @@ export class SiteFacade {
   ): Promise<Array<{ id: string; name: string; slug: string; sort: number }>> {
     const result = await this.columnService.setSites(userId, id, { sites })
     return result.sites
+  }
+
+  /**
+   * 从云盘文件导入解析（P9 T92 / D79）：**只解析不落库**。
+   * 委托 REST 同款实现（`POST /site/article/import` → articleService.importFromFile），
+   * 工具层零业务逻辑复写；文件归属校验与编码探测均在域内完成。
+   */
+  async importArticle(userId: bigint, fileId: bigint) {
+    return this.articleService.importFromFile(userId, { fileId: fileId.toString() })
+  }
+
+  /**
+   * 一键排版（P9 T92 / D79）：纯文本变换、**不落库**，与 REST `POST /site/article/format` 同源。
+   * 返回 `{ contentMd, changed, stats }`；是否采用由用户确认后走 updateArticle 落库。
+   */
+  async formatArticle(contentMd: string, options?: FormatOptionsDto) {
+    return this.articleService.formatContent(options ? { contentMd, options } : { contentMd })
   }
 
   /**

@@ -92,4 +92,17 @@ export class UpdateSiteDto {
   @IsInt()
   @IsIn([0, 1], { message: 'commentAudit 仅允许 0 / 1' })
   commentAudit?: number
+
+  /**
+   * SPA 回退入口（P9 T94 / D81 / R81）：`'index.html'` = 开启（无扩展名路径回退到该文件）、
+   * `null` = 关闭（保持 P7 前行为）；其他值一律 40001。只允许这两个值，避免任写路径造成越权读文件。
+   */
+  @ApiPropertyOptional({
+    description: "SPA 回退入口：'index.html' 开启 / null 关闭",
+    nullable: true,
+    example: 'index.html',
+  })
+  @IsOptional()
+  @IsIn(['index.html', null], { message: "spaFallback 仅允许 'index.html' 或 null" })
+  spaFallback?: string | null
 }

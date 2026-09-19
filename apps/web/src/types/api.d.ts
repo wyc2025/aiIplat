@@ -341,6 +341,8 @@ export interface SiteSiteInfo {
   status: number
   /** 评论审核开关：1 开 / 0 关 */
   commentAudit: number
+  /** SPA 回退入口：'index.html' = 开启（无扩展名地址回退到该文件）/ null = 关闭（P9 T94 D81） */
+  spaFallback: string | null
   /** 开放入口完整路径（/api/open/{slug}/） */
   siteUrl: string
   rootFolderId: string

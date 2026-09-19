@@ -92,14 +92,14 @@ export const CAPABILITY_MANIFEST: readonly CapabilityRow[] = [
   {
     key: 'site.article.create',
     perms: 'site:article:create',
-    text: '代写文章：新建文章默认草稿（用户明示「直接发布」才公开），可指定栏目、标签、封面；草稿可不选站（只进内容池），发布需明确发表站点（siteIds，可多站）（需确认）。',
-    tools: ['create_site_article'],
+    text: '代写文章：新建文章默认草稿（用户明示「直接发布」才公开），可指定栏目、标签、封面；可从云盘 md/txt 文件导入解析后入草稿；草稿可不选站（只进内容池），发布需明确发表站点（siteIds，可多站）（需确认）。',
+    tools: ['create_site_article', 'import_site_article'],
   },
   {
     key: 'site.article.update',
     perms: 'site:article:update',
-    text: '改写文章：更新已有文章的标题、正文、栏目、标签；siteIds 可整体替换发表站点（空数组 = 全站下架，文章本体保留）（需确认）。',
-    tools: ['update_site_article'],
+    text: '改写文章：更新已有文章的标题、正文、栏目、标签；可对正文一键排版（只排版不落库，确认后再更新）；siteIds 可整体替换发表站点（空数组 = 全站下架，文章本体保留）（需确认）。',
+    tools: ['update_site_article', 'format_site_article'],
   },
   {
     key: 'site.article.publish',

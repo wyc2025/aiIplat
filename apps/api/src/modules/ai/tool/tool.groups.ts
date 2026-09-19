@@ -27,7 +27,7 @@ export const TOOL_GROUPS: Record<ToolGroupName, readonly string[]> = {
   system: ['get_online_users', 'kick_user', 'search_users', 'list_roles'],
   /** 站点文件（站点目录内的页面/样式/脚本，影响线上站点） */
   siteFile: ['list_site_files', 'read_site_file', 'write_site_files'],
-  /** 站点 CMS（文章/栏目/标签 + 评论，含 P6 新增评论三件套） */
+  /** 站点 CMS（文章/栏目/标签 + 评论，含 P6 评论三件套与 P9 导入/排版两件套） */
   siteCms: [
     'list_site_articles',
     'read_site_article',
@@ -39,6 +39,9 @@ export const TOOL_GROUPS: Record<ToolGroupName, readonly string[]> = {
     'list_site_comments',
     'audit_site_comments',
     'reply_site_comment',
+    // P9 T92（D79/R79）：只解析/排版、不落库的 read 级能力
+    'import_site_article',
+    'format_site_article',
   ],
   /** 站点生命周期（新建 / 编辑 / 删除站点） */
   siteLifecycle: ['create_site', 'update_site', 'delete_site'],
@@ -61,8 +64,8 @@ export const ALL_TOOL_GROUPS: readonly ToolGroupName[] = [
  * 维护纪律：新增能力时同步补词根，宁可轻微高命中（多下发几个工具）也不漏命中。
  */
 export const KEYWORD_TO_GROUPS: Record<string, readonly ToolGroupName[]> = {
-  // 站点 CMS：文章/栏目/标签 + 评论（P6 扩充评论词根）
-  '文章|博文|博客|栏目|分类|标签|草稿|摘要|正文|标题|代写|写篇|写一篇|投稿': ['siteCms'],
+  // 站点 CMS：文章/栏目/标签 + 评论（P6 扩充评论词根；P9 补导入/排版词根）
+  '文章|博文|博客|栏目|分类|标签|草稿|摘要|正文|标题|代写|写篇|写一篇|投稿|导入|排版|format': ['siteCms'],
   '评论|留言|待审|审核|通过|驳回|回复|回评': ['siteCms'],
   // 站点文件：站点目录内的页面/样式/脚本
   '站点文件|页面|样式|样式表|网页|html|css|js|脚本|模板页|首页文件': ['siteFile'],

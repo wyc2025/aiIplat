@@ -204,6 +204,7 @@
       top="4vh"
       :close-on-click-modal="false"
       destroy-on-close
+      @closed="onEditorClosed"
     >
       <el-form
         ref="formRef"
@@ -449,6 +450,16 @@
               >
                 一键排版
               </el-button>
+              <!-- P9 T93（D80/R80）：应用排版后出现，把排版前正文放回编辑器；保存/关闭编辑器后消失 -->
+              <el-button
+                v-if="hasFormatSnapshot"
+                link
+                type="warning"
+                size="small"
+                @click="undoFormat"
+              >
+                撤销排版
+              </el-button>
             </span>
             <el-radio-group
               v-model="form.status"
@@ -556,7 +567,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { confirmDialog } from '@/utils/confirm'
 import { ArrowDown, Plus, Refresh } from '@element-plus/icons-vue'
@@ -807,6 +818,10 @@ const formatting = ref(false)
 const diffVisible = ref(false)
 const diffBefore = ref('')
 const diffAfter = ref('')
+/** 是否存在可撤销的排版快照（P9 T93/R80：应用排版后出现「撤销排版」按钮） */
+const hasFormatSnapshot = ref(false)
+/** 内存快照（localStorage 不可用时功能仍可用，只损失「刷新后可撤销」） */
+let fmtSnapshotMemory: { contentMd: string; ts: number } | null = null
 
 /** 导入入口：从云盘选 / 上传本地文件 */
 function onImportCommand(command: string | number | object): void {
@@ -922,11 +937,80 @@ async function runFormat(): Promise<void> {
   }
 }
 
-/** 应用排版结果（用户已在只读 diff 里确认过） */
+/** 应用排版结果（用户已在只读 diff 里确认过）：先把排版前正文落成快照，再覆盖（P9 T93/R80） */
 function applyFormat(): void {
+  writeFmtSnapshot(form.contentMd)
   form.contentMd = diffAfter.value
   diffVisible.value = false
-  ElMessage.success('已应用排版（Ctrl+Z 可撤销）')
+  ElMessage.success('已应用排版（可点「撤销排版」或 Ctrl+Z 回退）')
+}
+
+// ========== 排版前快照（P9 T93 / D80 / R80）：纯前端，不进后端与 DB ==========
+
+/** 快照键：按文章维度（新建统一 'new'）；只留最近一份（不做版本历史） */
+const FMT_SNAPSHOT_PREFIX = 'iplat:fmt-snapshot:'
+
+function fmtSnapshotKey(): string {
+  return `${FMT_SNAPSHOT_PREFIX}${editingId.value || 'new'}`
+}
+
+/**
+ * 写快照（应用排版时调用，覆盖旧份）。
+ * localStorage 写入失败（隐私模式 / 配额满）静默降级为仅内存快照——功能不报错。
+ */
+function writeFmtSnapshot(contentMd: string): void {
+  fmtSnapshotMemory = { contentMd, ts: Date.now() }
+  hasFormatSnapshot.value = true
+  try {
+    localStorage.setItem(fmtSnapshotKey(), JSON.stringify(fmtSnapshotMemory))
+  } catch {
+    // 仅内存快照
+  }
+}
+
+/** 读快照（内存优先，其次 localStorage；都没有或数据损坏 → null） */
+function readFmtSnapshot(): { contentMd: string; ts: number } | null {
+  if (fmtSnapshotMemory) return fmtSnapshotMemory
+  try {
+    const raw = localStorage.getItem(fmtSnapshotKey())
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as { contentMd?: unknown; ts?: unknown }
+    if (typeof parsed.contentMd === 'string') {
+      return { contentMd: parsed.contentMd, ts: typeof parsed.ts === 'number' ? parsed.ts : 0 }
+    }
+  } catch {
+    // 读取/解析失败按「无快照」处理
+  }
+  return null
+}
+
+/** 清快照（保存成功 / 关闭编辑器 / 离开页面时调用） */
+function clearFmtSnapshot(): void {
+  fmtSnapshotMemory = null
+  hasFormatSnapshot.value = false
+  try {
+    localStorage.removeItem(fmtSnapshotKey())
+  } catch {
+    // 忽略
+  }
+}
+
+/** 撤销排版：把快照正文放回编辑器（原生撤销栈不受影响）；快照消费一次即清除 */
+function undoFormat(): void {
+  const snapshot = readFmtSnapshot()
+  if (!snapshot) {
+    hasFormatSnapshot.value = false
+    ElMessage.warning('排版前的快照已不可用')
+    return
+  }
+  form.contentMd = snapshot.contentMd
+  clearFmtSnapshot()
+  ElMessage.success('已恢复排版前的正文')
+}
+
+/** 编辑器关闭（取消 / 保存 / ESC 均触发）：快照与按钮一并消失（R80「保存或离开页面后消失」） */
+function onEditorClosed(): void {
+  clearFmtSnapshot()
 }
 
 function openCreate() {
@@ -941,6 +1025,8 @@ function openCreate() {
   form.coverPath = ''
   form.contentMd = ''
   form.status = 0
+  // R80 兜底：刷新页面后 localStorage 里的快照仍在 → 重新打开编辑器时恢复「撤销排版」入口
+  hasFormatSnapshot.value = readFmtSnapshot() !== null
   editorVisible.value = true
 }
 
@@ -957,6 +1043,8 @@ async function openEdit(row: SiteArticleItem) {
     form.coverPath = detail.coverPath ?? ''
     form.contentMd = detail.contentMd
     form.status = detail.status
+    // R80 兜底：与本文章键匹配的未消费快照可继续撤销（如刷新页面后回到编辑器）
+    hasFormatSnapshot.value = readFmtSnapshot() !== null
     editorVisible.value = true
   } catch {
     // 拦截器提示（40109）
@@ -991,6 +1079,8 @@ async function submit() {
       if (form.siteIds.length) await setArticleSites(Number(created.id), sitePayload)
       ElMessage.success(form.status === 1 ? '已发布' : '已存草稿')
     }
+    // R80：保存成功后快照即失效（正文已落库，无需再「撤销排版」）
+    clearFmtSnapshot()
     editorVisible.value = false
     reload()
   } catch {
@@ -1049,6 +1139,12 @@ async function openPreview(row: SiteArticleItem) {
     previewLoading.value = false
   }
 }
+
+// 离开文章页：清掉本次编辑会话的排版快照（R80「离开页面后消失」）；浏览器刷新不走此钩子，
+// 故刷新场景下快照仍留在 localStorage，重新打开编辑器时按钮会回来（这正是双层快照的兜底价值）
+onBeforeUnmount(() => {
+  clearFmtSnapshot()
+})
 
 onMounted(async () => {
   // P7：站点只用于上传落点与站点筛选，不再决定列表内容

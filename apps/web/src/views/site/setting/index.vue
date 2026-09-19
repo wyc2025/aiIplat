@@ -86,6 +86,24 @@
             />
             <span class="v-ss-tip">开：访客评论需审核后展示；关：直接展示</span>
           </el-descriptions-item>
+          <!-- SPA 回退开关（P9 T94 / D81 / R81）：按站生效，NULL = 关 = 与 P7 前行为一致 -->
+          <el-descriptions-item label="SPA 回退">
+            <el-switch
+              v-permission="'site:site:manage'"
+              :model-value="site.spaFallback === 'index.html'"
+              :loading="spaToggling"
+              @change="toggleSpaFallback"
+            />
+            <span class="v-ss-tip">
+              开：无扩展名地址（如 /article/9）回退到 index.html，适合前端路由模板；关：只有真实存在的文件可访问
+            </span>
+            <div
+              v-if="site.spaFallback === 'index.html'"
+              class="v-ss-tip"
+            >
+              若模板仍是旧版 hash 路由，需在下方「模板库」重新应用模板并刷新地址后才会生效
+            </div>
+          </el-descriptions-item>
           <el-descriptions-item label="创建时间">
             {{ formatTime(site.createdAt) }}
           </el-descriptions-item>
@@ -237,6 +255,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { formatTime } from '@/utils/format'
 import SiteSwitcher from '@/components/SiteSwitcher/index.vue'
 import { updateSite, listTemplates, applyTemplate } from '@/api/site/site'
+import { listFiles, previewFileBlob } from '@/api/cloud/file'
 import { useSiteStore } from '@/stores/site'
 import type { SiteTemplateItem } from '@/types/api'
 
@@ -337,6 +356,61 @@ async function toggleCommentAudit() {
   await updateSite(site.value.id, { commentAudit: next })
   await store.load()
   ElMessage.success(next === 1 ? '已开启评论审核' : '已关闭评论审核（新评论直接展示）')
+}
+
+// ========== SPA 回退开关（P9 T94 / D81 / R81） ==========
+const spaToggling = ref(false)
+
+/**
+ * 切换 SPA 回退：写入 site_site.spa_fallback（'index.html' = 开 / null = 关）。
+ * 后端 DTO 已收口为这两个值（其他值 40001），并在变更后清 site:resolve 缓存，无需重启即生效。
+ */
+async function toggleSpaFallback(value: string | number | boolean) {
+  if (!site.value) return
+  const enabling = value === true
+  if (enabling) {
+    // R81：旧 hash 路由模板即使开启回退也不会生效，需用户显式「重新应用模板」——
+    // 这里只提示、不自动重应用（重应用会覆盖站点的自定义修改）
+    const legacy = await detectLegacyTemplate()
+    if (legacy) {
+      const go = await confirmDialog(
+        '当前站点模板疑似旧版（hash 路由）：开启回退后，需重新应用模板并刷新地址才会生效。仍要开启？',
+        '提示',
+        { type: 'warning', confirmButtonText: '仍要开启' },
+      )
+      if (!go) return
+    }
+  }
+  spaToggling.value = true
+  try {
+    await updateSite(site.value.id, { spaFallback: enabling ? 'index.html' : null })
+    await store.load()
+    ElMessage.success(enabling ? '已开启 SPA 回退' : '已关闭 SPA 回退（无扩展名地址恢复 404）')
+  } catch {
+    // 拦截器提示
+  } finally {
+    spaToggling.value = false
+  }
+}
+
+/**
+ * 探测站点模板是否旧版（R81）：读站点根 app.js——新版模板（D78）用 `history.pushState` 做站内跳转，
+ * 并从 location.pathname 反推 `<base>`；P7 之前的 hash 路由版没有该调用。
+ * 读不到（无权限 / 文件缺失 / 解析失败）一律按「非旧版」处理，不打断开关操作。
+ */
+async function detectLegacyTemplate(): Promise<boolean> {
+  const rootId = site.value?.rootFolderId
+  if (!rootId) return false
+  try {
+    const list = await listFiles(Number(rootId))
+    const appJs = list.list.find((item) => item.name === 'app.js' && !item.isDir)
+    if (!appJs) return false
+    const blob = await previewFileBlob(Number(appJs.id))
+    const text = await blob.text()
+    return !text.includes('pushState')
+  } catch {
+    return false
+  }
 }
 
 // ========== 模板库（P4b T44） ==========

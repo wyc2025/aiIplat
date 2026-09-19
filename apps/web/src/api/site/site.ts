@@ -32,7 +32,7 @@ export const createSite = (data: {
 /** 站点详情（非属主 40119） */
 export const getSite = (id: string | number) => get<SiteSiteInfo>(`/site/manage/${id}`)
 
-/** 编辑站点（title/description/slug/status/commentAudit，提供即更新） */
+/** 编辑站点（title/description/slug/status/commentAudit/spaFallback，提供即更新） */
 export const updateSite = (
   id: string | number,
   data: {
@@ -41,6 +41,8 @@ export const updateSite = (
     slug?: string
     status?: number
     commentAudit?: number
+    /** SPA 回退开关（P9 T94）：'index.html' = 开启 / null = 关闭；其他值后端 40001 */
+    spaFallback?: string | null
   },
 ) => put<SiteSiteInfo>(`/site/manage/${id}`, data)
 

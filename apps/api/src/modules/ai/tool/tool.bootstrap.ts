@@ -39,9 +39,12 @@ import { createUpdateSiteTool } from './tools/update-site.tool'
 import { createAuditSiteCommentsTool } from './tools/audit-site-comments.tool'
 import { createListSiteCommentsTool } from './tools/list-site-comments.tool'
 import { createReplySiteCommentTool } from './tools/reply-site-comment.tool'
+// P9 T92：文章导入 / 排版两件套（read 级：只解析/排版、不落库、不出确认卡）
+import { createFormatSiteArticleTool } from './tools/format-site-article.tool'
+import { createImportSiteArticleTool } from './tools/import-site-article.tool'
 
 /**
- * 工具装配器：注入各域暴露的门面 Service，在模块启动时把注册表内全部工具（P6 起 28 个）注册到 ToolRegistry。
+ * 工具装配器：注入各域暴露的门面 Service，在模块启动时把注册表内全部工具（P9 起 30 个）注册到 ToolRegistry。
  * 新增工具 = tools/ 下加一个工厂 + 在此处 register + 在 tool.groups.ts 归组（R70）。
  * 域门面纪律（见 ARCHITECTURE §12.3）：handler 只注入域 exports 的 Service，零跨域 import 内部实现——
  * 站点系列（文件三件套 + create_site + CMS 七件套 + 评论三件套 + 生命周期两件套）只注入 SiteFacade；
@@ -96,6 +99,9 @@ export class ToolBootstrap implements OnModuleInit {
     this.registry.register(createListSiteCommentsTool(this.siteFacade))
     this.registry.register(createAuditSiteCommentsTool(this.siteFacade))
     this.registry.register(createReplySiteCommentTool(this.siteFacade))
+    // P9 T92：文章导入 + 排版两件套（D79/R79：包装 P8 纯函数，read 级，工具内零业务复写）
+    this.registry.register(createImportSiteArticleTool(this.siteFacade))
+    this.registry.register(createFormatSiteArticleTool(this.siteFacade))
 
     // P6 T77：工具归组校验（R70）——孤儿工具会让组路由漏发工具，启动即告警
     this.assertToolGroups()

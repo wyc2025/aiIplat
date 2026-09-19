@@ -36,6 +36,8 @@ export interface SiteView {
   description: string | null
   status: number
   commentAudit: number
+  /** SPA 回退入口（'index.html' = 开启 / null = 关闭；P9 T94 D81） */
+  spaFallback: string | null
   siteUrl: string
   rootFolderId: string
   mediaFolderId: string
@@ -150,7 +152,7 @@ export class SiteManageService {
     }
   }
 
-  /** 编辑站点（标题/描述/slug/状态/评论开关）；变更后主动失效 slug 解析缓存 */
+  /** 编辑站点（标题/描述/slug/状态/评论开关/SPA 回退）；变更后主动失效 slug 解析缓存 */
   async update(userId: bigint, siteId: bigint, dto: UpdateSiteDto) {
     const site = await this.getOwnedSite(userId, siteId)
 
@@ -160,11 +162,14 @@ export class SiteManageService {
       slug?: string
       status?: number
       commentAudit?: number
+      spaFallback?: string | null
     } = {}
     if (dto.title !== undefined) data.title = dto.title
     if (dto.description !== undefined) data.description = dto.description || null
     if (dto.status !== undefined) data.status = dto.status
     if (dto.commentAudit !== undefined) data.commentAudit = dto.commentAudit
+    // P9 T94/R81：SPA 回退开关（仅 'index.html' | null，DTO 已收口）；NULL = 关闭 = 与 P7 前行为一致
+    if (dto.spaFallback !== undefined) data.spaFallback = dto.spaFallback
     if (dto.slug !== undefined && dto.slug !== site.slug) {
       // R11：同创建口径校验（40103/40102，排除自身）
       this.assertSlugValid(dto.slug)
@@ -345,6 +350,7 @@ export class SiteManageService {
       description: string | null
       status: number
       commentAudit: number
+      spaFallback: string | null
       rootFolderId: bigint
       mediaFolderId: bigint
       createTime: Date
@@ -358,6 +364,7 @@ export class SiteManageService {
       description: site.description,
       status: site.status,
       commentAudit: site.commentAudit,
+      spaFallback: site.spaFallback,
       siteUrl: `/api/open/${site.slug}/`,
       rootFolderId: site.rootFolderId.toString(),
       mediaFolderId: site.mediaFolderId.toString(),
