@@ -589,12 +589,15 @@ export class SiteFacade {
   }
 
   /**
-   * 从云盘文件导入解析（P9 T92 / D79）：**只解析不落库**。
-   * 委托 REST 同款实现（`POST /site/article/import` → articleService.importFromFile），
-   * 工具层零业务逻辑复写；文件归属校验与编码探测均在域内完成。
+   * 从云盘文件导入解析（P9 T92 / D79）：**只解析不落库**，工具层零业务复写。
+   * 寻址二选一：`fileId`（REST/前端文件选择器口径）或 `path`（AI 工具惯例——`list_cloud_files` 只回 path）。
    */
-  async importArticle(userId: bigint, fileId: bigint) {
-    return this.articleService.importFromFile(userId, { fileId: fileId.toString() })
+  async importArticle(userId: bigint, locator: { fileId?: bigint; path?: string }) {
+    if (locator.fileId !== undefined) {
+      return this.articleService.importFromFile(userId, { fileId: locator.fileId.toString() })
+    }
+    if (locator.path) return this.articleService.importFromPath(userId, locator.path)
+    throw new BusinessException(ErrorCode.ParamInvalid, '请提供云盘文件的 path 或 fileId')
   }
 
   /**

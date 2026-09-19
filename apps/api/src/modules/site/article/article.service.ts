@@ -20,6 +20,16 @@ import type {
 import type { FormatArticleDto, ImportArticleDto } from './dto/article-tools.dto'
 import type { SiteArticle } from '@prisma/client'
 
+/**
+ * 导入读取口径（P9 T92 修订：REST 的 fileId 入口与 AI 工具的 path 入口**共用同一份**，
+ * 扩展名白名单与体积上限由 site 域下发，cloud 域不硬编码他域口径）。
+ */
+const IMPORT_READ_OPTS = {
+  exts: IMPORT_ALLOWED_EXTS,
+  maxBytes: IMPORT_MAX_BYTES,
+  purpose: '导入文章',
+} as const
+
 /** 文章列表查询（P7 D73：用户级；siteId 降为可选筛选「已发表到该站」） */
 export class ArticleQueryDto extends UserPageQueryDto {
   @ApiPropertyOptional({ description: '按发表站点筛选（可选；不传 = 全部内容池文章）' })
@@ -162,13 +172,24 @@ export class SiteArticleService {
    * **只解析不落库**：结果填入编辑表单，由用户确认后再走常规 create/update。
    */
   async importFromFile(userId: bigint, dto: ImportArticleDto) {
-    const fileId = BigInt(dto.fileId)
-    const file = await this.cloudFacade.readTextFileById(userId, fileId, {
-      exts: IMPORT_ALLOWED_EXTS,
-      maxBytes: IMPORT_MAX_BYTES,
-      purpose: '导入文章',
-    })
+    const file = await this.cloudFacade.readTextFileById(userId, BigInt(dto.fileId), IMPORT_READ_OPTS)
+    return this.importFromBytes(userId, file)
+  }
 
+  /**
+   * 按**云盘相对路径**导入解析（P9 T92 修订）：AI 工具按 path 寻址（`list_cloud_files` 只回 path），
+   * 与 `importFromFile` 共用同一解析链（见 importFromBytes），仅寻址方式不同。
+   */
+  async importFromPath(userId: bigint, path: string) {
+    const file = await this.cloudFacade.readTextFileByPath(userId, path, IMPORT_READ_OPTS)
+    return this.importFromBytes(userId, file)
+  }
+
+  /** 解析链单一实现（fileId / path 两条入口共用）：解析 → 标签匹配 → 组装表单字段（不落库） */
+  private async importFromBytes(
+    userId: bigint,
+    file: { id: string; name: string; ext: string; size: number; content: Buffer },
+  ) {
     let parsed
     try {
       parsed = parseArticleFile(file.content, file.name)

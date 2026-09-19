@@ -878,6 +878,26 @@ export class CloudFacade {
   }
 
   /**
+   * 按**云盘相对路径**读文本（P9 T92 修订）：AI 工具的寻址惯例是 path——
+   * `list_cloud_files` 按设计只回 name/path（不回 id），只收 fileId 的工具模型根本喂不进去。
+   *
+   * 实现：逐段下行解析（≤10 层）拿到文件行后，**直接复用 `readTextFileById`**——
+   * 白名单、体积上限、读盘与错误码（30001/30012/30013）与 REST 导入完全同源，没有第二份实现。
+   */
+  async readTextFileByPath(
+    userId: bigint,
+    path: string,
+    opts: { exts: ReadonlySet<string>; maxBytes: number; purpose?: string },
+  ): Promise<{ id: string; name: string; ext: string; size: number; content: Buffer }> {
+    const segments = this.normalizeUserPath(path)
+    const entry = await this.findEntryByBase(userId, USER_ROOT_ID, segments)
+    if (!entry || entry.isDir === 1) {
+      throw new BusinessException(ErrorCode.CloudFileNotFound, '文件不存在或无权访问')
+    }
+    return this.readTextFileById(userId, entry.id, opts)
+  }
+
+  /**
    * 云盘写文本文件（基点 = 用户云盘根，R64/D22 温和覆盖）：
    * 路径规范（30001）→ 文本白名单（30012）→ 单文件 ≤256KB 文本（30013）→
    * writeFileRaw 全链（mkdir -p / R6 / 同名旧版进回收站 / used 记账 / 配额 30003）。
