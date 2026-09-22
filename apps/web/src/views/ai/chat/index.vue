@@ -113,16 +113,21 @@
           class="v-message-list"
         >
           <div class="v-message-inner">
-            <el-empty
-              v-if="!messages.length && !currentConversationId"
-              description="选择模型，输入消息开始对话"
-              :image-size="90"
-            />
-            <el-empty
-              v-else-if="!messages.length"
-              description="暂无消息"
-              :image-size="90"
-            />
+            <!-- 空状态：统一引导（新会话 vs 空会话复用同一视觉，仅文案不同） -->
+            <div
+              v-if="!messages.length"
+              class="v-message-empty"
+            >
+              <AppLogo :size="56" />
+              <p class="v-empty-title">
+                {{ currentConversationId ? '这个会话还没有消息' : '开始新的对话' }}
+              </p>
+              <p class="v-empty-sub">
+                选择上方模型后输入消息即可提问。<br>
+                点回形针可附加云盘文件或本地文本文件（≤5 个、单个 ≤2MB）。<br>
+                小文件全文注入，大文件由 AI 按需分段读取。
+              </p>
+            </div>
 
             <div
               v-for="msg in messages"
@@ -130,6 +135,20 @@
               class="v-message-row"
               :class="msg.role"
             >
+              <!-- 头像：AI 用平台标（公共组件 AppLogo），用户用本人头像/昵称首字 -->
+              <div class="v-avatar">
+                <AppLogo
+                  v-if="msg.role === 'assistant'"
+                  :size="30"
+                />
+                <el-avatar
+                  v-else
+                  :size="30"
+                  :src="userStore.avatarUrl"
+                >
+                  {{ userInitial }}
+                </el-avatar>
+              </div>
               <div class="v-bubble">
                 <MarkdownView
                   v-if="msg.role === 'assistant'"
@@ -140,6 +159,32 @@
                   class="v-user-text"
                 >
                   {{ msg.content }}
+                </div>
+                <!-- P10 R86/R87：附件行（模式标签 / 失效置灰），历史消息同源渲染 -->
+                <div
+                  v-if="msg.role === 'user' && msg.attachments?.length"
+                  class="v-msg-attachments"
+                >
+                  <div
+                    v-for="item in msg.attachments"
+                    :key="item.fileId"
+                    class="v-msg-attach"
+                    :class="{ invalid: item.invalid }"
+                  >
+                    <el-icon><Document /></el-icon>
+                    <span class="v-msg-attach-name">{{ item.name }}</span>
+                    <el-tag
+                      v-if="item.mode === 'listed' && !item.invalid"
+                      size="small"
+                      type="warning"
+                    >
+                      AI 按需读取
+                    </el-tag>
+                    <span
+                      v-if="item.invalid"
+                      class="v-msg-attach-tip"
+                    >源文件已删除</span>
+                  </div>
                 </div>
                 <!-- 工具调用记录（read 结果标签 / write 确认卡片） -->
                 <template v-if="msg.role === 'assistant' && msg.toolCalls?.length">
@@ -176,36 +221,112 @@
           </div>
         </el-scrollbar>
 
-        <!-- 底部：输入区 -->
+        <!-- 底部：输入区（卡片式：聚焦时整卡高亮；工具栏在卡内底部） -->
         <div class="v-input-area">
-          <el-input
-            v-model="inputText"
-            type="textarea"
-            :rows="3"
-            resize="none"
-            placeholder="输入消息，Enter 发送，Shift+Enter 换行"
-            :disabled="streaming"
-            @keydown="handleKeydown"
-          />
-          <div class="v-input-actions">
-            <el-button
-              v-if="streaming"
-              type="danger"
-              @click="stopGenerate"
+          <div class="v-input-card">
+            <!-- P10 R86：待发附件 chips（名称/大小/可移除；本地文件仅暂存内存，发送时才上传留档） -->
+            <div
+              v-if="pendingAttachments.length"
+              class="v-attach-chips"
             >
-              停止生成
-            </el-button>
-            <el-button
-              v-else
-              type="primary"
-              :disabled="!canSend"
-              @click="sendMessage"
-            >
-              发送
-            </el-button>
+              <div
+                v-for="item in pendingAttachments"
+                :key="item.key"
+                class="v-attach-chip"
+              >
+                <el-icon><Document /></el-icon>
+                <span
+                  class="v-attach-name"
+                  :title="item.name"
+                >{{ item.name }}</span>
+                <span class="v-attach-size">{{ formatSize(item.size) }}</span>
+                <el-icon
+                  class="v-attach-remove"
+                  title="移除"
+                  @click="removeAttachment(item.key)"
+                >
+                  <Close />
+                </el-icon>
+              </div>
+            </div>
+            <el-input
+              v-model="inputText"
+              class="v-input-textarea"
+              type="textarea"
+              :rows="3"
+              resize="none"
+              placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+              :disabled="streaming"
+              @keydown="handleKeydown"
+            />
+            <div class="v-input-actions">
+              <el-dropdown
+                :disabled="streaming || uploading"
+                trigger="click"
+                @command="handleAttachCommand"
+              >
+                <el-button
+                  :icon="Paperclip"
+                  :disabled="streaming || uploading"
+                  text
+                  size="small"
+                >
+                  附件
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="cloud">
+                      从云盘选择
+                    </el-dropdown-item>
+                    <el-dropdown-item command="local">
+                      上传本地文件
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+              <span class="v-attach-hint">
+                最多 {{ ATTACHMENT_MAX_COUNT }} 个 · 文本类 · 单个 ≤2MB{{ uploading ? ' · 附件上传中…' : '' }}
+              </span>
+              <el-button
+                v-if="streaming"
+                type="danger"
+                plain
+                size="small"
+                @click="stopGenerate"
+              >
+                停止生成
+              </el-button>
+              <el-button
+                v-else
+                class="v-send-btn"
+                type="primary"
+                size="small"
+                :icon="Promotion"
+                :disabled="!canSend"
+                @click="sendMessage"
+              >
+                发送
+              </el-button>
+            </div>
           </div>
+          <input
+            ref="fileInput"
+            type="file"
+            multiple
+            hidden
+            :accept="acceptAttr"
+            @change="handleLocalFiles"
+          >
         </div>
       </div>
+
+      <!-- P10 R86：云盘文件选择器（复用 P8 公共组件 FilePicker，不新造） -->
+      <FilePicker
+        v-model:visible="pickerVisible"
+        title="选择云盘文件作为附件"
+        :accept-exts="ATTACHMENT_EXTS"
+        @select="handlePickFromCloud"
+      />
     </template>
   </div>
 </template>
@@ -215,8 +336,12 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { confirmDialog } from '@/utils/confirm'
-import { Plus, EditPen, Delete } from '@element-plus/icons-vue'
+import { formatSize } from '@/utils/format'
+import { Close, Delete, Document, EditPen, Paperclip, Plus, Promotion } from '@element-plus/icons-vue'
 import type { ElScrollbar } from 'element-plus'
+import { listFiles, mkdir, uploadFile } from '@/api/cloud/file'
+import AppLogo from '@/components/AppLogo/index.vue'
+import { useUserStore } from '@/stores/user'
 import {
   confirmToolCall,
   deleteConversation,
@@ -228,15 +353,29 @@ import {
   updateConversation,
   type AvailableModel,
   type ConversationItem,
+  type MessageAttachment,
   type SseSession,
   type ToolCallItem,
   type ToolSummaryItem,
 } from '@/api/ai/chat'
 import MarkdownView from '@/components/MarkdownView/index.vue'
+import FilePicker from '@/components/FilePicker/index.vue'
+import {
+  ATTACHMENT_DIR_NAME,
+  ATTACHMENT_EXTS,
+  ATTACHMENT_MAX_BYTES,
+  ATTACHMENT_MAX_COUNT,
+  attachmentAcceptAttr,
+  isAllowedAttachment,
+} from '@/views/ai/utils/attachment'
 import ToolConfirmCard from '../components/ToolConfirmCard.vue'
 import ToolResultTag from '../components/ToolResultTag.vue'
 
 const router = useRouter()
+const userStore = useUserStore()
+
+/** 用户头像回退字符（昵称/账号首字，头像未设置时 el-avatar 显示） */
+const userInitial = computed(() => (userStore.nickname || '我').slice(0, 1).toUpperCase())
 
 /** 本地工具记录（read 结果 / write 确认） */
 interface LocalToolCall extends ToolCallItem {
@@ -251,6 +390,19 @@ interface LocalMessage {
   streaming?: boolean
   failed?: boolean
   toolCalls?: LocalToolCall[]
+  /** P10：附件元信息（发送时先乐观渲染，meta 事件到达后由后端权威数据覆盖） */
+  attachments?: MessageAttachment[]
+}
+
+/** 待发附件（P10 R86；本地文件仅暂存 File 对象，**发送时**才上传留档，未发送不占云盘） */
+interface PendingAttachment {
+  key: string
+  name: string
+  size: number
+  /** 云盘文件 id（云盘选择时即有；本地上传成功后才填） */
+  fileId?: string
+  /** 本地待上传文件 */
+  file?: File
 }
 
 // ========== 套餐状态 ==========
@@ -285,7 +437,16 @@ const inputText = ref('')
 const streaming = ref(false)
 let currentSession: SseSession | null = null
 
-const canSend = computed(() => !streaming.value && inputText.value.trim().length > 0 && !!selectedModelId.value)
+// ========== 附件（P10 R86） ==========
+const pendingAttachments = ref<PendingAttachment[]>([])
+const pickerVisible = ref(false)
+const uploading = ref(false)
+const fileInput = ref<HTMLInputElement>()
+const acceptAttr = attachmentAcceptAttr()
+
+const canSend = computed(
+  () => !streaming.value && !uploading.value && inputText.value.trim().length > 0 && !!selectedModelId.value,
+)
 
 // ========== 初始化 ==========
 onMounted(async () => {
@@ -353,6 +514,7 @@ async function selectConversation(c: ConversationItem) {
         ...tc,
         kind: tc.risk === 'write' ? 'confirm' : 'result',
       })),
+      attachments: m.attachments ?? [],
     }))
     scrollToBottom()
   } catch {
@@ -394,6 +556,88 @@ async function handleModelChange(modelId: string) {
   }
 }
 
+// ========== 附件操作（P10 R86） ==========
+/** 数量帽校验（前后端同口径 ≤5） */
+function ensureAttachCapacity(): boolean {
+  if (pendingAttachments.value.length >= ATTACHMENT_MAX_COUNT) {
+    ElMessage.warning(`单条消息最多 ${ATTACHMENT_MAX_COUNT} 个附件`)
+    return false
+  }
+  return true
+}
+
+/** 回形针菜单：从云盘选择 / 上传本地文件 */
+function handleAttachCommand(command: string | number | object): void {
+  if (!ensureAttachCapacity()) return
+  if (command === 'cloud') {
+    pickerVisible.value = true
+  } else if (command === 'local') {
+    fileInput.value?.click()
+  }
+}
+
+/** 云盘选择（只读引用，不产生新文件） */
+function handlePickFromCloud(file: { id: string; name: string; ext: string; size: string }): void {
+  if (!ensureAttachCapacity()) return
+  if (pendingAttachments.value.some((item) => item.fileId === file.id)) {
+    ElMessage.warning('该文件已在待发附件中')
+    return
+  }
+  pendingAttachments.value.push({ key: `c-${file.id}`, name: file.name, size: Number(file.size), fileId: file.id })
+}
+
+/** 本地选择（仅暂存内存；类型/体积前端预校验，真正校验链在后端） */
+function handleLocalFiles(event: Event): void {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files ?? [])
+  // 清空 value，允许再次选择同一文件
+  input.value = ''
+  for (const file of files) {
+    if (!ensureAttachCapacity()) break
+    if (!isAllowedAttachment(file.name)) {
+      ElMessage.warning(`「${file.name}」类型不支持，仅支持文本类文件`)
+      continue
+    }
+    if (file.size > ATTACHMENT_MAX_BYTES) {
+      ElMessage.warning(`「${file.name}」超过 2MB`)
+      continue
+    }
+    pendingAttachments.value.push({ key: `l-${Date.now()}-${file.name}`, name: file.name, size: file.size, file })
+  }
+}
+
+function removeAttachment(key: string): void {
+  pendingAttachments.value = pendingAttachments.value.filter((item) => item.key !== key)
+}
+
+/** 云盘根下的附件留档目录（自动创建，D84；同名 "(1)" 时复用已存在目录） */
+async function ensureAttachmentDir(): Promise<number> {
+  const root = await listFiles(0)
+  const existed = root.list.find((item) => item.isDir && item.name === ATTACHMENT_DIR_NAME)
+  if (existed) return Number(existed.id)
+  const created = await mkdir(0, ATTACHMENT_DIR_NAME)
+  return Number(created.id)
+}
+
+/** 发送前上传本地附件（失败向上抛：整条不发出、chips 保留可重试） */
+async function uploadPendingAttachments(): Promise<string[]> {
+  const localItems = pendingAttachments.value.filter((item) => item.file)
+  if (localItems.length > 0) {
+    uploading.value = true
+    try {
+      const dirId = await ensureAttachmentDir()
+      for (const item of localItems) {
+        const uploaded = await uploadFile(dirId, item.file as File)
+        item.fileId = uploaded.id
+        item.file = undefined
+      }
+    } finally {
+      uploading.value = false
+    }
+  }
+  return pendingAttachments.value.map((item) => item.fileId ?? '').filter((id) => id !== '')
+}
+
 // ========== 发送 ==========
 function handleKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -405,10 +649,30 @@ function handleKeydown(e: KeyboardEvent) {
 async function sendMessage() {
   if (!canSend.value) return
   const content = inputText.value.trim()
+
+  // P10 R86：本地附件「发送时才上传留档」——失败则整条不发出、chips 保留可重试
+  let attachmentIds: string[] = []
+  if (pendingAttachments.value.length > 0) {
+    try {
+      attachmentIds = await uploadPendingAttachments()
+    } catch {
+      return
+    }
+  }
+  const sentAttachments: MessageAttachment[] = pendingAttachments.value.map((item) => ({
+    fileId: item.fileId ?? '',
+    name: item.name,
+    ext: '',
+    size: item.size,
+    chars: 0,
+    mode: 'inject',
+    path: '',
+  }))
+  pendingAttachments.value = []
   inputText.value = ''
 
   // 本地插入 user 消息 + assistant 占位（通过数组索引访问 Proxy 对象，确保响应式更新）
-  messages.value.push({ id: `u-${Date.now()}`, role: 'user', content })
+  messages.value.push({ id: `u-${Date.now()}`, role: 'user', content, attachments: sentAttachments })
   messages.value.push({ id: `a-${Date.now()}`, role: 'assistant', content: '', streaming: true })
   const assistantIndex = messages.value.length - 1
   scrollToBottom()
@@ -416,7 +680,10 @@ async function sendMessage() {
   streaming.value = true
   const payload = {
     content,
-    ...(currentConversationId.value ? { conversationId: Number(currentConversationId.value) } : { modelId: Number(selectedModelId.value) }),
+    ...(currentConversationId.value
+      ? { conversationId: Number(currentConversationId.value) }
+      : { modelId: Number(selectedModelId.value) }),
+    ...(attachmentIds.length > 0 ? { attachments: attachmentIds.map((fileId) => ({ fileId })) } : {}),
   }
 
   currentSession = sendChatMessage(payload, {
@@ -428,6 +695,10 @@ async function sendMessage() {
         if (!currentConversationId.value && event.conversationId) {
           currentConversationId.value = event.conversationId as string
         }
+        // P10：后端权威附件元信息（含 inject/listed 分流结果）覆盖乐观渲染
+        const metas = event.attachments as MessageAttachment[] | undefined
+        const userMsg = messages.value[assistantIndex - 1]
+        if (metas?.length && userMsg) userMsg.attachments = metas
       } else if (event.type === 'delta') {
         assistantMsg.content += (event.content as string) ?? ''
         scrollToBottom()
@@ -601,7 +872,7 @@ async function scrollToBottom() {
 <style scoped>
 .v-ai-chat {
   display: flex;
-  gap: 16px;
+  gap: 12px;
   height: calc(100vh - 130px);
   min-height: 500px;
 }
@@ -616,7 +887,7 @@ async function scrollToBottom() {
 
 /* 左：会话列表 */
 .v-session-panel {
-  width: 260px;
+  width: 264px;
   flex-shrink: 0;
   background: #fff;
   border-radius: 6px;
@@ -626,18 +897,24 @@ async function scrollToBottom() {
 }
 .v-session-header {
   padding: 12px;
-  border-bottom: 1px solid #ebeef5;
+  border-bottom: 1px solid #f0f2f5;
 }
 .v-session-list {
   flex: 1;
 }
+.v-session-list :deep(.el-scrollbar__view) {
+  padding: 8px;
+}
 .v-session-item {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px;
+  gap: 6px;
+  padding: 9px 10px;
+  margin-bottom: 2px;
+  border-radius: 6px;
   cursor: pointer;
-  border-bottom: 1px solid #f5f7fa;
+  transition: background-color 0.2s;
 }
 .v-session-item:hover {
   background: #f5f7fa;
@@ -645,26 +922,50 @@ async function scrollToBottom() {
 .v-session-item.active {
   background: #ecf5ff;
 }
+/* 选中态：左侧主色竖条（绝对定位，不占布局宽度） */
+.v-session-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 16px;
+  border-radius: 0 2px 2px 0;
+  background: var(--el-color-primary);
+  transform: translateY(-50%);
+}
+.v-session-item.active .v-session-title {
+  color: var(--el-color-primary);
+  font-weight: 500;
+}
 .v-session-title {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
+  color: #303133;
 }
 .v-session-actions {
   display: none;
-  gap: 6px;
+  gap: 2px;
 }
-.v-session-item:hover .v-session-actions {
+.v-session-item:hover .v-session-actions,
+.v-session-item.active .v-session-actions {
   display: flex;
 }
 .v-session-icon {
+  padding: 3px;
+  border-radius: 4px;
   color: #909399;
   font-size: 14px;
+  transition:
+    color 0.2s,
+    background-color 0.2s;
 }
 .v-session-icon:hover {
-  color: #409eff;
+  color: var(--el-color-primary);
+  background: rgba(64, 158, 255, 0.12);
 }
 
 /* 右：对话区 */
@@ -678,13 +979,14 @@ async function scrollToBottom() {
   overflow: hidden;
 }
 .v-chat-header {
-  padding: 12px 16px;
-  border-bottom: 1px solid #ebeef5;
+  padding: 10px 16px;
+  border-bottom: 1px solid #f0f2f5;
   display: flex;
   align-items: center;
   gap: 12px;
 }
 .v-model-price {
+  margin-left: auto;
   font-size: 12px;
   color: #909399;
   display: flex;
@@ -699,33 +1001,69 @@ async function scrollToBottom() {
   background: #f7f8fa;
 }
 .v-message-inner {
-  padding: 16px 24px;
+  padding: 20px 24px 24px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 18px;
+}
+/* 空状态（新会话 / 空会话共用视觉，文案区分）
+   注意：AppLogo 内部是 display:block 的 SVG，仅靠 text-align:center 不会居中，故用纵向 flex 居中 */
+.v-message-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: 460px;
+  margin: auto;
+  padding: 40px 0;
+  text-align: center;
+}
+.v-empty-title {
+  margin: 16px 0 6px;
+  font-size: 15px;
+  font-weight: 500;
+  color: #303133;
+}
+.v-empty-sub {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.8;
+  color: #909399;
 }
 .v-message-row {
   display: flex;
+  align-items: flex-start;
+  gap: 10px;
 }
+/* 用户消息镜像排列：头像靠右、气泡贴右（DOM 顺序与 AI 消息一致，便于复用） */
 .v-message-row.user {
-  justify-content: flex-end;
+  flex-direction: row-reverse;
 }
-.v-message-row.assistant {
-  justify-content: flex-start;
+.v-avatar {
+  flex-shrink: 0;
+  margin-top: 2px;
+  line-height: 0;
+}
+.v-avatar :deep(.el-avatar) {
+  background: #c0c4cc;
+  font-size: 13px;
 }
 .v-bubble {
-  max-width: 72%;
+  max-width: 76%;
   padding: 10px 14px;
-  border-radius: 8px;
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
-.v-message-row.user .v-bubble {
-  background: #409eff;
-  color: #fff;
-}
+/* 贴近头像的一角收窄，形成「从该侧发出」的指向感 */
 .v-message-row.assistant .v-bubble {
   background: #fff;
-  border: 1px solid #e4e7ed;
   color: #303133;
+  border-top-left-radius: 2px;
+}
+.v-message-row.user .v-bubble {
+  background: var(--el-color-primary);
+  color: #fff;
+  border-top-right-radius: 2px;
+  box-shadow: none;
 }
 .v-user-text {
   white-space: pre-wrap;
@@ -734,10 +1072,11 @@ async function scrollToBottom() {
 }
 .v-cursor {
   display: inline-block;
-  width: 8px;
-  height: 16px;
-  background: #409eff;
-  margin-left: 2px;
+  width: 2px;
+  height: 15px;
+  border-radius: 1px;
+  background: var(--el-color-primary);
+  margin-left: 3px;
   vertical-align: text-bottom;
   animation: v-blink 1s step-start infinite;
 }
@@ -751,13 +1090,115 @@ async function scrollToBottom() {
   font-size: 12px;
   color: #f56c6c;
 }
+/* P10 R86/R87：气泡附件行（模式标签 / 失效置灰） */
+.v-msg-attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.35);
+}
+.v-msg-attach {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.v-msg-attach-name {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.v-msg-attach.invalid {
+  opacity: 0.75;
+  text-decoration: line-through;
+}
+.v-msg-attach-tip {
+  font-size: 12px;
+}
+/* 附件标签落在主色气泡内：改白底，避免黄色标签与主色蓝互斥 */
+.v-msg-attachments :deep(.el-tag) {
+  --el-tag-bg-color: rgba(255, 255, 255, 0.92);
+  --el-tag-border-color: transparent;
+  --el-tag-text-color: #b88230;
+}
+/* 输入区：卡片包裹（聚焦时整卡高亮），工具栏收进卡内底部 */
 .v-input-area {
-  padding: 12px 16px;
-  border-top: 1px solid #ebeef5;
+  padding: 12px 16px 16px;
+  border-top: 1px solid #f0f2f5;
+}
+.v-input-card {
+  padding: 6px 8px 4px;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+.v-input-card:focus-within {
+  border-color: var(--el-color-primary);
+  box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.12);
+}
+/* textarea 去边框（外框由 .v-input-card 承担，避免双层边框） */
+.v-input-textarea :deep(.el-textarea__inner) {
+  padding: 4px 4px 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.v-input-textarea :deep(.el-textarea__inner:focus) {
+  box-shadow: none;
 }
 .v-input-actions {
   display: flex;
-  justify-content: flex-end;
-  margin-top: 10px;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid #f5f7fa;
+}
+.v-send-btn {
+  margin-left: auto;
+}
+/* P10 R86：待发附件 chips */
+.v-attach-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 2px 6px;
+}
+.v-attach-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  background: #f7f8fa;
+  font-size: 12px;
+  color: #606266;
+}
+.v-attach-name {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.v-attach-size {
+  color: #a8abb2;
+}
+.v-attach-remove {
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.v-attach-remove:hover {
+  color: #f56c6c;
+}
+.v-attach-hint {
+  font-size: 12px;
+  color: #a8abb2;
 }
 </style>

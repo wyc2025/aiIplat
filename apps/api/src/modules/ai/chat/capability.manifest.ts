@@ -62,7 +62,7 @@ export const CAPABILITY_MANIFEST: readonly CapabilityRow[] = [
   {
     key: 'cloud.read',
     perms: 'cloud:file:list',
-    text: '云盘查看：列云盘目录（可递归）、读文本文件（≤64KB）。',
+    text: '云盘查看：列云盘目录（可递归）、读文本文件（默认只回开头 2 万字符，大文件按 nextOffset 分段续读）。',
     tools: ['list_cloud_files', 'read_cloud_file'],
   },
   {

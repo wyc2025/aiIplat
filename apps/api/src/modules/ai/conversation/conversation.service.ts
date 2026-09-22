@@ -3,6 +3,8 @@ import { ErrorCode } from '../../../common/constants/error-code'
 import { PageResultDto } from '../../../common/dto/page-result.dto'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
+import { CloudFacade } from '../../cloud/facade/cloud-facade.service'
+import { parseStoredAttachments } from '../chat/attachment-resolver'
 import { ToolRegistry } from '../tool/tool.registry'
 import type { AuthUser } from '../../../gateway/guards/jwt.strategy'
 import type { ConversationQueryDto, UpdateConversationDto } from './dto/conversation.dto'
@@ -12,6 +14,7 @@ export class ConversationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly toolRegistry: ToolRegistry,
+    private readonly cloudFacade: CloudFacade,
   ) {}
 
   /** 会话分页列表（按 updatedAt 倒序，含当前模型显示名） */
@@ -90,6 +93,13 @@ export class ConversationService {
     })
     const ordered = recent.reverse()
 
+    // P10 T96/R87：批量判定附件失效（源文件已删除 → invalid=true，前端置灰渲染「源文件已删除」）
+    const attachmentMetas = ordered.flatMap((m) => parseStoredAttachments(m.attachments))
+    const aliveIds = await this.cloudFacade.filterAliveFileIds(
+      userId,
+      attachmentMetas.filter((meta) => /^\d+$/.test(meta.fileId)).map((meta) => BigInt(meta.fileId)),
+    )
+
     // 批量查这些消息关联的工具调用记录（按 messageId 分组）
     const toolCalls = await this.prisma.aiToolCall.findMany({
       where: { messageId: { in: ordered.map((m) => m.id) } },
@@ -114,6 +124,17 @@ export class ConversationService {
         modelDisplayName: m.model?.displayName ?? null,
         status: m.status,
         createdAt: m.createdAt,
+        // P10 D82/R87：附件元信息（只回元信息，内容由前端按需展示；invalid=源文件已删除）
+        attachments: parseStoredAttachments(m.attachments).map((meta) => ({
+          fileId: meta.fileId,
+          name: meta.name,
+          ext: meta.ext,
+          size: meta.size,
+          chars: meta.chars,
+          mode: meta.mode,
+          path: meta.path,
+          invalid: !aliveIds.has(meta.fileId),
+        })),
         toolCalls: await Promise.all(
           (toolCallsByMessage.get(m.id.toString()) ?? []).map(async (tc) => ({
             toolCallId: tc.id.toString(),

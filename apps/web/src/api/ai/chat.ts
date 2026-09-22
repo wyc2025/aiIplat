@@ -53,6 +53,22 @@ export interface ToolCallItem {
   risk: string
 }
 
+/** 附件元信息（P10 D82；history 列表与 chat meta 事件同源） */
+export interface MessageAttachment {
+  fileId: string
+  name: string
+  ext: string
+  size: number
+  /** 附件字符数（后端解析后给出） */
+  chars: number
+  /** inject = 全文已注入（气泡无标签）；listed = 已列入可读清单，AI 按需读取 */
+  mode: 'inject' | 'listed'
+  /** 相对云盘根的路径（AI 按此路径分段自读） */
+  path: string
+  /** true = 源文件已删除（气泡置灰，R87；仅历史消息列表返回） */
+  invalid?: boolean
+}
+
 /** 消息项 */
 export interface MessageItem {
   id: string
@@ -65,6 +81,8 @@ export interface MessageItem {
   status: number
   createdAt: string
   toolCalls: ToolCallItem[]
+  /** P10：附件元信息（无附件为 []） */
+  attachments?: MessageAttachment[]
 }
 
 /** 发送消息入参 */
@@ -72,6 +90,8 @@ export interface ChatPayload {
   conversationId?: number
   modelId?: number
   content: string
+  /** P10：附件（云盘文件 id；本地上传先落云盘 /ai-attachments/ 再取 id，D84） */
+  attachments?: Array<{ fileId: string }>
 }
 
 /** SSE done 事件的 usage */

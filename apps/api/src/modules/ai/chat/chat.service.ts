@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import type { Prisma } from '@prisma/client'
 import type { Response } from 'express'
 import { ErrorCode } from '../../../common/constants/error-code'
 import { RedisKey } from '../../../common/constants/redis-key'
@@ -9,12 +10,29 @@ import type { AuthUser } from '../../../gateway/guards/jwt.strategy'
 import { PermissionService } from '../../../gateway/services/permission.service'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { AI_MAX_TOOL_ROUNDS_DEFAULT, AI_MAX_TOOL_ROUNDS_LIMIT } from '../../../config/ai.config'
+import { CloudFacade } from '../../cloud/facade/cloud-facade.service'
 import { CreditService } from '../credit/credit.service'
 import { ProviderService } from '../engine/provider.service'
 import type { EngineChatMessage, EngineTool, EngineToolCall, EngineUsage } from '../engine/engine.types'
 import { ToolRegistry } from '../tool/tool.registry'
 import { groupOfTool, resolveToolGroups, type ToolRoutingResult } from '../tool/tool.groups'
 import type { AiTool } from '../tool/tool.types'
+import {
+  ATTACHMENT_ALLOWED_EXTS,
+  ATTACHMENT_MAX_BYTES,
+  MANIFEST_MAX_ITEMS,
+  buildInjectedBlock,
+  buildInvalidBlock,
+  decodeAttachmentText,
+  estimateInjectedChars,
+  looksBinaryContent,
+  parseStoredAttachments,
+  planAttachmentModes,
+  renderAttachmentManifest,
+  resolveAttachments,
+  type AttachmentMeta,
+  type ManifestEntry,
+} from './attachment-resolver'
 import type { ChatDto } from './dto/chat.dto'
 import { SystemPromptService } from './system-prompt.service'
 
@@ -33,6 +51,21 @@ const MIN_HISTORY_CHARS = 2000
 const HISTORY_TAKE = 50
 /** write 工具确认单 TTL（10 分钟） */
 const CONFIRM_TTL_SEC = 600
+/**
+ * 工具往返累计字符占 max_context 的比例上限（P10 T100）。
+ * 背景：多轮工具结果（tool 消息）**不参与历史截取预算**，大文件分段读取会把上下文推向上限——
+ * 实测 admin 会话 #377 的 tokens_input 已达 118,865 / 128,000（读 6 段 PROGRESS.md），
+ * 再读一两轮就会被上游以超出上下文拒绝（400）。故超过该比例即停止继续调工具、进入收尾轮。
+ */
+const TOOL_ROUNDTRIP_BUDGET_RATIO = 0.4
+/**
+ * 收尾轮指令（P10 T100）：轮次或往返预算耗尽后**不携带 tools** 再调一次上游，
+ * 强制模型基于已获取的信息作答——否则用户看到的是「AI 读完文件就莫名其妙停了」
+ * （旧行为：轮次用尽即 break，模型从未见到最后一批工具结果，也没有机会总结）。
+ */
+const FINAL_ROUND_INSTRUCTION =
+  '（系统提示：本轮工具调用次数已达上限，接下来不再提供任何工具。请立即基于你已经获取到的信息给出结论或阶段性总结；' +
+  '若仍有未读完的内容，请明确说明还缺什么、以及建议用户如何继续。）'
 
 /** 模型（含厂商）精简类型 */
 interface ChatModel {
@@ -72,6 +105,7 @@ export class ChatService {
     private readonly permissionService: PermissionService,
     private readonly systemPromptService: SystemPromptService,
     private readonly config: ConfigService,
+    private readonly cloudFacade: CloudFacade,
   ) {}
 
   /**
@@ -237,48 +271,24 @@ export class ChatService {
       assistantMessageId: assistantMessage.id.toString(),
     })
 
-    // 10. 多轮上游调用（总结后可能再触发工具）
-    let fullContent = ''
-    let totalInputTokens = 0
-    let totalOutputTokens = 0
-    let hasUpstreamUsage = false
-    let streamFailed = false
-    let reasoningContent = ''
+    // 10. 多轮上游调用（总结后可能再触发工具；轮次/往返预算耗尽 → 收尾轮，P10 T100）
+    const rounds = await this.runToolRounds({
+      user,
+      userId,
+      conversationId,
+      assistantMessageId: assistantMessage.id,
+      model,
+      messages,
+      tools,
+      res,
+      signal,
+    })
+    const fullContent = rounds.content
+    const streamFailed = rounds.failed
 
-    let roundMessages = messages
-    for (let round = 0; round < this.maxToolRounds; round++) {
-      const roundResult = await this.callUpstream(model, roundMessages, tools, res, signal)
-      if (roundResult.failed) {
-        streamFailed = true
-        break
-      }
-
-      fullContent += roundResult.content
-      if (roundResult.reasoningContent) reasoningContent = roundResult.reasoningContent
-      if (roundResult.usage) {
-        totalInputTokens += roundResult.usage.inputTokens
-        totalOutputTokens += roundResult.usage.outputTokens
-        hasUpstreamUsage = true
-      }
-
-      if (roundResult.toolCalls.length === 0) break
-
-      const processed = await this.processToolCalls(user, userId, conversationId, assistantMessage.id, roundResult.toolCalls, res)
-      if (processed.stop) break
-      roundMessages = [
-        ...roundMessages,
-        {
-          role: 'assistant' as const,
-          content: roundResult.content,
-          tool_calls: roundResult.toolCalls,
-          ...(roundResult.reasoningContent ? { reasoning_content: roundResult.reasoningContent } : {}),
-        },
-        ...processed.toolMessages,
-      ]
-    }
-
-    // 11. 结算新消息（R68 兜底估算基数 = 全部 messages + tools schema + tool 往返消息）
-    const inputChars = roundMessages.reduce((sum, m) => sum + m.content.length, 0) + this.toolsCharsOf(tools)
+    // 11. 结算新消息（R68 兜底估算基数 = 初始 messages + tools schema + tool 往返消息）
+    const inputChars =
+      messages.reduce((sum, m) => sum + m.content.length, 0) + this.toolsCharsOf(tools) + rounds.roundTripChars
     const { credits, remainingCredits } = await this.finalizeAssistant(
       userId,
       conversationId,
@@ -286,9 +296,9 @@ export class ChatService {
       model,
       fullContent,
       inputChars,
-      hasUpstreamUsage ? { inputTokens: totalInputTokens, outputTokens: totalOutputTokens } : null,
+      rounds.hasUsage ? { inputTokens: rounds.inputTokens, outputTokens: rounds.outputTokens } : null,
       !streamFailed,
-      reasoningContent,
+      rounds.reasoningContent,
     )
 
     if (streamFailed) {
@@ -296,8 +306,8 @@ export class ChatService {
     } else {
       this.writeEvent(res, 'done', {
         usage: {
-          inputTokens: hasUpstreamUsage ? totalInputTokens : inputChars,
-          outputTokens: hasUpstreamUsage ? totalOutputTokens : fullContent.length,
+          inputTokens: rounds.hasUsage ? rounds.inputTokens : inputChars,
+          outputTokens: rounds.hasUsage ? rounds.outputTokens : fullContent.length,
           credits,
           remainingCredits: remainingCredits.toString(),
         },
@@ -370,11 +380,15 @@ export class ChatService {
 
     const paramsObj = (record.params ?? {}) as Record<string, unknown>
     const systemPrompt = await this.systemPromptService.build(user)
-    const picked = this.pickHistory(
+    // P10 R84：会话可读清单随每轮组装刷新（确认回填链路同样注入；附件正文按最新文件内容重读，§26.7）
+    const manifest = await this.buildAttachmentManifest(BigInt(user.userId), record.conversationId)
+    const systemContent = manifest ? `${systemPrompt}\n\n${manifest}` : systemPrompt
+    const picked = await this.pickHistoryWithAttachments(
+      BigInt(user.userId),
       history,
       this.computeHistoryBudget(
         model,
-        systemPrompt.length,
+        systemContent.length,
         this.toolsCharsOf(tools),
         toolResult.length,
         tools.length,
@@ -395,7 +409,7 @@ export class ChatService {
     }
 
     return [
-      { role: 'system', content: systemPrompt },
+      { role: 'system', content: systemContent },
       ...picked,
       // 原 assistant 消息带 tool_calls（用 ai_tool_call.id 作为 tool_call_id）+ reasoning_content 回传
       {
@@ -454,20 +468,32 @@ export class ChatService {
       throw new BusinessException(ErrorCode.AiContentTooLong, '消息内容超出模型上下文长度，请精简后重试')
     }
 
-    // 6. 存 user 消息
+    // 6. 附件解析链（P10 D82/R82/R83）：校验（30001/30012/30013）→ 读字节 → 编码探测 → inject/listed 分流
+    const resolvedAttachments = await resolveAttachments(this.cloudFacade, userId, dto.attachments ?? [])
+    const { metas: attachmentMetas, injectedText } = planAttachmentModes(resolvedAttachments)
+
+    // 7. 存 user 消息（附件**只落元信息**，内容不冗余，D82）
     const userMessage = await this.prisma.aiMessage.create({
-      data: { conversationId, role: 'user', content: dto.content, status: 1 },
+      data: {
+        conversationId,
+        role: 'user',
+        content: dto.content,
+        status: 1,
+        ...(attachmentMetas.length > 0
+          ? { attachments: attachmentMetas as unknown as Prisma.InputJsonValue }
+          : {}),
+      },
     })
 
-    // 7. 建 assistant 占位消息
+    // 8. 建 assistant 占位消息
     const assistantMessage = await this.prisma.aiMessage.create({
       data: { conversationId, role: 'assistant', content: '', modelId: model.id, status: 1 },
     })
 
-    // 8. 确定可用工具（模型支持 + 权限过滤 + 组路由，P6 T77）——先定工具子集，再按其 schema 实测占用扣减历史预算（R67）
+    // 9. 确定可用工具（模型支持 + 权限过滤 + 组路由，P6 T77）——先定工具子集，再按其 schema 实测占用扣减历史预算（R67）
     const { tools, routing } = await this.getAvailableTools(user, model, dto.content)
 
-    // 9. 拼装上下文（system + tools 恒完整，历史从最早丢弃）
+    // 10. 拼装上下文（system + tools 恒完整，历史从最早丢弃；P10 附件注入与清单随组装进行）
     const { messages, inputChars } = await this.buildContext(
       user,
       conversationId,
@@ -476,59 +502,129 @@ export class ChatService {
       model,
       tools,
       routing,
+      { metas: attachmentMetas, injectedText },
     )
 
-    // 10. 进入流式
+    // 11. 进入流式（P10：meta 附本次附件元信息，前端据此渲染气泡模式标签，R86/R87）
     this.setupSseHeaders(res)
     this.writeEvent(res, 'meta', {
       conversationId: conversationId.toString(),
       userMessageId: userMessage.id.toString(),
       assistantMessageId: assistantMessage.id.toString(),
+      ...(attachmentMetas.length > 0 ? { attachments: attachmentMetas } : {}),
     })
 
-    // 11. 多轮上游调用（工具调用循环，轮次上限取 ai.maxToolRounds）
-    let fullContent = ''
-    let totalInputTokens = 0
-    let totalOutputTokens = 0
-    let hasUpstreamUsage = false
-    let streamFailed = false
-    let reasoningContent = ''
-    /** tool 往返消息累计字符（R68 兜底估算基数的一部分） */
-    let roundTripChars = 0
+    // 12. 多轮上游调用（工具调用循环 + 轮次/往返预算耗尽后的收尾轮，P10 T100）
+    const rounds = await this.runToolRounds({
+      user,
+      userId,
+      conversationId,
+      assistantMessageId: assistantMessage.id,
+      model,
+      messages,
+      tools,
+      res,
+      signal,
+    })
+    const fullContent = rounds.content
+    const streamFailed = rounds.failed
 
-    let roundMessages = messages
+    // 13. 结算（合并计费）+ 更新 assistant 消息
+    // R68：兜底估算基数 = messages（含 tool 往返）+ tools schema（无上游 usage 时才真正生效）
+    const estimatedInputChars = inputChars + rounds.roundTripChars
+    const { credits, remainingCredits } = await this.finalizeAssistant(
+      userId,
+      conversationId,
+      assistantMessage.id,
+      model,
+      fullContent,
+      estimatedInputChars,
+      rounds.hasUsage ? { inputTokens: rounds.inputTokens, outputTokens: rounds.outputTokens } : null,
+      !streamFailed,
+      rounds.reasoningContent,
+    )
+
+    // 14. 收尾事件
+    if (streamFailed) {
+      this.writeEvent(res, 'error', { code: ErrorCode.AiUpstreamError, message: '上游模型调用失败' })
+    } else {
+      this.writeEvent(res, 'done', {
+        usage: {
+          inputTokens: rounds.hasUsage ? rounds.inputTokens : estimatedInputChars,
+          outputTokens: rounds.hasUsage ? rounds.outputTokens : fullContent.length,
+          credits,
+          remainingCredits: remainingCredits.toString(),
+        },
+      })
+    }
+    res.end()
+  }
+
+  /** 多轮工具调用循环的产出（P10 T100 抽出，chat 与 confirm 两条链共用） */
+  private async runToolRounds(params: {
+    user: AuthUser
+    userId: bigint
+    conversationId: bigint
+    assistantMessageId: bigint
+    model: ChatModel
+    messages: EngineChatMessage[]
+    tools: EngineTool[]
+    res: Response
+    signal: AbortSignal
+  }): Promise<{
+    content: string
+    reasoningContent: string
+    inputTokens: number
+    outputTokens: number
+    hasUsage: boolean
+    roundTripChars: number
+    failed: boolean
+    /** 由 write 工具确认卡终止（后续交由 /ai/tool/confirm 链路接管） */
+    awaitingConfirm: boolean
+  }> {
+    const { user, userId, conversationId, assistantMessageId, model, res, signal } = params
+    const toolRoundTripBudget = Math.floor(model.maxContext * TOOL_ROUNDTRIP_BUDGET_RATIO)
+
+    let content = ''
+    let reasoningContent = ''
+    let inputTokens = 0
+    let outputTokens = 0
+    let hasUsage = false
+    let roundTripChars = 0
+    let roundMessages = params.messages
+    let needFinale = false
+    let awaitingConfirm = false
+
     for (let round = 0; round < this.maxToolRounds; round++) {
-      const roundResult = await this.callUpstream(model, roundMessages, tools, res, signal)
+      const roundResult = await this.callUpstream(model, roundMessages, params.tools, res, signal)
       if (roundResult.failed) {
-        streamFailed = true
-        break
+        return { content, reasoningContent, inputTokens, outputTokens, hasUsage, roundTripChars, failed: true, awaitingConfirm }
       }
 
-      fullContent += roundResult.content
+      content += roundResult.content
       if (roundResult.reasoningContent) reasoningContent = roundResult.reasoningContent
       if (roundResult.usage) {
-        totalInputTokens += roundResult.usage.inputTokens
-        totalOutputTokens += roundResult.usage.outputTokens
-        hasUpstreamUsage = true
+        inputTokens += roundResult.usage.inputTokens
+        outputTokens += roundResult.usage.outputTokens
+        hasUsage = true
       }
 
-      // 无工具调用：正常结束
+      // 无工具调用：模型已给出终答，正常结束
       if (roundResult.toolCalls.length === 0) break
 
-      // 处理工具调用
       const processed = await this.processToolCalls(
         user,
         userId,
         conversationId,
-        assistantMessage.id,
+        assistantMessageId,
         roundResult.toolCalls,
         res,
       )
+      if (processed.stop) {
+        awaitingConfirm = true
+        break
+      }
 
-      // write 工具：发确认卡片后本轮结束
-      if (processed.stop) break
-
-      // read 工具结果回喂：追加 assistant（含 tool_calls + reasoning）+ tool 消息，进入下一轮
       roundMessages = [
         ...roundMessages,
         {
@@ -541,37 +637,45 @@ export class ChatService {
       ]
       roundTripChars +=
         roundResult.content.length + processed.toolMessages.reduce((sum, m) => sum + m.content.length, 0)
+
+      // 轮次用尽 或 工具往返字符超预算 → 收尾轮（不再允许调工具，强制给结论）
+      if (round === this.maxToolRounds - 1) {
+        needFinale = true
+      }
+      if (roundTripChars > toolRoundTripBudget) {
+        this.logger.warn(
+          `工具往返字符 ${roundTripChars} 超过预算 ${toolRoundTripBudget}（maxContext ${model.maxContext} × ${TOOL_ROUNDTRIP_BUDGET_RATIO}），提前收尾`,
+        )
+        needFinale = true
+      }
+      if (needFinale) break
     }
 
-    // 12. 结算（合并计费）+ 更新 assistant 消息
-    // R68：兜底估算基数 = messages（含 tool 往返）+ tools schema（无上游 usage 时才真正生效）
-    const estimatedInputChars = inputChars + roundTripChars
-    const { credits, remainingCredits } = await this.finalizeAssistant(
-      userId,
-      conversationId,
-      assistantMessage.id,
-      model,
-      fullContent,
-      estimatedInputChars,
-      hasUpstreamUsage ? { inputTokens: totalInputTokens, outputTokens: totalOutputTokens } : null,
-      !streamFailed,
-      reasoningContent,
-    )
-
-    // 13. 收尾事件
-    if (streamFailed) {
-      this.writeEvent(res, 'error', { code: ErrorCode.AiUpstreamError, message: '上游模型调用失败' })
-    } else {
-      this.writeEvent(res, 'done', {
-        usage: {
-          inputTokens: hasUpstreamUsage ? totalInputTokens : estimatedInputChars,
-          outputTokens: hasUpstreamUsage ? totalOutputTokens : fullContent.length,
-          credits,
-          remainingCredits: remainingCredits.toString(),
-        },
-      })
+    if (needFinale) {
+      this.logger.warn(
+        `工具轮次/往返预算耗尽 → 追加收尾轮（上限 ${this.maxToolRounds} 轮，往返 ${roundTripChars} 字符）`,
+      )
+      const finale = await this.callUpstream(
+        model,
+        [...roundMessages, { role: 'user', content: FINAL_ROUND_INSTRUCTION }],
+        [],
+        res,
+        signal,
+      )
+      if (finale.failed) {
+        return { content, reasoningContent, inputTokens, outputTokens, hasUsage, roundTripChars, failed: true, awaitingConfirm }
+      }
+      content += finale.content
+      if (finale.reasoningContent) reasoningContent = finale.reasoningContent
+      if (finale.usage) {
+        inputTokens += finale.usage.inputTokens
+        outputTokens += finale.usage.outputTokens
+        hasUsage = true
+      }
+      roundTripChars += finale.content.length
     }
-    res.end()
+
+    return { content, reasoningContent, inputTokens, outputTokens, hasUsage, roundTripChars, failed: false, awaitingConfirm }
   }
 
   /** 单轮上游调用：累积 delta 下发、tool_calls 收集、usage 返回 */
@@ -925,8 +1029,9 @@ export class ChatService {
   }
 
   /**
-   * 拼装上下文（P5 R67 实测预算）：system prompt 最前（恒完整）+ 历史消息（按实测预算从最早丢弃）
-   * + 当前消息；tools schema 占用由调用方以过滤后子集实测传入。
+   * 拼装上下文（P5 R67 实测预算 + P10 §26.3 附件阶段）：
+   * system（助手设定 + 手册 + 能力清单 + **会话可读清单**）→ 历史（含 inject 附件重读）→ 当前 user 消息。
+   * 预算顺序：实测 system + tools 之后，**再扣 attachments（inject 实算字符）**，剩余为 history 预算（§26.4）。
    * inputChars 含 tools schema（R68 兜底估算基数）。
    */
   private async buildContext(
@@ -936,7 +1041,8 @@ export class ChatService {
     currentContent: string,
     model: ChatModel,
     tools: EngineTool[],
-    routing?: ToolRoutingResult,
+    routing: ToolRoutingResult | undefined,
+    attachments: { metas: AttachmentMeta[]; injectedText: string },
   ): Promise<{ messages: EngineChatMessage[]; inputChars: number }> {
     const history = await this.prisma.aiMessage.findMany({
       where: { conversationId, deletedAt: null, id: { not: excludeMessageId } },
@@ -945,24 +1051,115 @@ export class ChatService {
     })
 
     const systemPrompt = await this.systemPromptService.build(user)
+    // P10 R84：会话可读清单（动态段，不计手册 2000 字帽）
+    const manifest = await this.buildAttachmentManifest(BigInt(user.userId), conversationId)
+    const systemContent = manifest ? `${systemPrompt}\n\n${manifest}` : systemPrompt
+
     const toolsChars = this.toolsCharsOf(tools)
-    const systemMsg: EngineChatMessage = { role: 'system', content: systemPrompt }
-    const picked = this.pickHistory(
+    const systemMsg: EngineChatMessage = { role: 'system', content: systemContent }
+    const picked = await this.pickHistoryWithAttachments(
+      BigInt(user.userId),
       history,
       this.computeHistoryBudget(
         model,
-        systemPrompt.length,
+        systemContent.length,
         toolsChars,
         currentContent.length,
         tools.length,
         routing,
+        attachments.injectedText.length,
       ),
     )
 
-    const currentMsg: EngineChatMessage = { role: 'user', content: currentContent }
+    // P10 D83/R83：inject 附件全文拼进该条 user 消息**前部**（多附件按用户选择顺序）
+    const currentMsg: EngineChatMessage = {
+      role: 'user',
+      content: attachments.injectedText
+        ? `${attachments.injectedText}\n\n${currentContent}`
+        : currentContent,
+    }
     const messages: EngineChatMessage[] = [systemMsg, ...picked, currentMsg]
     const inputChars = messages.reduce((sum, m) => sum + m.content.length, 0) + toolsChars
     return { messages, inputChars }
+  }
+
+  /**
+   * 会话可读清单（P10 R84）：本会话**所有 user 消息附件的并集**（去重按最近优先、失效标注、上限 20）。
+   * 无附件 → 空串（system 不追加）。失效判定经云盘门面批量查（不读盘，零成本）。
+   */
+  private async buildAttachmentManifest(userId: bigint, conversationId: bigint): Promise<string> {
+    const rows = await this.prisma.aiMessage.findMany({
+      where: { conversationId, deletedAt: null, role: 'user' },
+      orderBy: { createdAt: 'desc' },
+      take: HISTORY_TAKE,
+      select: { attachments: true },
+    })
+
+    const entries: ManifestEntry[] = []
+    const seen = new Set<string>()
+    for (const row of rows) {
+      for (const meta of parseStoredAttachments(row.attachments)) {
+        if (seen.has(meta.fileId)) continue
+        seen.add(meta.fileId)
+        entries.push({ fileId: meta.fileId, name: meta.name, path: meta.path, chars: meta.chars, invalid: false })
+        if (entries.length >= MANIFEST_MAX_ITEMS) break
+      }
+      if (entries.length >= MANIFEST_MAX_ITEMS) break
+    }
+    if (entries.length === 0) return ''
+
+    const ids = entries.filter((entry) => /^\d+$/.test(entry.fileId)).map((entry) => BigInt(entry.fileId))
+    const alive = await this.cloudFacade.filterAliveFileIds(userId, ids)
+    for (const entry of entries) entry.invalid = !alive.has(entry.fileId)
+    return renderAttachmentManifest(entries)
+  }
+
+  /**
+   * 历史消息装配（P10 D82/R83 / §26.3）：与 pickHistory 同口径（按预算从最新往回装、装不下即停），
+   * 差异：历史 user 消息中 **mode=inject** 的附件按 fileId **重读云盘**并拼回正文前部；
+   * listed 附件不重读（清单已随 system 注入，模型按需自读）。
+   * 容器纪律：**先按元信息判定预算、再决定是否读盘**——装不下的消息零文件读取。
+   * 源文件被删/无权/超限 → 占位「（附件已失效）」降级（不报错、不阻断对话）。
+   */
+  private async pickHistoryWithAttachments(
+    userId: bigint,
+    historyNewestFirst: Array<{ role: string; content: string; attachments: unknown }>,
+    budget: number,
+  ): Promise<EngineChatMessage[]> {
+    const picked: EngineChatMessage[] = []
+    let used = 0
+    for (const message of historyNewestFirst) {
+      const injectMetas = parseStoredAttachments(message.attachments).filter((meta) => meta.mode === 'inject')
+      const attachmentCost = injectMetas.reduce((sum, meta) => sum + estimateInjectedChars(meta), 0)
+      if (used + message.content.length + attachmentCost > budget) break
+
+      const blocks: string[] = []
+      for (const meta of injectMetas) {
+        const text = await this.readAttachmentText(userId, meta)
+        blocks.push(text === null ? buildInvalidBlock(meta.name) : buildInjectedBlock(meta.name, text))
+      }
+      const content = blocks.length > 0 ? `${blocks.join('\n\n')}\n\n${message.content}` : message.content
+      picked.push({ role: message.role as 'user' | 'assistant', content })
+      used += content.length
+    }
+    picked.reverse()
+    return picked
+  }
+
+  /** 按元信息重读附件正文（历史装配用）；已删/无权/超限/非文本/二进制 → null（失效降级，D82） */
+  private async readAttachmentText(userId: bigint, meta: AttachmentMeta): Promise<string | null> {
+    if (!/^\d+$/.test(meta.fileId)) return null
+    try {
+      const file = await this.cloudFacade.readTextFileById(userId, BigInt(meta.fileId), {
+        exts: ATTACHMENT_ALLOWED_EXTS,
+        maxBytes: ATTACHMENT_MAX_BYTES,
+        purpose: '作为对话附件读取',
+      })
+      if (looksBinaryContent(file.content)) return null
+      return decodeAttachmentText(file.content)
+    } catch {
+      return null
+    }
   }
 
   /** tools schema 实测占用（字符口径：1 token ≈ 1 字符；过滤后子集，各人因权限不同而不同，D65） */
@@ -983,46 +1180,26 @@ export class ChatService {
     currentChars: number,
     toolsCount: number,
     routing?: ToolRoutingResult,
+    attachmentsChars = 0,
   ): number {
     const outputReserve = Math.floor(model.maxContext * OUTPUT_RESERVE_RATIO)
-    const budget = model.maxContext - outputReserve - systemChars - toolsChars - currentChars
+    const budget = model.maxContext - outputReserve - systemChars - toolsChars - currentChars - attachmentsChars
     const routeLabel = routing
       ? `groups=${routing.fallback ? 'all(no-match)' : routing.groups.join(',')} `
       : ''
     if (budget < MIN_HISTORY_CHARS) {
       this.logger.warn(
         `上下文预算不足：maxContext=${model.maxContext} 输出预留=${outputReserve} system=${systemChars} ` +
-          `${routeLabel}tools=${toolsCount}(${toolsChars} 字符) 当前消息=${currentChars} → 历史预算 ${budget} < ${MIN_HISTORY_CHARS}，` +
+          `${routeLabel}tools=${toolsCount}(${toolsChars} 字符) 当前消息=${currentChars} 附件=${attachmentsChars} → 历史预算 ${budget} < ${MIN_HISTORY_CHARS}，` +
           '已按下限保底截取（建议调大模型 max_context 或精简工具/手册字数）',
       )
       return MIN_HISTORY_CHARS
     }
     this.logger.debug(
       `上下文预算：model maxContext=${model.maxContext} ${routeLabel}tools=${toolsCount} toolsBudget=${toolsChars} ` +
-        `systemBudget=${systemChars} historyBudget=${budget}`,
+        `systemBudget=${systemChars} attachmentsBudget=${attachmentsChars} historyBudget=${budget}`,
     )
     return budget
-  }
-
-  /**
-   * 历史消息截取（从最新往回装，装不下即停——等价于「装不下时继续从最早历史消息丢弃」）：
-   * 返回正序消息数组；system prompt 与 tools schema 恒完整（不受本函数影响）。
-   * @param historyNewestFirst 必须按**时间倒序**传入（最新在前），与查询 orderBy desc 一致
-   */
-  private pickHistory(
-    historyNewestFirst: Array<{ role: string; content: string }>,
-    budget: number,
-  ): EngineChatMessage[] {
-    const picked: EngineChatMessage[] = []
-    let used = 0
-    for (const m of historyNewestFirst) {
-      const cost = m.content.length
-      if (used + cost > budget) break
-      picked.push({ role: m.role as 'user' | 'assistant', content: m.content })
-      used += cost
-    }
-    picked.reverse()
-    return picked
   }
 
   /** 结算并更新 assistant 消息 */

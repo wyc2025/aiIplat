@@ -501,17 +501,18 @@ apps/api/src/
 
 ### ai_message —— 消息
 
-| 字段                         | 类型        | 说明                                            |
-| ---------------------------- | ----------- | ----------------------------------------------- |
-| id                           | bigint PK   |                                                 |
-| conversation_id              | bigint      |                                                 |
-| role                         | varchar(20) | user / assistant（system 不持久化，由后端拼装） |
-| content                      | longtext    |                                                 |
-| model_id                     | bigint      | assistant 消息记录所用模型，可空                |
-| tokens_input / tokens_output | int         | assistant 消息记录实际用量                      |
-| credits                      | int         | 本条消息扣减积分（user 消息为 0）               |
-| status                       | tinyint     | 1 正常 2 失败（流中断/上游错误）                |
-| created_at / deleted_at      | datetime    |                                                 |
+| 字段                         | 类型        | 说明                                                                                                              |
+| ---------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------- |
+| id                           | bigint PK   |                                                                                                                   |
+| conversation_id              | bigint      |                                                                                                                   |
+| role                         | varchar(20) | user / assistant（system 不持久化，由后端拼装）                                                                   |
+| content                      | longtext    |                                                                                                                   |
+| model_id                     | bigint      | assistant 消息记录所用模型，可空                                                                                  |
+| tokens_input / tokens_output | int         | assistant 消息记录实际用量                                                                                        |
+| credits                      | int         | 本条消息扣减积分（user 消息为 0）                                                                                 |
+| status                       | tinyint     | 1 正常 2 失败（流中断/上游错误）                                                                                  |
+| attachments                  | json        | P10 附件元信息 `[{fileId,name,ext,size,chars,mode,path}]`（mode=inject\|listed）；**只存元信息不存内容**（§26.1） |
+| created_at / deleted_at      | datetime    |                                                                                                                   |
 
 索引：(conversation_id, created_at)
 
@@ -844,7 +845,7 @@ main.ts 增补：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 函数�
 | SiteFacade CMS 层扩展（P5） | api/src/modules/site/facade | listArticles / readArticle / createArticle / updateArticle / publishArticle / ensureColumn / ensureTags / listColumns / listTags（全部收 siteId，slug 解析在工具层经 resolveSiteForTool，§20.1）；SiteFacadeModule 增 imports 文章/栏目/标签三模块（同域直注） | 已建（T71） |
 | SiteFacade 生命周期扩展（P5） | api/src/modules/site/facade | updateSite（委托 manage.update）/ getSiteDeleteImpact（R66 计数预检）/ deleteSite（委托 manage.remove） | 已建（T71） |
 | SiteArticleService.getOwnedSiteId | api/src/modules/site/article | 文章 → 所属站点 id（复用同一属主链：40109/40119），供门面 CMS 写路径定位站点作用域 | 已建（T71） |
-| CloudFacade 云盘根基点原语（P5） | api/src/modules/cloud/facade | listUserFiles / readUserFile / writeUserFile / moveUserFiles / deleteUserFiles / isUserDirPublic（基点 = 用户云盘根 parent_id=0，路径防穿越 + 文本白名单 + 64KB/256KB 上限 + 批量上限 20，§20.1）；CloudFacadeModule 增 imports SiteRootModule（inSite 标注） | 已建（T71） |
+| CloudFacade 云盘根基点原语（P5） | api/src/modules/cloud/facade | listUserFiles / readUserFile / writeUserFile / moveUserFiles / deleteUserFiles / isUserDirPublic（基点 = 用户云盘根 parent_id=0，路径防穿越 + 文本白名单 + **2MB**（P10 T97 由 64KB 放宽）/256KB 上限 + 批量上限 20，§20.1）；CloudFacadeModule 增 imports SiteRootModule（inSite 标注） | 已建（T71，P10 读上限放宽） |
 | AI 云盘五件套 | api/src/modules/ai/tool/tools | list_cloud_files / read_cloud_file / write_cloud_file / move_cloud_files / delete_cloud_files（handler 只注入 CloudFacade，§20.2） | 已建（T72） |
 | AI 站点 CMS 七件套 | api/src/modules/ai/tool/tools | list/read/create/update/publish_site_article + ensure_site_column / ensure_site_tags（D63 代发语义：默认草稿、明示才发布、不提供删除文章） | 已建（T73） |
 | AI 站点生命周期两件套 | api/src/modules/ai/tool/tools | update_site / delete_site（R66 确认卡三段影响 + 文章数统计） | 已建（T74） |
@@ -853,9 +854,9 @@ main.ts 增补：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 函数�
 | R14 字数口径转出 | api/src/modules/site/facade/site-facade.service.ts | `export { countWordsR14 }`（口径单一来源仍在 article.service.ts）：AI 工具确认卡需在**执行前**展示字数，经门面模块转出而非跨域直插站点域内部文件（铁律 6） | 已建（T73） |
 | prompt.sections.ts | api/src/modules/ai/chat | system prompt 分段拼装纯函数（助手设定文案 + composeSystemPrompt + textLength；零 Nest 依赖，供核查脚本直接 import，§21.1） | 已建（T77） |
 | capability.manifest.ts | api/src/modules/ai/chat | **能力清单常量表**（17 行：能力名 + 注入权限 + 一行文案 + 覆盖工具；`pickCapabilityRows` 按权限过滤 / `renderCapabilityList` 渲染）；与工具注册表三方同源，机械核查 | 已建（T77） |
-| tool.groups.ts | api/src/modules/ai/tool | **工具分组与确定性路由**（TOOL_GROUPS 6 组 28 工具 / KEYWORD_TO_GROUPS 词根 / resolveToolGroups / checkToolGroupCoverage 孤儿与陈旧校验） | 已建（T77） |
+| tool.groups.ts | api/src/modules/ai/tool | **工具分组与确定性路由**（TOOL_GROUPS 6 组 30 工具 / KEYWORD_TO_GROUPS 词根 / resolveToolGroups / checkToolGroupCoverage 孤儿与陈旧校验） | 已建（T77，P9 T92 补两工具） |
 | check-ai-prompt（`pnpm check:ai`） | apps/api/scripts/check-ai-prompt.ts | 手册分段三阈值 + 工具归组全覆盖 + 能力清单同源 + 路由样例机械核查（失败退出码 1；`pnpm --filter @iplat/api check:ai`） | 已建（T77） |
-| smoke-ai-tools（`pnpm smoke:ai`） | apps/api/scripts/smoke-ai-tools.ts | **AI 工具链路冒烟**（真实对话 → `ai_tool_call` 落库断言：F 排版 / I 导入；退出码 0 全过 / 1 失败 / 2 前置不满足；单用例重试 3 次 + 3s 间隔）；「何时必跑」清单见 PROGRESS「AI 冒烟清单」 | 已建（T95） |
+| smoke-ai-tools（`pnpm smoke:ai`） | apps/api/scripts/smoke-ai-tools.ts | **AI 工具链路冒烟**（真实对话 → `ai_tool_call` / `ai_message` 落库断言：F 排版 / I 导入 / J 附件 inject / K 附件 listed 自读；退出码 0 全过 / 1 失败 / 2 前置不满足；单用例重试 3 次 + 3s 间隔；附件夹具见 §26.9-7）；「何时必跑」清单见 PROGRESS「AI 冒烟清单」 | 已建（T95，P10 T99 扩两用例） |
 | SiteFacade 评论层扩展（P6） | api/src/modules/site/facade | listComments / auditComments（≤20 逐条独立成败）/ replyComment / getCommentBrief（全部收 siteId；SiteFacadeModule 增 imports SiteCommentModule） | 已建（T78） |
 | SiteFacade.resolveCoverPath（P6） | api/src/modules/site/facade | 封面判定对象（R72：media/ 前缀 + 真实图片行 + 可公开访问 + 扩展名白名单；失败附 media/ 可用图片前 10 条） | 已建（T79） |
 | AI 评论三件套 | api/src/modules/ai/tool/tools | list_site_comments / audit_site_comments / reply_site_comment（D69 代审 + 代回；跨站评论 40119） | 已建（T78） |
@@ -866,8 +867,11 @@ main.ts 增补：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 函数�
 | secret-box.util | api/src/common/utils/secret-box.util.ts | 短口令可逆密钥箱（AES-256-GCM：encryptSecret / decryptSecret / deriveKey，iv12+tag16 布局，异常一律返回 null）；当前用于分享提取码回显，密钥由调用方从配置派生（§23.2） | 已建（W5） |
 | file-ticket | api/src/modules/cloud/transfer/file-ticket.ts | 私有文件直链票据（HMAC-SHA256 无状态签名：createFileTicket / verifyFileTicket / FILE_TICKET_TTL_MS=2h；恒定时间比较；§23.4） | 已建（W7） |
 | downloadByUrl | web/src/utils/download.ts | 直链下载（URL 自带票据/公开 token 时交给浏览器原生下载：零内存驻留 + 断点续传；与 saveBlob 的分工见 §23.4） | 已建（W7） |
-| FilePicker | web/src/components/FilePicker | 云盘文件选择器（单层下钻 + 扩展名白名单过滤，只产出 `{id,name,ext,size}`，不读内容；文章导入用，其它需要"选云盘文件"的场景复用） | 已建（T88） |
+| FilePicker | web/src/components/FilePicker | 云盘文件选择器（单层下钻 + 扩展名白名单过滤，只产出 `{id,name,ext,size}`，不读内容；文章导入与 AI 对话附件共用） | 已建（T88，P10 T98 复用） |
 | DiffView | web/src/components/DiffView | 只读双栏 diff 弹窗（@codemirror/merge 动态 import、随弹窗挂载/销毁；用于"改了再确认"场景，如一键排版预览） | 已建（T89） |
+| attachment-resolver.ts | api/src/modules/ai/chat | **AI 对话附件解析链**（P10 T96）：白名单/上限常量 + `resolveAttachments`（经 CloudFacade 读字节，二进制嗅探 + 编码探测）+ `planAttachmentModes`（inject/listed 分流与注入组装）+ `renderAttachmentManifest`（会话可读清单）+ `parseStoredAttachments`（JSON 列安全读取）；纯函数零 Nest 依赖 | 已建（T96） |
+| CloudFacade 附件门面（P10） | api/src/modules/cloud/facade | `pathOfUserFile(userId, fileId)`（fileId → 相对云盘根路径，有界上溯 ≤10）+ `filterAliveFileIds(userId, ids)`（批量有效性判定，不读盘）；供 ai 域附件元信息与失效降级使用 | 已建（T96） |
+| attachment.ts | web/src/views/ai/utils/attachment.ts | 前端附件常量与预校验（白名单 / 2MB / ≤5 个 / 留档目录名 / `isAllowedAttachment`）；与后端 `attachment-resolver.ts` 同源副本（体验级预校验，真正校验链在后端） | 已建（T98） |
 
 ### Redis Key 增补约定（写入 RedisKey 常量）
 
@@ -1974,6 +1978,130 @@ readTextFileById(userId, fileId, { exts, maxBytes, purpose })
 - `pnpm --filter @iplat/api check:ai` 16/16；`tsc` / `vue-tsc` / ESLint 零错；
 - **可重跑冒烟（T95）**：`pnpm --filter @iplat/api smoke:ai` —— 真实对话 + `ai_tool_call` 落库断言（本轮实测 F #134 / I #135 均 `executed`）；「改了工具链就必须跑」的触发条件与判据见 PROGRESS「AI 冒烟清单」。
 
+## 26. P10：AI 对话附件上传（文本类）
+
+> 来源：`docs/P10/PRD-P10-AI-ATTACHMENT.md` + `ARCHITECTURE-P10-增补.md` + `API-P10-增补.md`（Kimi，2026-09-19）。编号：D82~~D86 / R82~~R87 / T96~~T99。
+> **零新依赖、零新 HTTP 端点、零新错误码**；AI 工具 **30 不变**（`read_cloud_file` 签名变更）；**DB +1 列**（`ai_message.attachments`）。
+> 行业事实：大模型 API 没有通用附件概念（DeepSeek 只收图片、文档须应用侧解析成文本注入），「解析 + 注入」是标准架构而非绕道。
+
+### 26.1 数据模型（T96 / D82）
+
+```sql
+ALTER TABLE ai_message ADD COLUMN attachments JSON NULL
+  COMMENT '附件元信息 [{fileId,name,ext,size,chars,mode,path}]，mode=inject|listed；仅存元信息不存内容';
+```
+
+迁移 `20260920100000_add_ai_message_attachments`（手写 SQL + `prisma migrate deploy`，纯加列无回填、零风险）：
+
+- **只存元信息、不冗余内容**：历史轮次重组装时按 `fileId` 重读云盘（§26.3）；
+- 源文件被删/无权/超限 → 该附件在组装时降级为占位「（附件已失效）」或标注 invalid，**不报错、不阻断对话**（验收 6）；
+- Prisma 侧 `AiMessage.attachments Json?`；读取一律经 `parseStoredAttachments`（JSON 列不可信，单项非法即丢弃）。
+
+### 26.2 附件解析链（T96 / D86 / R82）
+
+新增 `modules/ai/chat/attachment-resolver.ts`（纯函数 + 门面注入，零 Nest 依赖）：
+
+```
+resolveAttachments(cloudFacade, userId, [{fileId}])
+  → CloudFacade.readTextFileById（属主/未删/非目录/白名单 30012/≤2MB 30013，一次到位）
+  → 二进制嗅探（窗口内 NUL 字节 → 30012）
+  → 编码探测（UTF-8 剥 BOM 优先，替换字符多则 GBK 回取）
+  → CloudFacade.pathOfUserFile（元信息里的 path，供清单与 read_cloud_file 寻址）
+  → { meta, text }[]
+```
+
+- **域边界**：ai 域不直接查 `cloud_file`、不直接读盘，全经 CloudFacade（铁律 6）；本次为其新增两个门面方法——
+  `pathOfUserFile(userId, fileId)`（有界上溯 ≤10 层拼相对云盘根路径）与 `filterAliveFileIds(userId, ids)`（批量有效性判定，不读盘）；
+- **编码探测**属「文本语义」，与 P8 §24.5 同口径但**在 ai 域侧实现**（跨域 import site 域内部解析器违反铁律 6，故为受控重复）；
+- 附件上传（本地路）复用云盘既有 upload 链路落 `/ai-attachments/`（D84）：前端先调上传接口（自动建目录、配额记账、同名 "(1)"），再把返回 `fileId` 放进 chat body——**后端零新端点**；
+- 类型白名单 32 项（D86）：txt/md/markdown/json/js/ts/jsx/tsx/vue/css/scss/xml/yml/yaml/log/csv/html/htm/py/java/go/rs/c/cc/cpp/h/hpp/sql/sh/bat/ini/conf/toml。
+
+### 26.3 双模式分流与注入组装（T96 / D83 / R83 / R84）
+
+`planAttachmentModes(resolved)` 按用户选择顺序逐条判定，组装顺序 = system → 历史 → 当前 user：
+
+1. **inject**：单文件 ≤30,000 字符 **且** 本条累计 ≤60,000 字符 → 全文注入该条 user 消息**前部**，格式 `【附件 {name}】` + fenced code block；
+2. **截断注入**：单文件 >30,000 字符但累计帽内仍有空间（余量 ≥1,000 字符，见 §26.9-3）→ 注入前 N 字符 + 尾部标注「（已截断，完整文件已列入可读清单，路径 {path}）」，**同时进清单**（记 `mode='listed'`：前端标签与「需自读」语义一致）；
+3. **listed**：不注入正文，仅登记；模型按需 `read_cloud_file` 自读。
+
+**会话可读清单（R84）**：本会话所有 user 消息附件的**并集**（去重按最近优先、失效标注、上限 20），随每轮 system 动态追加：
+
+```
+用户本会话附带文件（可用 read_cloud_file 按路径分段读取，单次 ≤2 万字符；未读前不得猜测文件内容）：
+- {path}（{name}，{chars} 字符）
+```
+
+清单属动态上下文，**不计入手册 2000 字帽**（`check:ai` 只核手册/能力清单两段）；确认回填链路同样注入（§26.7）。
+
+### 26.4 预算扣减（T96 / D85）
+
+P5 预算动态化扩一项（`computeHistoryBudget`）：
+
+```
+history 预算 = max_context − 输出预留(25%) − system（含可读清单） − tools schema − 当前消息 − attachments
+```
+
+- `attachments` = 本条消息 inject 实算字符（`【附件】头 + 正文`）；清单文案已并入 system 段（不重复扣减）；
+- 下限保护 2000 不变；`DEBUG_AI=1` 日志新增 `attachmentsBudget=` 字段；
+- attachments **无下限保护**——超限场景由 D83 分流在注入前消化，不走预算硬切。
+
+### 26.5 read_cloud_file 分页（T97 / R85）
+
+| 项          | 变更                                                                                            |
+| ----------- | ----------------------------------------------------------------------------------------------- |
+| parameters  | 加 `offsetChars?`（默认 0）、`maxChars?`（默认 20000，上限 50000）                              |
+| 返回        | 加 `totalChars` / `truncated` / `nextOffset?`，并回显实际 `offsetChars`（便于模型自我核对）     |
+| description | 补「大文件请分段读取：先读开头判断结构，truncated=true 时用 nextOffset 续读，不得假定已读全文」 |
+
+- **旧调用兼容但行为变化**：不传分页参数等价于 `offsetChars=0, maxChars=20000`（原先默认返回全文 ≤64KB），description 与手册（PLATFORM-GUIDE「工具使用原则」）均已写明，避免模型误以为读到全文；
+- 切片在**工具层**（读链返回全文文本，切片零成本）；**AI 云盘读上限由 64KB 放宽到 2MB**（`AI_CLOUD_READ_MAX_BYTES`）——`read_cloud_file` 是清单自读的唯一通道，上限若仍是 64KB，>64KB 的附件列进清单后模型永远读不到（K 用例实测暴露，§26.9-9）；上下文安全改由工具分页承担；
+- KEYWORD_TO_GROUPS 不变（cloud 组既有）；能力清单 `cloud.read` 行文案同步改「默认只回开头 2 万字符，大文件按 nextOffset 分段续读」；
+- **工具定义变更 → 必跑 `pnpm smoke:ai`**（T95 触发条件表），本期已跑（§26.9）。
+
+### 26.6 前端（T98 / R86 / R87）
+
+- 输入区：回形针下拉（从云盘选择 → 复用 P8 `FilePicker`；上传本地文件 → 复用 `uploadFile`）+ 待发 chips（图标 + 名称 + 大小 + ×移除）；
+- **本地文件仅暂存内存**，**发送时**才上传留档到 `/ai-attachments/`（目录不存在自动创建；未发送不占云盘）；上传失败则整条不发出、chips 保留可重试；
+- 气泡：用户气泡底部附件行（图标 + 名称 + listed 标「AI 按需读取」）；历史消息同源渲染；失效附件置灰 + 「源文件已删除」；附件**纯展示不做跳转联动**；
+- 前端常量与后端同源副本：`web/src/views/ai/utils/attachment.ts`（白名单 / 2MB / 5 个 / 目录名），只做体验级预校验，真正校验链在后端。
+
+### 26.7 SSE 与确认链兼容
+
+- chat SSE **事件类型不变**、流式输出与工具确认回路零影响；附件仅影响**组装**；
+- `meta` 事件**兼容扩展** `attachments` 字段（本次附件元信息，含 inject/listed 分流结果），前端据此渲染权威模式标签（§26.9-1）；
+- 确认后重发（confirm 链）重组装历史时附件重读——内容可能已被用户编辑，语义即「以最新文件内容继续」（可接受）；失效降级同 §26.1。
+
+### 26.8 演进方向（登记不实施）
+
+| 项                  | 触发条件                     | 预留设计                                                                                           |
+| ------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------- |
+| 二期图片/多模态附件 | 厂商模型表加 vision 能力标记 | 组装层对 vision 模型产 content 数组（text + image_url/base64），非 vision 模型拒收并提示；前端预览 |
+| RAG / 摘要接力      | 清单自读实测效果差           | 侧录 prompt 措辞先调（PRD 验收 2 的唯一不确定性）                                                  |
+| 附件用量分析        | 需要时                       | `ai_message.attachments` 已有元信息，统计零成本                                                    |
+
+### 26.9 实现偏差与验证登记（T99）
+
+| #   | 项                                             | 说明                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| --- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | meta 事件扩展 attachments                      | 增补文档写「SSE 事件流格式不变」；实现保持事件类型与既有字段不变，仅**兼容扩展** meta 的 `attachments`（否则前端无法知道后端分流结果，模式标签只能靠猜）                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 2   | 历史 inject 附件才重读                         | §26.3「历史轮次重组装时按 fileId 重读」按 `mode` 收口：`mode='inject'` 才重读正文，`listed` 不重读（清单已给路径，模型按需自读）——避免每轮对全部历史附件无谓读盘                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 3   | 截断注入最小余量 1000 字符                     | 增补文档只说「余量仍有空间」，实现补 `INJECT_TRUNCATE_MIN_CHARS=1000`（注入 1~999 字符的尾巴无意义，直接 listed）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| 4   | attachmentsBudget 口径                         | 增补文档写「inject 全文 + 清单文案」；实现把清单并入 system 段计入 `systemChars`，`attachmentsBudget` 只记 inject 实算字符——**总额等价，避免重复扣减**                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 5   | 编码探测受控重复                               | 与 P8 §24.5 同口径，但 ai 域侧自带实现（跨域 import site 域内部解析器违反铁律 6）；后续如提公共工具再统一                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 6   | 冒烟脚本 SSE 解析修正                          | `scripts/smoke-ai-tools.ts` 原先按 `event:` 行解析（后端实际只发 `data: {json}`），done 判定一直靠流关闭兜底；本期修正为解析 data 内的 `type`（新增用例依赖 meta/content）                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 7   | 冒烟附件夹具复用                               | 夹具落 `/ai-attachments/smoke-attach-*.txt`（固定名 + 固定核对码），**已存在则复用**——云盘软删不释放 used（R2 语义），反复重建会持续蚕食配额；三个夹具合计约 **2.15MB**（inject 1.7KB / listed 103KB / big 2.0MB，末者为校验链 30013 用例）                                                                                                                                                                                                                                                                                                                                                                |
+| 8   | 手册字数再平衡                                 | 加「读大文件用 read_cloud_file 分段读，未读前不臆测」的同时等量精简既有条目：通用版 **980/1000**、能力清单 **832/1200**、合注 **1863/2000**                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 9   | AI 云盘读上限 64KB → 2MB                       | 增补文档写「CloudFacade 读取链不动（文本已 ≤2MB 入内存）」，但实现里 `AI_CLOUD_READ_MAX_BYTES` 实为 **64KB** → 大附件列清单后模型**读不到**（K 用例 3 次尝试均回喂 30013，实测暴露）；故放宽到 2MB 与附件口径（D83）一致，上下文安全由工具分页承担。**注意 `read_site_file` 仍维持 64KB（40115），本期未动站点读口径**                                                                                                                                                                                                                                                                                     |
+| 10  | 截断点 = min(单文件帽, 剩余帽)                 | 增补文档只写「总量帽内仍有空间即允许截断注入」；若直接按剩余帽截断，3.5 万字符文件（剩余 6 万）会被**全量注入却标注已截断**（验收 3 实测暴露）。故截断点取两帽较小者，单文件帽同时是「全文注入」的判据                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 11  | 冒烟 I 用例候选过滤                            | 新增的 2MB 大文件夹具会顶掉既有 I 用例的文件候选（导入链上限 2MB → 30013）；故候选查询排除附件夹具目录并限体积 ≤2MB，保证 F/I/J/K 四用例互不干扰                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 12  | **收尾轮 + 工具往返预算护栏（交付后修复 W1）** | 交付后实测发现两个叠加缺陷：① `maxToolRounds=3` 用尽即 `break`，**模型从未见到最后一批工具结果**也没机会作答 → 用户看到「AI 读取文件后莫名其妙停了」（admin 会话 #111：6 次 `read_cloud_file`、正文仅 16 字）；② 工具往返字符**不参与任何预算**，`tokens_input` 已达 **118,865 / 128,000**，再读一两轮必被上游以超上下文 400 拒绝。修复：抽出 `runToolRounds`（chat / confirm 两链共用）——轮次用尽 **或** 工具往返 > `max_context × 40%` 时追加**收尾轮**（不携带 tools 再调一次，指令要求基于已读内容给结论、说明还缺什么）。复测同场景：2 段读取后收尾，输出 **3,207 字**完整总结，`tokens_input` 46,458 |
+
+**验收对照（PRD §4）**：小附件注入（1）/ 大文件自读（2）/ 截断标注（3）/ 校验链 30001·30012·30013·40001（4）/ 预算扣减（5）/ 失效降级（6）/ 前端四态（7）/ 回归（8）——
+**全部实测通过（2026-09-20）**：1·2·8 由 `pnpm smoke:ai` **4/4** 覆盖（真实模型 + `ai_message.attachments` 与 `ai_tool_call` 落库断言，K 用例证明模型主动分段读到文件末尾）；
+3·4·6 由一次性验收脚本 **11/11** 覆盖（分流纯函数四组断言 + 四条错误码 + 删除源文件后 `invalid=true`）；5 由 `DEBUG_AI` 预算日志与组装链核对；
+7 由 agent-browser 真机复验（chips 增删 / inject 无标签 / listed 标「AI 按需读取」/ 历史渲染 / 失效置灰 / 本地上传留档 + 配额记账）；
+累计消耗积分 **1110**、测试数据已清理（详见 PROGRESS「P10 任务拆解」实测记录）。
+
 ## 20. AI 能力扩展（P5）：云盘/CMS/生命周期工具 + 预算动态化（自 docs/P5/ARCHITECTURE-P5-增补.md 并入；增补文档保留为历史细节参考）
 
 > 编号与 `docs/P5/PRD-P5-AI.md` 对齐（D62~~D66 / R63~~R68 / T71~T76）。**零新 HTTP 端点、零新错误码、零新依赖**：
@@ -2007,7 +2135,7 @@ deleteSite(userId, siteId)             → 委托 manage.remove（{ deletedArtic
 
 ```
 listUserFiles(userId, { path?, recursive? })  → { path, items[{name,path,isDir,size,ext,updatedAt,inSite}], truncated?, quota{used,limit} }
-readUserFile(userId, path)                    → 文本白名单 + ≤64KB
+readUserFile(userId, path)                    → 文本白名单 + ≤2MB（P10 T97 由 64KB 放宽，配合 read_cloud_file 分页）
 writeUserFile(userId, path, content)          → 复用 writeFileRaw 全链（mkdir -p / R6 / 温和覆盖 / used 记账 / 配额 30003）
 moveUserFiles(userId, moves[{from,to}])       → 逐条 { from, to, finalPath, ok, error?, targetPublic? }
 deleteUserFiles(userId, paths[])              → 逐条 { path, ok, error? }
@@ -2019,7 +2147,7 @@ isUserDirPublic(userId, path)                 → 供 move 确认卡预判「目
 - `EDITABLE_TEXT_EXTS`（原 file.service 私有常量）加 `export`，云盘原语读写白名单复用同一集，单一来源
 - CloudFacadeModule 增 `imports: [SiteRootModule]`（inSite 标注需要站点根集合；SiteRootModule 零跨域 import，不成环）
 - **R64 路径口径**：空段 / `.` / `..` / 绝对路径 / 反斜杠 / 单段 >64 / 深度 >10 一律拒绝（30001；深度超限 30006）；
-  文本白名单外 30012；读 >64KB、写 >256KB 30013；`move` 的 `to` 为**目标目录路径**（保留原文件名移入、自动 mkdir -p，
+  文本白名单外 30012；读 >2MB（P10 T97 由 64KB 放宽）、写 >256KB 30013；`move` 的 `to` 为**目标目录路径**（保留原文件名移入、自动 mkdir -p，
   空串 = 云盘根）；批量上限 20（`AI_CLOUD_MAX_BATCH`）
 - **move 的 R39 偏差**：管理端 move 有「移入公开目录二次确认」交互，AI 工具无此交互位——确认卡即用户确认动作，
   故 `moveUserFiles` 直接带 `confirmPublic: true` 执行并在结果中标注 `targetPublic=true`，不阻断
@@ -2037,22 +2165,22 @@ isUserDirPublic(userId, path)                 → 供 move 确认卡预判「目
   生命周期 = `site:site:manage`
 - **工具清单与风险级别**
 
-| 工具                 | risk  | perms                | 要点                                                                                                 |
-| -------------------- | ----- | -------------------- | ---------------------------------------------------------------------------------------------------- |
-| list_cloud_files     | read  | cloud:file:list      | `{ path?, recursive? }`；返回条目（含相对路径与 inSite）+ 配额用量                                   |
-| read_cloud_file      | read  | cloud:file:list      | `{ path }`；文本白名单 ≤64KB                                                                         |
-| write_cloud_file     | write | cloud:file:upload    | `{ path, content }`；同路径温和覆盖（旧文件进回收站）；摘要复用「文件清单」表格（path/action/size）  |
-| move_cloud_files     | write | cloud:file:upload    | `{ moves[{from,to}] }`；批量 ≤20；站点根 30019 / 回收站 30019 全继承                                 |
-| delete_cloud_files   | write | cloud:file:delete    | `{ paths[] }`；**仅软删进回收站**；站点根 30020 拦截                                                 |
-| list_site_articles   | read  | site:article:list    | 分页摘要（无正文），pageSize ≤20                                                                     |
-| read_site_article    | read  | site:article:list    | 全文（含 contentMd；超 64KB 截断）；交叉校验 slug 与文章实际站点一致                                 |
-| create_site_article  | write | site:article:create  | 默认草稿；status=1 摘要带「发布即公开可见」警示行；columnId 缺省时本站唯一栏目直达、否则回喂栏目清单 |
-| update_site_article  | write | site:article:update  | 部分更新；tagNames 提供即整体替换                                                                    |
-| publish_site_article | write | site:article:publish | 上下架；上架摘要带公开警示                                                                           |
-| ensure_site_column   | write | site:column:create   | 同名同父命中即复用（created=false）                                                                  |
-| ensure_site_tags     | write | site:tag:create      | 批量幂等 → [{id,name,created}]                                                                       |
-| update_site          | write | site:site:manage     | `{ slug, title?, description?, newSlug?, status?, commentAudit? }`；改 slug / 停用的影响在摘要中明示 |
-| delete_site          | write | site:site:manage     | 摘要 = R66 三段影响 + 文章/栏目/标签/评论数；执行走既有删站级联                                      |
+| 工具                 | risk  | perms                | 要点                                                                                                                               |
+| -------------------- | ----- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| list_cloud_files     | read  | cloud:file:list      | `{ path?, recursive? }`；返回条目（含相对路径与 inSite）+ 配额用量                                                                 |
+| read_cloud_file      | read  | cloud:file:list      | `{ path, offsetChars?, maxChars? }`（P10 分页：默认前 2 万字符、上限 5 万，返回 totalChars/truncated/nextOffset）；文本白名单 ≤2MB |
+| write_cloud_file     | write | cloud:file:upload    | `{ path, content }`；同路径温和覆盖（旧文件进回收站）；摘要复用「文件清单」表格（path/action/size）                                |
+| move_cloud_files     | write | cloud:file:upload    | `{ moves[{from,to}] }`；批量 ≤20；站点根 30019 / 回收站 30019 全继承                                                               |
+| delete_cloud_files   | write | cloud:file:delete    | `{ paths[] }`；**仅软删进回收站**；站点根 30020 拦截                                                                               |
+| list_site_articles   | read  | site:article:list    | 分页摘要（无正文），pageSize ≤20                                                                                                   |
+| read_site_article    | read  | site:article:list    | 全文（含 contentMd；超 64KB 截断）；交叉校验 slug 与文章实际站点一致                                                               |
+| create_site_article  | write | site:article:create  | 默认草稿；status=1 摘要带「发布即公开可见」警示行；columnId 缺省时本站唯一栏目直达、否则回喂栏目清单                               |
+| update_site_article  | write | site:article:update  | 部分更新；tagNames 提供即整体替换                                                                                                  |
+| publish_site_article | write | site:article:publish | 上下架；上架摘要带公开警示                                                                                                         |
+| ensure_site_column   | write | site:column:create   | 同名同父命中即复用（created=false）                                                                                                |
+| ensure_site_tags     | write | site:tag:create      | 批量幂等 → [{id,name,created}]                                                                                                     |
+| update_site          | write | site:site:manage     | `{ slug, title?, description?, newSlug?, status?, commentAudit? }`；改 slug / 停用的影响在摘要中明示                               |
+| delete_site          | write | site:site:manage     | 摘要 = R66 三段影响 + 文章/栏目/标签/评论数；执行走既有删站级联                                                                    |
 
 - **summarize 摘要形态**：新工具一律返回**字符串摘要（中文标签多行）**——
   `move_cloud_files` = 逐条 `from → to`（目标在公开目录的条目附「内容将对外可见」）；`delete_cloud_files` =

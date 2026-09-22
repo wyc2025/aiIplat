@@ -60,13 +60,26 @@ interface CheckResult {
 
 /** 一次对话流的观察结果（用于失败诊断，不参与判定） */
 interface StreamOutcome {
-  /** 是否收到 event: done */
+  /** 是否收到 done 事件 */
   finished: boolean
-  /** event: error 的内容（上游/预检失败时给诊断线索） */
+  /** error 事件的内容（上游/预检失败时给诊断线索） */
   errorEvent: string | null
   /** 收到的字节数（0 = 流几乎没内容） */
   bytes: number
+  /** meta 事件负载（P10：含 userMessageId 与 attachments 元信息） */
+  meta: Record<string, unknown> | null
+  /** 累积的助手文本（P10 用例：断言「模型确实读到了附件内容」） */
+  content: string
 }
+
+/** 云盘根下的附件留档目录（与前端/后端同口径，D84） */
+const ATTACHMENT_DIR = 'ai-attachments'
+/** 附件夹具核对码（固定值：文件已存在时复用，避免反复占用配额） */
+const INJECT_MARKER = 'IPLAT-INJECT-OK'
+const LISTED_MARKER = 'IPLAT-TAIL-OK'
+/** 附件夹具文件名 */
+const INJECT_FIXTURE = 'smoke-attach-inject.txt'
+const LISTED_FIXTURE = 'smoke-attach-listed.txt'
 
 /** 取登录 token（失败直接抛出，属前置问题） */
 async function login(): Promise<string> {
@@ -83,17 +96,23 @@ async function login(): Promise<string> {
 
 /**
  * 发一条消息并读完整条 SSE 流。
- * 判定结论一律以 ai_tool_call 落库为准；本函数只负责「等模型跑完」并收集失败诊断信息。
+ * 判定结论一律以 ai_tool_call / ai_message 落库为准；本函数只负责「等模型跑完」并收集失败诊断信息。
+ * P10：可选 attachments（附件用例）；同时收集 meta 事件（附件元信息）与助手文本（内容引用断言）。
  */
-async function chat(token: string, modelId: number, content: string): Promise<StreamOutcome> {
+async function chat(
+  token: string,
+  modelId: number,
+  content: string,
+  attachments?: Array<{ fileId: string }>,
+): Promise<StreamOutcome> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), CHAT_TIMEOUT_MS)
-  const outcome: StreamOutcome = { finished: false, errorEvent: null, bytes: 0 }
+  const outcome: StreamOutcome = { finished: false, errorEvent: null, bytes: 0, meta: null, content: '' }
   try {
     const res = await fetch(`${BASE}/api/ai/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ modelId, content }),
+      body: JSON.stringify({ modelId, content, ...(attachments?.length ? { attachments } : {}) }),
       signal: controller.signal,
     })
     if (!res.ok || !res.body) {
@@ -113,11 +132,18 @@ async function chat(token: string, modelId: number, content: string): Promise<St
       while (index >= 0) {
         const rawEvent = buffer.slice(0, index)
         buffer = buffer.slice(index + 2)
-        const eventName = /^event:\s*(.+)$/m.exec(rawEvent)?.[1]?.trim()
-        if (eventName === 'done') outcome.finished = true
-        if (eventName === 'error') {
-          const data = /^data:\s*(.+)$/m.exec(rawEvent)?.[1]?.trim() ?? ''
-          outcome.errorEvent = data.slice(0, 200)
+        // SSE 帧为单条 `data: {json}`（type 在 JSON 体内，无 event: 行）
+        const dataLine = /^data:\s*(.+)$/m.exec(rawEvent)?.[1]?.trim()
+        if (dataLine) {
+          try {
+            const payload = JSON.parse(dataLine) as Record<string, unknown> & { type?: string; content?: string }
+            if (payload.type === 'done') outcome.finished = true
+            else if (payload.type === 'meta') outcome.meta = payload
+            else if (payload.type === 'delta' && typeof payload.content === 'string') outcome.content += payload.content
+            else if (payload.type === 'error') outcome.errorEvent = JSON.stringify(payload).slice(0, 200)
+          } catch {
+            // 非 JSON data 行（心跳等）：忽略
+          }
         }
         index = buffer.indexOf('\n\n')
       }
@@ -126,6 +152,92 @@ async function chat(token: string, modelId: number, content: string): Promise<St
   } finally {
     clearTimeout(timer)
   }
+}
+
+// ==================== P10 附件夹具（云盘 API 直接操作，走真实业务链路） ====================
+
+interface ApiEnvelope<T> {
+  code?: number
+  message?: string
+  data?: T
+}
+
+/** 统一请求（自动带 token、解开统一响应体；非 0 即抛） */
+async function api<T>(
+  token: string,
+  path: string,
+  options: { method?: string; json?: unknown; form?: FormData } = {},
+): Promise<T> {
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` }
+  let body: FormData | string | undefined
+  if (options.form) {
+    body = options.form
+  } else if (options.json !== undefined) {
+    headers['Content-Type'] = 'application/json'
+    body = JSON.stringify(options.json)
+  }
+  const res = await fetch(`${BASE}${path}`, { method: options.method ?? 'GET', headers, body })
+  const payload = (await res.json()) as ApiEnvelope<T>
+  if (payload.code !== 0) {
+    throw new Error(`${path} → code=${payload.code ?? res.status} ${payload.message ?? ''}`)
+  }
+  return payload.data as T
+}
+
+/** 附件留档目录（存在即复用，不存在才创建） */
+async function ensureAttachmentDir(token: string): Promise<string> {
+  const root = await api<{ list: Array<{ id: string; name: string; isDir: boolean }> }>(
+    token,
+    '/api/cloud/file/list?parentId=0',
+  )
+  const existed = root.list.find((item) => item.isDir && item.name === ATTACHMENT_DIR)
+  if (existed) return existed.id
+  const created = await api<{ id: string }>(token, '/api/cloud/file/mkdir', {
+    method: 'POST',
+    json: { parentId: 0, name: ATTACHMENT_DIR },
+  })
+  return created.id
+}
+
+/**
+ * 附件夹具（固定文件名 + 固定内容）：已存在则复用。
+ * 复用而非每次重建，是因为云盘软删不释放 used（R2 语义），反复建夹具会持续蚕食配额。
+ */
+async function ensureFixture(token: string, name: string, content: string): Promise<string> {
+  const dirId = await ensureAttachmentDir(token)
+  const dir = await api<{ list: Array<{ id: string; name: string; isDir: boolean }> }>(
+    token,
+    `/api/cloud/file/list?parentId=${dirId}`,
+  )
+  const existed = dir.list.find((item) => !item.isDir && item.name === name)
+  if (existed) return existed.id
+
+  const form = new FormData()
+  form.append('file', new Blob([content], { type: 'text/plain' }), name)
+  const uploaded = await api<{ id: string }>(token, `/api/cloud/file/upload?parentId=${dirId}`, {
+    method: 'POST',
+    form,
+  })
+  return uploaded.id
+}
+
+/** inject 用例夹具：小文件（全文注入，模型应直接答出核对码） */
+function injectFixtureContent(): string {
+  return (
+    `# 小附件核对\n\n核对码：${INJECT_MARKER}\n\n` + '本行用于撑出若干行文本，验证全文注入。\n'.repeat(30)
+  )
+}
+
+/** listed 用例夹具：>3 万字符（触发清单模式），核对码放在**文件末尾**（迫使模型分段读到后段） */
+function listedFixtureContent(): string {
+  const filler = '这一行用于把文件撑到三万字符以上，触发清单模式与分段自读。\n'
+  return `# 大附件核对\n\n开头说明：本文件很长，末尾才是核对码。\n\n${filler.repeat(1200)}\n文件末尾核对码：${LISTED_MARKER}\n`
+}
+
+/** 从 meta 事件读取本次附件元信息（后端分流结果，权威） */
+function metaAttachments(outcome: StreamOutcome): Array<{ fileId: string; mode: string; chars: number }> {
+  const raw = outcome.meta?.attachments
+  return Array.isArray(raw) ? (raw as Array<{ fileId: string; mode: string; chars: number }>) : []
 }
 
 /** since 之后该工具最近一条留痕的断言（无记录 / 状态非 executed / verify 不通过 → 失败原因） */
@@ -264,8 +376,17 @@ async function main(): Promise<void> {
 
     // 用例 I：云盘文件导入（需要一份 md/markdown/txt；无则跳过）
     console.log('I. import_site_article（导入解析）')
+    // 候选过滤：排除附件夹具目录（J/K 的夹具含 >2MB 大文件，导入链上限 2MB 会被 30013 拒），并限体积 ≤2MB
+    const attachmentDirId = await ensureAttachmentDir(token)
     const candidate = await prisma.cloudFile.findFirst({
-      where: { userId, deletedAt: null, isDir: 0, ext: { in: ['md', 'markdown', 'txt'] } },
+      where: {
+        userId,
+        deletedAt: null,
+        isDir: 0,
+        ext: { in: ['md', 'markdown', 'txt'] },
+        size: { lte: BigInt(2 * 1024 * 1024) },
+        parentId: { not: BigInt(attachmentDirId) },
+      },
       orderBy: { id: 'desc' },
       select: { name: true, parentId: true, size: true },
     })
@@ -298,6 +419,110 @@ async function main(): Promise<void> {
         if (attempt < MAX_ATTEMPT) await sleep(RETRY_DELAY_MS)
       }
       if (!done) report('I 导入工具被调用且成功落库', { ok: false, reason: lastReason })
+    }
+
+    // 用例 J：附件 inject（P10 T99 验收 1）——小文件全文注入，模型无需调工具即可答出文件内核对码
+    console.log('J. 附件 inject（小文件全文注入）')
+    {
+      const fixture = injectFixtureContent()
+      try {
+        const fileId = await ensureFixture(token, INJECT_FIXTURE, fixture)
+        console.log(`  · 夹具附件 #${fileId}（${fixture.length} 字符，${ATTACHMENT_DIR}/${INJECT_FIXTURE}）`)
+        let lastReason = '未执行'
+        let done = false
+        for (let attempt = 1; attempt <= MAX_ATTEMPT && !done; attempt += 1) {
+          const outcome = await chat(
+            token,
+            modelId,
+            '请读一下我附带的文件，其中有一个核对码，只回答核对码本身。',
+            [{ fileId }],
+          )
+          const target = metaAttachments(outcome).find((item) => item.fileId === fileId)
+          let result: CheckResult
+          if (!target) {
+            result = { ok: false, reason: withStreamHint('meta.attachments 未包含本次附件', outcome) }
+          } else if (target.mode !== 'inject') {
+            result = { ok: false, reason: `附件被分流为 ${target.mode}（小文件应为 inject）` }
+          } else if (!outcome.content.includes(INJECT_MARKER)) {
+            result = { ok: false, reason: `模型回复未含核对码（${outcome.content.slice(0, 80)}）` }
+          } else {
+            result = { ok: true, reason: `mode=inject / ${target.chars} 字符，模型答出核对码` }
+          }
+          if (result.ok) {
+            report('J 小附件全文注入且模型正确引用', result)
+            done = true
+            break
+          }
+          lastReason = result.reason
+          console.log(`  · 第 ${attempt}/${MAX_ATTEMPT} 次未通过：${lastReason}`)
+          if (attempt < MAX_ATTEMPT) await sleep(RETRY_DELAY_MS)
+        }
+        if (!done) report('J 小附件全文注入且模型正确引用', { ok: false, reason: lastReason })
+      } catch (error) {
+        report('J 小附件全文注入且模型正确引用', {
+          ok: false,
+          reason: `夹具准备失败：${(error as Error).message}`,
+        })
+      }
+    }
+
+    // 用例 K：附件 listed（P10 T99 验收 2）——大文件走清单，模型须**主动**调 read_cloud_file 分段读到末尾
+    console.log('K. 附件 listed（大文件清单自读）')
+    {
+      const fixture = listedFixtureContent()
+      try {
+        const fileId = await ensureFixture(token, LISTED_FIXTURE, fixture)
+        console.log(`  · 夹具附件 #${fileId}（${fixture.length} 字符，核对码在文件末尾）`)
+        let lastReason = '未执行'
+        let done = false
+        for (let attempt = 1; attempt <= MAX_ATTEMPT && !done; attempt += 1) {
+          const since = new Date()
+          const outcome = await chat(
+            token,
+            modelId,
+            '我附带了一个较大的文本文件，其末尾有一个核对码。请用工具按路径分段读取该文件'
+              + '（本会话附带文件清单里有它的路径），然后只回答核对码本身。',
+            [{ fileId }],
+          )
+          const target = metaAttachments(outcome).find((item) => item.fileId === fileId)
+          let result: CheckResult
+          if (!target) {
+            result = { ok: false, reason: withStreamHint('meta.attachments 未包含本次附件', outcome) }
+          } else if (target.mode !== 'listed') {
+            result = { ok: false, reason: `附件被分流为 ${target.mode}（>3 万字符应为 listed）` }
+          } else {
+            const call = await assertToolCall(prisma, userId, 'read_cloud_file', since, (params, res) => {
+              if (params.offsetChars === undefined && params.maxChars === undefined) {
+                return '未带分页参数（offsetChars / maxChars）'
+              }
+              if (!res.includes('"totalChars"')) return 'result 未含 totalChars'
+              if (!res.includes('"truncated"')) return 'result 未含 truncated'
+              return null
+            })
+            if (!call.ok) {
+              result = { ok: false, reason: withStreamHint(call.reason, outcome) }
+            } else if (!outcome.content.includes(LISTED_MARKER)) {
+              result = { ok: false, reason: `模型回复未含末尾核对码（${outcome.content.slice(0, 80)}）` }
+            } else {
+              result = { ok: true, reason: `mode=listed / ${call.reason} / 模型答出末尾核对码` }
+            }
+          }
+          if (result.ok) {
+            report('K 大文件清单自读（read_cloud_file 分页）', result)
+            done = true
+            break
+          }
+          lastReason = result.reason
+          console.log(`  · 第 ${attempt}/${MAX_ATTEMPT} 次未通过：${lastReason}`)
+          if (attempt < MAX_ATTEMPT) await sleep(RETRY_DELAY_MS)
+        }
+        if (!done) report('K 大文件清单自读（read_cloud_file 分页）', { ok: false, reason: lastReason })
+      } catch (error) {
+        report('K 大文件清单自读（read_cloud_file 分页）', {
+          ok: false,
+          reason: `夹具准备失败：${(error as Error).message}`,
+        })
+      }
     }
 
     console.log(`\n冒烟结果：通过 ${passed} 项，失败 ${failures.length} 项`)

@@ -47,8 +47,13 @@ const USER_ROOT_ID = BigInt(0)
 
 /** AI 云盘写单文件上限 256KB（P5 R64，与站点写口径一致） */
 export const AI_CLOUD_WRITE_MAX_FILE_BYTES = 256 * 1024
-/** AI 云盘读文件上限 64KB（P5 R64，与站点读口径一致） */
-export const AI_CLOUD_READ_MAX_BYTES = 64 * 1024
+/**
+ * AI 云盘读文件上限 2MB（P5 R64 原为 64KB；**P10 T97 起放宽**）：
+ * 对话附件单文件上限即 2MB（D83）且大附件走「列清单 + 模型自读」（R84），
+ * 若读上限仍是 64KB，>64KB 的附件将无法被 read_cloud_file 读到（实体清单形同虚设）。
+ * 上下文安全由工具层分页（单次 ≤5 万字符，默认 2 万）承担，不再靠「读不动」兜底。
+ */
+export const AI_CLOUD_READ_MAX_BYTES = 2 * 1024 * 1024
 /** AI 云盘单次批量操作条目上限（move / delete，防模型一次性下发超大数组） */
 export const AI_CLOUD_MAX_BATCH = 20
 
@@ -817,7 +822,8 @@ export class CloudFacade {
   }
 
   /**
-   * 云盘读文本文件（基线 = 用户云盘根）：文本白名单（30012）+ ≤64KB（30013）+ 不存在/目录 30001。
+   * 云盘读文本文件（基线 = 用户云盘根）：文本白名单（30012）+ ≤2MB（30013）+ 不存在/目录 30001。
+   * P10 T97：体积上限由 64KB 放宽到 2MB（与附件口径一致），超长内容由工具层分页消费。
    */
   async readUserFile(userId: bigint, path: string): Promise<UserFileReadResult> {
     const segments = this.normalizeUserPath(path)
@@ -831,7 +837,8 @@ export class CloudFacade {
       throw new BusinessException(ErrorCode.CloudFileNotFound, '文件不存在或无权访问')
     }
     if (Number(entry.size) > AI_CLOUD_READ_MAX_BYTES) {
-      throw new BusinessException(ErrorCode.CloudContentTooLarge, '文件超出读取上限（64KB）')
+      const mb = Math.max(1, Math.floor(AI_CLOUD_READ_MAX_BYTES / 1024 / 1024))
+      throw new BusinessException(ErrorCode.CloudContentTooLarge, `文件超出读取上限（${mb}MB）`)
     }
     const raw = await this.readFileByBase(userId, USER_ROOT_ID, segments)
     return { path: normalized, size: raw.size, content: raw.content.toString('utf-8') }
@@ -895,6 +902,47 @@ export class CloudFacade {
       throw new BusinessException(ErrorCode.CloudFileNotFound, '文件不存在或无权访问')
     }
     return this.readTextFileById(userId, entry.id, opts)
+  }
+
+  // ==================== P10 附件门面（T96，D82/R82/R84） ====================
+
+  /**
+   * 按文件 ID 取「相对用户云盘根」的路径（P10 T96）。
+   * 场景：前端文件选择器 / 上传接口只回 fileId，而 ai 域附件元信息与可读清单都按 **path** 寻址
+   * （`read_cloud_file` 按路径读），故由 cloud 域统一拼路径（域边界：ai 域禁止直查 cloud_file 表）。
+   * 有界上溯 ≤10 层；不存在 / 已删 / 非本人 → null（调用方按「失效」降级，不抛异常）。
+   */
+  async pathOfUserFile(userId: bigint, fileId: bigint): Promise<string | null> {
+    const row = await this.prisma.cloudFile.findFirst({
+      where: { id: fileId, userId, deletedAt: null },
+      select: { name: true, parentId: true },
+    })
+    if (!row) return null
+    const segments = [row.name]
+    let cursor = row.parentId
+    for (let depth = 0; depth <= RESOLVE_MAX_DEPTH && cursor !== USER_ROOT_ID; depth++) {
+      const parent = await this.prisma.cloudFile.findFirst({
+        where: { id: cursor, userId },
+        select: { name: true, parentId: true },
+      })
+      if (!parent) break
+      segments.unshift(parent.name)
+      cursor = parent.parentId
+    }
+    return segments.join('/')
+  }
+
+  /**
+   * 批量判定文件是否仍「有效」（本人 + 未删除 + 非目录，P10 T96 / D82 失效降级）。
+   * 供 ai 域标注附件 invalid（源文件已删除）：只查行不读盘，零成本；返回有效 fileId 字符串集合。
+   */
+  async filterAliveFileIds(userId: bigint, fileIds: readonly bigint[]): Promise<Set<string>> {
+    if (fileIds.length === 0) return new Set()
+    const rows = await this.prisma.cloudFile.findMany({
+      where: { id: { in: [...fileIds] }, userId, deletedAt: null, isDir: 0 },
+      select: { id: true },
+    })
+    return new Set(rows.map((row) => row.id.toString()))
   }
 
   /**
