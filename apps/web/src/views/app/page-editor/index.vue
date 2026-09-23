@@ -14,7 +14,9 @@ import {
   type AppPageListItem,
 } from '@/api/app'
 import { confirmDialog } from '@/utils/confirm'
+import PageVisualEditor from './components/PageVisualEditor.vue'
 import { displayPageSchemaTemplate, pageSchemaTemplate } from '../utils/schema'
+import type { AppTableItem } from '@/types/api'
 
 /**
  * 功能页编辑器（P11 T106 / R97）：
@@ -40,6 +42,12 @@ const dialog = reactive({
   /** 页面类型：admin 管理页 / display 公开展示页（P12 T113；落库类型由 schema.kind 决定） */
   kind: 'admin' as 'admin' | 'display',
   schemaText: '',
+  /** P12 T115：编辑窗标签（可视化 / 高级模式），两模式各存各稿（R109） */
+  tab: 'visual' as 'visual' | 'advanced',
+  /** 打开编辑窗时库中最新版本的 JSON 快照（切换标签按它重载，杜绝双向同步歧义） */
+  savedSchemaText: '',
+  /** 保存失败就地提示（50004 message 含 path） */
+  error: '',
 })
 
 /** P12 T113：公开状态（pageId → isPublic）与公开凭证（预览新窗口用） */
@@ -85,6 +93,7 @@ async function load(): Promise<void> {
   try {
     const [bundle, list] = await Promise.all([getSchema(appCode.value), listPages(appCode.value)])
     const userTables = bundle.tables.filter((table) => !table.isSystem)
+    tableItems.value = userTables as unknown as AppTableItem[]
     tables.value = userTables.map((table) => table.name)
     tableLabels.value = Object.fromEntries(userTables.map((table) => [table.name, table.label]))
     lastBundlePages.value = bundle.pages.map((page) => ({
@@ -106,13 +115,12 @@ onMounted(load)
 /** 按当前「页面类型 + 主表」重填 schema 模板（admin = 可写管理页 / display = 只读展示页） */
 function applyTemplate(): void {
   const table = dialog.table
-  dialog.schemaText = JSON.stringify(
+  resetModes(
     dialog.kind === 'display'
       ? displayPageSchemaTemplate(table)
       : pageSchemaTemplate(table, tableLabels.value[table] ?? table),
-    null,
-    2,
   )
+  dialog.tab = 'visual'
 }
 
 function openCreate(): void {
@@ -132,20 +140,62 @@ function openEdit(page: AppPageListItem): void {
   dialog.route = page.route
   dialog.table = ''
   const bundlePage = lastBundlePages.value.find((item) => item.code === page.code)
-  dialog.schemaText = JSON.stringify(bundlePage?.schema ?? {}, null, 2)
+  resetModes(bundlePage?.schema ?? {})
+  dialog.tab = 'visual'
   dialog.visible = true
 }
 
 /** 最近一次拉取的完整页面（用于编辑时回填 schema） */
 const lastBundlePages = ref<Array<{ code: string; schema: Record<string, unknown> }>>([])
 
+/** P12 T115：可视化编辑器宿主状态（用户表元数据 + 草稿种子 + 强制重挂 key） */
+const tableItems = ref<AppTableItem[]>([])
+const visualSeed = ref<Record<string, unknown>>({})
+const visualKey = ref(0)
+const visualRef = ref<InstanceType<typeof PageVisualEditor> | null>(null)
+
+/** 以某份 schema 重置两种模式（可视化种子 + 高级 JSON + 快照） */
+function resetModes(schema: Record<string, unknown>): void {
+  const text = JSON.stringify(schema, null, 2)
+  dialog.savedSchemaText = text
+  dialog.schemaText = text
+  visualSeed.value = JSON.parse(text) as Record<string, unknown>
+  visualKey.value += 1
+  dialog.error = ''
+}
+
+/**
+ * 切换标签：两模式各存各稿、**不实时互转**，切换时以库中最新保存版本（打开时的快照）重载（R109）。
+ */
+function handleTabChange(): void {
+  if (!dialog.savedSchemaText) return
+  const snapshot = JSON.parse(dialog.savedSchemaText) as Record<string, unknown>
+  if (dialog.tab === 'visual') {
+    visualSeed.value = snapshot
+    visualKey.value += 1
+  } else {
+    dialog.schemaText = dialog.savedSchemaText
+  }
+  dialog.error = ''
+}
+
 async function submit(): Promise<void> {
+  dialog.error = ''
   let schema: Record<string, unknown>
-  try {
-    schema = JSON.parse(dialog.schemaText) as Record<string, unknown>
-  } catch {
-    ElMessage.error('页面模式不是合法 JSON')
-    return
+  if (dialog.tab === 'visual') {
+    const draft = visualRef.value?.getSchema()
+    if (!draft) {
+      ElMessage.warning('可视化编辑器未就绪，请切换标签后重试')
+      return
+    }
+    schema = draft
+  } else {
+    try {
+      schema = JSON.parse(dialog.schemaText) as Record<string, unknown>
+    } catch {
+      ElMessage.error('页面模式不是合法 JSON')
+      return
+    }
   }
   if (!dialog.name.trim()) {
     ElMessage.warning('页面名称必填')
@@ -171,6 +221,12 @@ async function submit(): Promise<void> {
     }
     dialog.visible = false
     await load()
+  } catch (error) {
+    // R113：50004 就地展示（message 形如「页面模式校验失败（路径）：原因」）
+    dialog.error = error instanceof Error ? error.message : '保存失败，请稍后重试'
+    if (dialog.tab === 'visual') {
+      ElMessage.warning('校验未通过，请按提示调整可视化配置或切到高级模式查看')
+    }
   } finally {
     dialog.submitting = false
   }
@@ -325,7 +381,7 @@ function openPage(page: AppPageListItem): void {
     <el-dialog
       v-model="dialog.visible"
       :title="dialog.editingId ? '编辑功能页' : '新建功能页'"
-      width="720px"
+      width="880px"
     >
       <el-form label-width="90px">
         <el-form-item
@@ -378,11 +434,49 @@ function openPage(page: AppPageListItem): void {
           </el-select>
         </el-form-item>
         <el-form-item label="页面模式">
-          <el-input
-            v-model="dialog.schemaText"
-            type="textarea"
-            :rows="16"
-            spellcheck="false"
+          <el-tabs
+            v-model="dialog.tab"
+            class="v-page-editor__tabs"
+            @tab-change="handleTabChange"
+          >
+            <el-tab-pane
+              label="可视化"
+              name="visual"
+            >
+              <PageVisualEditor
+                :key="visualKey"
+                ref="visualRef"
+                :app-code="appCode"
+                :tables="tableItems"
+                :pages="pages"
+                :initial-schema="visualSeed"
+              />
+            </el-tab-pane>
+            <el-tab-pane
+              label="高级模式（JSON）"
+              name="advanced"
+            >
+              <el-input
+                v-model="dialog.schemaText"
+                type="textarea"
+                :rows="16"
+                spellcheck="false"
+              />
+              <div class="v-page-editor__hint">
+                两模式各存各稿：切换标签会以库中最新保存版本重载（未保存的改动不互转）
+              </div>
+            </el-tab-pane>
+          </el-tabs>
+        </el-form-item>
+        <el-form-item
+          v-if="dialog.error"
+          label=" "
+        >
+          <el-alert
+            :title="dialog.error"
+            type="error"
+            :closable="false"
+            show-icon
           />
         </el-form-item>
       </el-form>

@@ -7,6 +7,7 @@
  * AdminRenderer 同源（views/app/utils/schema.ts），差异仅在数据来源与只读约束。
  */
 import { computed, onMounted, reactive, watch } from 'vue'
+import { queryData } from '@/api/app'
 import { pubAppDataDetail, pubAppDataList, pubAppFileUrl } from '@/api/app/pub'
 import type { DataRowView } from '@/types/api'
 import { displayCell, parseFieldSpec } from '@/views/app/utils/schema'
@@ -51,6 +52,11 @@ const props = defineProps<{
   routeQuery?: Record<string, unknown>
   /** 详情行参数名（默认 rowId；由宿主按列表页 rowLink.rowIdParam 传入） */
   rowIdParam?: string
+  /**
+   * 预览取数（P12 T115，R113/PRD-PATCH1 §4）：给定时改走 **A 侧登录态** `POST /api/app/data/query`
+   * （草稿 schema 直查，与是否已保存/已公开无关），只读、不产生任何写请求；不传则走公开端点。
+   */
+  previewAppCode?: string
   /** 列表行点击 → 跳详情（宿主负责路由跳转） */
   onRowClick?: (row: DataRowView, rowLink: { page: string; rowIdParam?: string }) => void
 }>()
@@ -102,7 +108,7 @@ async function loadDetail(block: DisplayBlock): Promise<void> {
   }
 }
 
-/** 列表取数（filter/sort/expand 按 R104 传入） */
+/** 列表取数（filter/sort/expand 按 R104 传入；预览模式走 A 侧登录态 DSL 直查） */
 async function loadList(block: DisplayBlock): Promise<void> {
   const ds = dsOf(block)
   if (!ds.table) {
@@ -114,6 +120,23 @@ async function loadList(block: DisplayBlock): Promise<void> {
     const applied = Object.entries(filters)
       .filter(([, value]) => value !== '')
       .map(([key, value]) => `${key}:${value}`)
+    if (props.previewAppCode) {
+      const preview = await queryData({
+        appCode: props.previewAppCode,
+        op: 'list',
+        table: ds.table,
+        filter: applied.map((raw) => {
+          const [f, op, ...rest] = raw.split(':')
+          return { f, op: op as 'eq' | 'contains', v: rest.join(':') }
+        }),
+        sort: ds.sort,
+        size: ds.size ?? 20,
+        page: 1,
+        expand: expandOf(block.bind).map((f) => ({ f })),
+      })
+      store.rows[block.bind] = (preview.list ?? []) as unknown as DataRowView[]
+      return
+    }
     const payload = await pubAppDataList(props.pubCode, ds.table, {
       size: ds.size ?? 20,
       sort: (ds.sort ?? []).map((item) => `${item.f}:${item.dir}`),
@@ -157,6 +180,12 @@ function attachmentId(row: DataRowView, field: string): string {
 
 function fileUrl(fileId: string): string {
   return pubAppFileUrl(props.pubCode, fileId)
+}
+
+/** 预览模式：rowLink 跳转无意义（草稿未落库/未公开）→ 不跳 */
+function handleRowClick(row: DataRowView, rowLink: { page: string; rowIdParam?: string }): void {
+  if (props.previewAppCode) return
+  props.onRowClick?.(row, rowLink)
 }
 
 async function loadAll(): Promise<void> {
@@ -242,7 +271,7 @@ onMounted(() => void loadAll())
           v-loading="store.loading[block.bind]"
           :data="store.rows[block.bind] ?? []"
           :empty-text="store.error[block.bind] || '暂无数据'"
-          @row-click="(row: DataRowView) => block.rowLink && onRowClick?.(row, block.rowLink)"
+          @row-click="(row: DataRowView) => block.rowLink && handleRowClick(row, block.rowLink)"
         >
           <el-table-column
             v-for="spec in fieldSpecs(block)"
