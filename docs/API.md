@@ -712,6 +712,11 @@ Content-Type: application/json　Accept: text/event-stream
 | ------------------ | -------------------- | ------------ | ---------------------------------------------------------------------------------------------------- |
 | `ai.maxToolRounds` | `AI_MAX_TOOL_ROUNDS` | 3（上限 10） | 单轮用户消息的工具调用轮次上限（D65，替代 chat.service 原硬编码常量）；越界/非法回退默认值，每次现读 |
 
+**P11 增补：app 配置组**（`apps/api/src/config/app.config.ts`，env 前缀 `APP_*`，均可不配；见 §18.5 与 ARCHITECTURE §27.8）：
+`app.maxAppsPerUser=10` / `app.maxDraftsPerUser=3` / `app.maxTablesPerApp=20` / `app.maxRowsPerTable=50000` /
+`app.maxPagesPerApp=50` / `app.maxAttachmentSize=10MB` / `app.maxImportSize=5MB` / `app.hotIndexFieldsPerTable=5` /
+`app.queryTimeoutMs=2000` / `app.draftTtlDays=7`。
+
 ### 12.2 工具参数契约（供 ToolRegistry 注册，非 HTTP 端点）
 
 通用约定：write 类全走确认卡（`summarize` 结构化摘要，中文标签）；失败回喂 `{ ok:false, errorCode, message }` 不抛栈；
@@ -1200,3 +1205,130 @@ system 动态追加（不计手册 2000 字帽，上限 20 条，R84）：
 | AI 工具   | 30（不变） | `read_cloud_file` 签名变更（加分页）；`pnpm check:ai` 16/16 |
 | DB        | +1 列      | `ai_message.attachments` JSON NULL                          |
 | 前端依赖  | +0         | `FilePicker` / `uploadFile` 全复用                          |
+
+---
+
+## 18. P11：应用平台 · 数据应用 A 全链（增补并入）
+
+> 全端点登录态（`@CurrentUser`），属主校验统一 **50001**；**无 @RequirePermission**（属主自服务口径，同云盘）；
+> 写操作挂 `@OperationLog`。编号 D92~~D96 / R88~~R99 / T100~T107（见 ARCHITECTURE §27 与 PROGRESS）。
+
+### 18.1 端点族 `/api/app/**`（+18）
+
+**18.1.1 应用管理**
+
+| 方法   | 路径                     | 说明                                                                                                                                                                                    |
+| ------ | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/app`               | 创建。body `{ name, description?, mode: 'blank'\|'draft' }`；blank=直接 active（占额度），draft=AI 草稿（限 3）。返回 `{ appCode, pubCode, status }`；code 冲突自动 "(1)"；超配额 50002 |
+| GET    | `/api/app`               | 我的应用列表（不分页）：`[{ appCode, pubCode, name, description, status, tableCount, rowCount, pageCount, updatedAt }]`；`?status=draft` 只看草稿                                       |
+| GET    | `/api/app/:code`         | 应用详情（含统计数字）；无权/不存在 50001                                                                                                                                               |
+| PUT    | `/api/app/:code`         | 改名称/描述                                                                                                                                                                             |
+| DELETE | `/api/app/:code`         | 软删（级联软删表/字段/页/关系；数据保留 30 天后物理清理——软删后立即 50001）                                                                                                             |
+| POST   | `/api/app/:code/confirm` | draft → active（查配额）；草稿过期/非草稿 50008                                                                                                                                         |
+
+**18.1.2 结构管理**
+
+| 方法   | 路径                                | 说明                                                                                                                             |
+| ------ | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/app/:code/schema`             | 全量打包（def+tables+fields+rels+pages，含 isSystem 标注）；Redis 缓存                                                           |
+| POST   | `/api/app/:code/tables`             | 建表 `{ name, label, fields:[{name,label,type,required?,default?,enumOptions?,refTable?}] }`；超 20 表 50002；字段类型非法 50005 |
+| PUT    | `/api/app/:code/tables/:tid`        | 改 label（v1 禁止改表名）                                                                                                        |
+| DELETE | `/api/app/:code/tables/:tid`        | 软删；系统表 50001 语义；被引用阻断 50003 并列出引用方                                                                           |
+| POST   | `/api/app/:code/tables/:tid/fields` | 加字段（表内唯一）                                                                                                               |
+| PUT    | `/api/app/:code/fields/:fid`        | 改 label/必填/默认值/枚举选项                                                                                                    |
+| DELETE | `/api/app/:code/fields/:fid`        | 软删（is_deleted=1，数据保留）                                                                                                   |
+| POST   | `/api/app/:code/fields/:fid/shrink` | 类型收窄（text/number→enum）：先跑存量校验，不合规 50003（message 带前 10 个 rowId）                                             |
+| POST   | `/api/app/:code/relations`          | 建 n:n `{ fromTable, fromField, toTable }` → 自动生成中间表（isSystem）；幂等                                                    |
+
+**18.1.3 功能页**
+
+| 方法   | 路径                        | 说明                                                                                     |
+| ------ | --------------------------- | ---------------------------------------------------------------------------------------- |
+| GET    | `/api/app/:code/pages`      | 列表（code/name/route/genBy/sort）                                                       |
+| POST   | `/api/app/:code/pages`      | 新建 `{ name, route, schema, genBy }`；schema 校验失败 50004（带路径）；route 重复 50007 |
+| PUT    | `/api/app/:code/pages/:pid` | 更新 schema/name/sort                                                                    |
+| DELETE | `/api/app/:code/pages/:pid` | 软删                                                                                     |
+
+**18.1.4 沙箱数据**
+
+| 方法 | 路径                   | 说明                                                                                                             |
+| ---- | ---------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| POST | `/api/app/data/query`  | 查询 DSL（**必带 appCode**；op/filter/sort/page/size/expand）；越权表 50001；超护栏 50009                        |
+| POST | `/api/app/data/action` | body `{ appCode, pageCode, action, params }`；多步 `$transaction`，任一步失败整体回滚 50005；action 未声明 50010 |
+| GET  | `/api/app/data/record` | `?appCode=&table=&rowId=` 单行（get 语义糖）                                                                     |
+
+**18.1.5 导入导出与附件**
+
+| 方法 | 路径                                    | 说明                                                                                                                                         |
+| ---- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST | `/api/app/:code/import?table=`          | multipart（CSV ≤5MB）→ 解析 + 自动映射 → `{ taskId, mapping, previewRows[5], total }` 待确认；不合规 50006                                   |
+| POST | `/api/app/:code/import/:taskId/confirm` | 确认映射 `{ mapping? }` → 异步导入                                                                                                           |
+| GET  | `/api/app/import/:taskId`               | 进度 `{ status, total, done, errors[{row,reason}] }`                                                                                         |
+| GET  | `/api/app/:code/export?table=`          | 流式 CSV（≤5 万行，超出截断并在尾注释说明）                                                                                                  |
+| POST | `/api/app/:code/attachment`             | multipart 附件上传：服务端强制落 `/app-attachments/{appCode}/` + 云盘配额记账；返回 `{ fileId, path, name, ext, size }`；超 10MB → **30004** |
+
+### 18.2 userinfo 菜单动态段（修改既有）
+
+`GET /api/auth/userinfo` 的 `menus` 树：「应用中心」节（seed）children 由后端**实时拼装**追加（不落 sys_menu）：
+
+```
+应用中心(/app-center) ── 我的应用(app-center/center，seed)
+                     └─ {应用名}(/app-center/app/{appCode})     id 前缀 dyn-app-
+                         └─ {功能页名}(/app-center/app/{appCode}/p/{pageCode})
+```
+
+前端静态注册通配路由 `/app-center/app/:appCode/p/:pageCode → function-page/index.vue`（单组件按参数拉 schema 渲染），
+菜单只驱动跳转；动态节点 `component=null`，`dynamic.ts` 跳过空 component 不产生重复路由。应用删除 → 下次拉 userinfo 即消失（R96）。
+
+### 18.3 错误码（50xxx 新段 10 个 + cloud 段 1 个）
+
+| 码    | 文案                         | 场景                                                                       |
+| ----- | ---------------------------- | -------------------------------------------------------------------------- |
+| 50001 | 应用不存在或无权             | 统一属主校验；含系统表操作、越权表                                         |
+| 50002 | 超出配额（message 带项）     | 应用数/草稿数/表数/页数/附件/导入大小                                      |
+| 50003 | 结构变更未通过数据校验       | 类型收窄遇存量违规（带 rowId 清单）；删表被引用阻断（带引用方）            |
+| 50004 | 页面模式校验失败（带路径）   | schema 结构校验失败                                                        |
+| 50005 | 数据校验失败                 | 字段规则/动作步骤失败（事务回滚）；字段类型白名单外                        |
+| 50006 | 导入文件不合规               | 非 CSV/超 5MB/空文件/首行无列名                                            |
+| 50007 | 功能页路由冲突               | 同应用内 route 重复                                                        |
+| 50008 | 草稿已过期或不存在           | confirm 时草稿失效                                                         |
+| 50009 | 查询超出护栏                 | >2s 或非索引过滤 >1 万行                                                   |
+| 50010 | 动作与页面定义不符           | action 未在 schema 声明                                                    |
+| 30021 | 文件被应用数据引用，禁止删除 | **cloud 段**（软删/彻底删除/清空/超期清理预检；复用于 app_attachment_ref） |
+
+### 18.4 AI 工具（新增 app 组 7 个，工具总数 30 → 37）
+
+| 工具             | parameters                                                                               | 成功返回要点                                  | risk  |
+| ---------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------- | ----- |
+| create_data_app  | `{ name, description? }`                                                                 | `{ ok, appCode, status:'draft' }`             | write |
+| add_table        | `{ appCode, table, label, fields:[{name,label,type,required?,enumOptions?,refTable?}] }` | `{ ok, table, created:[] }`                   | write |
+| add_fields       | `{ appCode, table, fields:[同上] }`                                                      | `{ ok, table, created:[] }`                   | write |
+| set_relation     | `{ appCode, fromTable, fromField, toTable }`                                             | `{ ok, relation:'nm', throughTable }`（幂等） | write |
+| gen_admin_page   | `{ appCode, name, purpose }`                                                             | `{ ok, pageCode, route, blocks }`             | write |
+| adjust_page      | `{ appCode, pageCode, instruction }`                                                     | `{ ok, changed }`                             | write |
+| confirm_data_app | `{ appCode }`                                                                            | `{ ok, status:'active', menuHint }`           | write |
+
+- 全部 write 级（走确认卡）；**perms 留空**（属主自服务，handler 内 assertOwned 由 app 域完成）；关键词入 `KEYWORD_TO_GROUPS` 的 `app` 组。
+- `gen_admin_page` 的「AI 选表」落为**确定性关键词匹配**（purpose → 表名/显示名）；`adjust_page` 本期为**按当前表结构重建区块**
+  （精细调整走前端功能页编辑器，R97）；两者实现口径见 ARCHITECTURE §27.5。
+- 冒烟新增 **L 用例**（R98）：提示词建「读书笔记」数据应用 → 逐张确认卡自动批准 → 断言 `ai_tool_call` 出现
+  create_data_app/add_table/gen_admin_page 且 `app_def`(active) 与 `app_table` 落库。
+
+### 18.5 配置登记（API §12.1 ai 表旁新增 app 配置组，详见 ARCHITECTURE §27.8）
+
+`app.maxAppsPerUser=10` / `app.maxDraftsPerUser=3` / `app.maxTablesPerApp=20` / `app.maxRowsPerTable=50000` /
+`app.maxPagesPerApp=50` / `app.maxAttachmentSize=10MB` / `app.maxImportSize=5MB` / `app.hotIndexFieldsPerTable=5` /
+`app.queryTimeoutMs=2000` / `app.draftTtlDays=7`（env 前缀 `APP_*`，均可不配）。
+
+### 18.6 编号登记
+
+| 系列      | 本期使用                                | 说明                                           |
+| --------- | --------------------------------------- | ---------------------------------------------- |
+| 决策      | D92~D96                                 | 见 PRD-P11 §2（D87~D91 既有沿用）              |
+| 规则      | R88~R99                                 | 见 PRD-P11 §3                                  |
+| 任务      | T100~T107                               | 见 PROGRESS「P11 任务拆解」                    |
+| HTTP 端点 | +18                                     | §18.1；userinfo 响应扩展（§18.2）              |
+| 错误码    | 50xxx 段 10 + 30021（cloud 段续 30020） | §18.3                                          |
+| AI 工具   | 30 → 37（app 组 7）                     | §18.4；`pnpm check:ai` 16/16                   |
+| DB        | +7 表                                   | ARCHITECTURE §27.2                             |
+| 前端依赖  | +0                                      | 复用 ProTable/FormDialog/uploadFile 等既有资产 |

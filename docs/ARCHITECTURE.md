@@ -372,7 +372,7 @@ apps/api/src/
 
 ---
 
-## 5. 数据库设计（sys_ 前缀为 P1 底座；P2a 新增 7 张 ai_ 表；P3 新增 3 张 cloud_ 表；P4a 新增 6 张 site_ 表；**P4e 新增 1 张 `site_quota` 表并解除 `site_site.user_id` 唯一索引**）
+## 5. 数据库设计（sys_ 前缀为 P1 底座；P2a 新增 7 张 ai_ 表；P3 新增 3 张 cloud_ 表；P4a 新增 6 张 site_ 表；**P4e 新增 1 张 `site_quota` 表并解除 `site_site.user_id` 唯一索引**；**P11 新增 7 张 app\_ 表，见 §27.2**）
 
 > Prisma model 用 PascalCase + `@@map("sys_user")`，字段 camelCase + `@map("user_name")`。以下为数据库层结构。时间字段统一 `created_at / updated_at`，软删除用 `deleted_at`。
 >
@@ -758,6 +758,10 @@ P5 增补（ai 配置组，见 `apps/api/src/config/ai.config.ts`，D65）：
 
 main.ts 增补：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 函数式（/api/open 反射 `*` + 放行 Content-Type/Range，其余维持 CORS_ORIGINS 白名单）。
 
+P11 增补（app 配置组，见 `apps/api/src/config/app.config.ts`，§27.8）：`APP_MAX_APPS_PER_USER=10` / `APP_MAX_DRAFTS_PER_USER=3` /
+`APP_MAX_TABLES_PER_APP=20` / `APP_MAX_ROWS_PER_TABLE=50000` / `APP_MAX_PAGES_PER_APP=50` / `APP_MAX_ATTACHMENT_SIZE=10MB` /
+`APP_MAX_IMPORT_SIZE=5MB` / `APP_HOT_INDEX_FIELDS=5` / `APP_QUERY_TIMEOUT_MS=2000` / `APP_DRAFT_TTL_DAYS=7`（均可不配）。
+
 ---
 
 ## 9. 公共资产表（优先复用，禁止重复造；新增后必须回写登记）
@@ -872,6 +876,13 @@ main.ts 增补：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 函数�
 | attachment-resolver.ts | api/src/modules/ai/chat | **AI 对话附件解析链**（P10 T96）：白名单/上限常量 + `resolveAttachments`（经 CloudFacade 读字节，二进制嗅探 + 编码探测）+ `planAttachmentModes`（inject/listed 分流与注入组装）+ `renderAttachmentManifest`（会话可读清单）+ `parseStoredAttachments`（JSON 列安全读取）；纯函数零 Nest 依赖 | 已建（T96） |
 | CloudFacade 附件门面（P10） | api/src/modules/cloud/facade | `pathOfUserFile(userId, fileId)`（fileId → 相对云盘根路径，有界上溯 ≤10）+ `filterAliveFileIds(userId, ids)`（批量有效性判定，不读盘）；供 ai 域附件元信息与失效降级使用 | 已建（T96） |
 | attachment.ts | web/src/views/ai/utils/attachment.ts | 前端附件常量与预校验（白名单 / 2MB / ≤5 个 / 留档目录名 / `isAllowedAttachment`）；与后端 `attachment-resolver.ts` 同源副本（体验级预校验，真正校验链在后端） | 已建（T98） |
+| AppFacade | api/src/modules/app/facade | app 域完整门面（createAppDraft / addTable / addFields / setRelation / genAdminPage / adjustPage / confirmDataApp / getAppMenuSegments）；ai 域工具与 auth 域菜单动态段唯一入口 | 已建（T100~T105） |
+| AppRefService | api/src/modules/app/facade/app-ref.service.ts | app 域反向引用最小门面（`getAttachmentRefs` / `hasAttachmentRefs` / `hasAnyAttachmentRef`，只查 app_attachment_ref + app_def）；供 cloud 域删除预检（30021）注入，零跨域 import 防环 | 已建（T100/T103） |
+| DataService | api/src/modules/app/data/data.service.ts | **沙箱数据唯一入口**（字段校验 / r_cN 索引列 / n:n 中间表差量写 / 附件引用维护 / 查询白名单 + 内存兜底护栏 / create/update/remove 可传事务客户端） | 已建（T103） |
+| csv.ts | api/src/modules/app/import/csv.ts | 自研 CSV 解析/序列化（引号/换行/转义/BOM/GBK 探测；零新依赖，R92） | 已建（T103） |
+| app-clean.core.ts | api/src/modules/app/admin | 应用生命周期清理纯函数核心（softDeleteApp / cleanExpiredDraftsCore / purgeDeletedAppsCore）；AdminService（cron）与手动脚本 `clean:app` 共用 | 已建（T101） |
+| AdminRenderer | web/src/components/app-renderer | 功能页渲染引擎（filterBar/table/form/detail 四型区块 + 数据源与动作接线 + ref 候选/展开）；配套 `FieldInput.vue` 按字段类型出控件 | 已建（T106） |
+| app 前端同源常量 | web/src/views/app/utils/schema.ts | 字段类型七类中文名 / 区块字段 DSL 解析（parseFieldSpec）/ 单元格展示（displayCell）/ 页面模板（pageSchemaTemplate）；与后端 `schema.constants.ts`、`page.builder.ts` 同源副本 | 已建（T106） |
 
 ### Redis Key 增补约定（写入 RedisKey 常量）
 
@@ -880,6 +891,8 @@ main.ts 增补：`app.set('trust proxy', true)`（R8 IP 口径）；CORS 函数�
 | `online:{userId}`                    | hash，30min 滑动                                         | 在线用户（username/nickname/ip/loginAt/lastActiveAt），JwtAuthGuard 校验通过时刷新，登出删除                 |
 | `ai:chatting:{userId}`               | string，TTL 300s（兜底防进程崩溃残留），流结束时主动删除 | 单用户并发流限制（存在即拒绝新流，20007）                                                                    |
 | `ai:confirm:{toolCallId}`            | string（JSON），TTL 600s                                 | write 工具确认单：{ userId, conversationId, toolName, params }，确认/取消/过期即失效                         |
+| `app:schema:{appId}`                 | string（JSON），TTL 600s                                 | 应用 schema 全量打包缓存（def+tables+fields+rels+pages）；结构/页面/应用变更即 DEL（R99）                    |
+| `app:import:{taskId}`                | string（JSON），TTL 3600s                                | CSV 导入进度 { status,total,done,errors }（含 userId 归属校验）                                              |
 | `site:resolve:{slug}`                | string（JSON），TTL 300s                                 | slug → 站点信息；site 域写操作（改 slug/启停）主动 DEL                                                       |
 | `site:path:{siteId}:{path}`          | string，TTL 60s                                          | 路径 → fileId；"404" 为负缓存；cloud 侧变更靠 TTL 被动失效（R12）                                            |
 | `site:data:{siteId}:{...}`           | string（JSON），TTL 60s                                  | 开放数据热缓存；site 域内容变更 scanDel 前缀失效                                                             |
@@ -2386,3 +2399,166 @@ system prompt = 助手设定（静态，prompt.sections.ASSISTANT_IDENTITY）
 评论 list/audit/reply（含 trim、覆盖不新增行、空串清除、开放层携带回复）、超长 40001 / 批量 >20 40001 / 跨站与非属主 40119、
 封面四条失败链 + 真实图片通过 + create 落库 + update 空串清除、回收站顶层不含头像旧行；
 `pnpm check:ai` 16/16；`tsc --noEmit` / `eslint`（双端）/ `vue-tsc` 零错；`vite build` 产物含 `@codemirror/merge` 独立异步 chunk（首屏不加载）。
+
+---
+
+## 27. P11：应用平台 · 数据应用 A 全链（P11 增补并入）
+
+> 来源：`docs/P11/ARCHITECTURE-P11-增补.md`（Kimi）。编号 D92~~D96 / R88~~R99 / T100~T107。
+> 一句话：把「数据管理」产品化——用户经 **AI 对话或空白表单**创建**数据应用**（自定义逻辑表 + 字段 + 关系），
+> 平台**自动生成管理后台（功能页）**，数据全部落沙箱化元模型存储（D87）。
+
+### 27.1 域结构（apps/api/src/modules/app/）
+
+| 子目录    | 职责                                                    | 关键类                                                                                   |
+| --------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `admin/`  | 应用 CRUD、草稿生命周期、配额、清理 cron                | AdminService、AdminController（`/app`）、AppCleanTask、`app-clean.core.ts`（纯函数核心） |
+| `schema/` | 表/字段/关系管理、结构变更规则、中间表生成、schema 缓存 | SchemaService、SchemaController（`/app/:code/...`）                                      |
+| `data/`   | **沙箱数据服务**（唯一数据入口）                        | DataService、DataController（`/app/data`）                                               |
+| `page/`   | 功能页 schema 存取 + 校验 + 动作事务                    | PageService、PageController、PageActionController（`/app/data/action`）                  |
+| `import/` | CSV 导入导出 + 附件上传                                 | ImportService、ImportController、`csv.ts`（自研解析）                                    |
+| `facade/` | 跨域门面                                                | `AppFacade`（完整，供 ai 域）/ `AppRefService`（最小，供 cloud 域预检）                  |
+
+聚合模块 `app-domain.module.ts` 导出 **AppFacadeModule**（ai 域注入）与 **AppRefModule**（cloud 域注入）。
+
+> 命名说明：类名为 `AppDomainModule` 而非 `AppModule`——避免与根模块 `src/app.module.ts` 的同名类冲突。
+
+### 27.2 数据模型（7 张 app_* 表，relationMode="prisma" 逻辑外键）
+
+`app_def`（主档：code 用户内唯一 / pub_code 全局唯一 12 位 / status draft|active / source_app_id / version / deleted_at）、
+`app_table`（逻辑表：is_system=1 为 n:n 中间表，不计配额不可见）、
+`app_field`（字段定义：type 七类 / required / default_val / enum_options / ref_table_id / ref_multiple / is_deleted 软删）、
+`app_rel`（仅 n:n 显式登记：from_table/from_field/to_table/through_table）、
+`app_record`（数据行：row_id char(36) 对外主键 / data JSON / **r_c1~r_c5** 热字段冗余生成列 / deleted_at）、
+`app_page`（功能页：kind=admin / code / route / schema JSON / schema_version / gen_by）、
+`app_attachment_ref`（附件引用索引：file_id + deleted_at 为 D96 预检查询点）。
+
+索引要点：`app_def(owner_id,status,deleted_at)` + `uk(owner_id,code)` + `uk(pub_code)`；
+`app_record(table_id,deleted_at)`、`(table_id,r_c1..r_c5)`、`(app_id,updated_at)`；
+`app_attachment_ref(file_id,deleted_at)`。
+
+**实现注记（相对增补文档的落地差异，已回写）**：
+
+1. **软删释放唯一槽**：`app_table.name` / `app_field.name` 有 DB 唯一索引，软删时把 name 改写为 `__deleted_{id}`
+   以释放槽位（否则「删表/删字段后重建同名」会撞唯一索引）；label 保留便于回溯。
+   已知边界：重建同名字段不会继承旧值，但旧行 data 中同键的历史值会被新字段读到（v1 登记为已知限制）。
+2. **中间表字段固定命名** `from_id` / `to_id`（`schema.constants.ts` 的 REL_FROM_FIELD/REL_TO_FIELD），
+   使 n:n 读写可用 r_c1/r_c2 索引列定位，避免 JSON path 查询。
+3. `app_page` 增 `uk(app_id,code)`（菜单/路由按 code 寻址，增补只写了 route 唯一）。
+
+### 27.3 Facade 拓扑（铁律 3/6，防环照 P4d 先例）
+
+```
+ai 域（工具 handler）      ──▶ AppFacade（createAppDraft/addTable/addFields/setRelation/genAdminPage/adjustPage/confirmDataApp/getAppMenuSegments）
+cloud 域（删除/彻底删除/清理预检）──▶ AppRefService.getAttachmentRefs / hasAttachmentRefs（最小模块，仅 PrismaService）
+auth 域（userinfo 动态菜单）  ──▶ AppFacade.getAppMenuSegments
+app 域（附件上传）          ──▶ CloudFacade.uploadForApp
+```
+
+- app → cloud 经 **CloudFacadeModule**；cloud → app 经 **AppRefModule**（零跨域 import，仅全局 PrismaService），
+  两向各走各的门面，无 import 环（照 `SiteRootModule` 先例）。
+- `getAttachmentRefs` 只查 `app_attachment_ref`（deleted_at 过滤）+ `app_def`（限定属主），**不读 app_record.data**。
+- 还原语义：回收站**还原**允许（引用仍在）；**软删/彻底删除/清空/超期清理**命中引用即 30021 阻断。
+
+### 27.4 沙箱数据服务（DataService，唯一数据入口）
+
+- **写路径**：解析逻辑表 → 逐字段校验（类型/必填/枚举/ref 存在性/attachment 权属，附件权属经 `CloudFacade.filterAliveFileIds`）
+  → 组装 data JSON + 维护 r_cN → prisma 事务落库；attachment 同步维护 `app_attachment_ref`（差量重写）；
+  n:n 多值经中间表差量重写（删旧行 → 插新行，随动作事务）。**任何控制器/工具不得绕开 DataService 写 app_record**（红线）。
+- **查询 DSL（R95 白名单）**：`{ appCode, op: list|get|count, table, filter[{f,op,v}], sort[{f,dir}], page, size, expand[{f,fields}] }`
+  - filter op：`eq/ne/gt/gte/lt/lte/contains/in`；size ≤100（默认 20）；expand ≤1 层（应用层回表，禁 SQL JOIN）；
+  - **两条路径**：可全下推（filter 仅 eq/ne/in/contains 且字段命中 r_cN、sort 字段非 number）→ DB where/orderBy；
+    否则内存路径（(table_id,deleted_at) 拉取，**硬上限 1 万行**，超出 50009）；单查询耗时 > `app.queryTimeoutMs` → 50009。
+  - **实现注记**：DSL 需带 **`appCode`**（表名仅在应用内唯一，增补文档 DSL 示例未含此字段，落地为必填）。
+- **行渲染**：多值 ref 从中间表回填为 `data[field] = rowId[]`（前端表单编辑需要）；expand 结果放 `expanded[field]`。
+- **CSV 导入导出（R92）**：自研解析（`csv.ts`，UTF-8/GBK 探测，零新依赖）；
+  导入 = 上传(≤5MB) → 自动映射 + 前 5 行预览 → 确认 → **异步逐行**导入（每行独立事务，错误行报告不中断）→ 进度轮询（Redis `app:import:{taskId}`，TTL 1h）；
+  导出 = cursor 分批流式 CSV（≤5 万行，超出截断并在尾注释说明）；附件字段导出 fileId，多值 ref 以 `;` 连接。
+- **附件（D96）**：`POST /app/:code/attachment` → `CloudFacade.uploadForApp` 服务端强制落
+  `/app-attachments/{appCode}/`（appCode 白名单校验防穿越），占云盘配额。
+  **实现注记**：超 10MB 返回 **30004**（CloudFileTooLarge；增补写 30003 属笔误，30003 是配额不足）。
+
+### 27.5 功能页模式 JSON（app_page.schema，schema_version=1）
+
+```json
+{
+  "kind": "admin",
+  "layout": [
+    { "type": "filterBar", "bind": "mainList", "fields": ["title:contains"] },
+    {
+      "type": "table",
+      "bind": "mainList",
+      "columns": ["title", "tag_ids:expand:tag"],
+      "rowActions": ["edit", "delete"]
+    },
+    {
+      "type": "form",
+      "bind": "create_book",
+      "title": "新建书",
+      "fields": ["title", "status:enum", "cover:attachment", "tag_ids:ref:tag:multiple"]
+    }
+  ],
+  "dataSources": {
+    "mainList": {
+      "op": "list",
+      "table": "book",
+      "sort": [{ "f": "title", "dir": "desc" }],
+      "size": 20
+    },
+    "tag_ids_options": { "op": "list", "table": "tag", "fields": ["rowId", "name"], "size": 100 }
+  },
+  "actions": {
+    "create_book": { "tx": false, "steps": [{ "op": "create", "table": "book" }] },
+    "update_book": { "tx": false, "steps": [{ "op": "update", "table": "book" }] },
+    "delete_book": { "tx": false, "steps": [{ "op": "delete", "table": "book" }] }
+  }
+}
+```
+
+- 区块四型：`filterBar/table/form/detail`；字段 string DSL（`字段[:op]` / `字段:expand:目标` / `字段:ref:目标[:multiple]`）。
+- 校验（R94，50004 带路径）：kind 必须 admin；dataSources/tables 存在、filter/sort 字段存在；layout 绑定必须指向已声明数据源（form → 动作）；
+  `rowId` 为内置列（非 app_field 定义），显式放行。
+  **实现注记**：增补写「zod/class-validator」，但 zod 非现有依赖且铁律 7 禁止新增 → 落地为**手写结构校验**（`page/page.schema.ts`，纯函数零依赖）。
+- **动作执行**：`POST /app/data/action { appCode, pageCode, action, params }` → 全部步骤包 `$transaction`，任一步失败整体回滚；
+  action 未声明 50010；步骤参数取 `params[表名]` 子对象（多表编排必填），否则用平铺 params；`rowId` 从同层取。
+- 页面 code/route 生成：名称 slug 化（中文退化为 `page`），应用内唯一（含软删行，避免撞唯一索引）。
+
+### 27.6 前端（apps/web）
+
+- `views/app/center/index.vue`（我的应用卡片流 + 空白创建 + 草稿确认入册 + 删除）、
+  `views/app/schema/index.vue`（结构编辑器：表/字段/关系）、
+  `views/app/page-editor/index.vue`（功能页列表 + 模型 JSON 编辑，R97）、
+  `views/app/function-page/index.vue`（功能页宿主，按 `/app-center/app/:appCode/p/:pageCode` 参数拉 schema）；
+- `components/app-renderer/`：**AdminRenderer**（四型区块渲染）+ `FieldInput.vue`（按字段类型出控件，附件走 `/app/attachment`）；
+  数据源统一经 `api/app/data/query`，动作经 `api/app/data/action`；常量与后端同源副本放 `views/app/utils/schema.ts`；
+- 通配路由与两个编辑器路由**静态注册**（`router/index.ts`）；菜单节点 component 留空，`dynamic.ts` 跳过空 component 不产生重复路由。
+
+### 27.7 菜单动态段（R96，userinfo 响应扩展）
+
+`GET /api/auth/userinfo` 的「应用中心」节点 children 由**后端实时拼装**（不落 sys_menu）：
+
+```
+应用中心(/app-center，seed 目录) ── 我的应用(app-center/center，seed 菜单)
+                              └─ {应用名}(/app-center/app/{appCode})     ← 动态段（active 应用）
+                                  └─ {功能页名}(/app-center/app/{appCode}/p/{pageCode})
+```
+
+自动节点 id 前缀 `dyn-app-*`；应用删除/转草稿后下次拉 userinfo 即时消失（零种子依赖）。
+
+### 27.8 缓存 / 安全 / 配置
+
+- Redis：`app:schema:{appId}`（def+tables+fields+rels+pages 全量打包，TTL 600s，结构/页面/应用变更即 DEL）；
+  `app:import:{taskId}`（导入进度）。
+- 安全：全参数绑定（Prisma prepared）；schema 双道校验（R94）；AdminRenderer 全文本插值（禁 v-html）；
+  全部端点属主校验（assertOwned，统一 50001）；软删可回溯；附件目录服务端拼接防穿越；写操作挂 @OperationLog。
+- 配置组（`src/config/app.config.ts`，env 前缀 `APP_*`）：`maxAppsPerUser=10` / `maxDraftsPerUser=3` / `maxTablesPerApp=20` /
+  `maxRowsPerTable=50000` / `maxPagesPerApp=50` / `maxAttachmentSize=10MB` / `maxImportSize=5MB` /
+  `hotIndexFieldsPerTable=5` / `queryTimeoutMs=2000` / `draftTtlDays=7`。
+- 定时任务（`admin/app-clean.task.ts`）：04:00 清理过期草稿（软删）；04:30 物理清理软删超期应用（保留 30 天）。
+  核心逻辑在 `app-clean.core.ts`（纯函数 + PrismaClient），Service 与手动脚本 `pnpm --filter @iplat/api clean:app` 共用。
+
+### 27.9 演进注记
+
+展示应用 B / 市场 → P12/P13（`app_page.kind` 已分 admin/display，`app_def.pub_code/source_app_id` 已建）；
+app_record 分表（单表 ≥500 万行）；富文本字段（引 DOMPurify 需特批，先 Markdown 文本）；
+AI 创建 agent 化 → P14；行级操作审计（data 外追加 diff 列）。
