@@ -3,6 +3,7 @@ import { ErrorCode } from '../../../common/constants/error-code'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { StorageService } from '../../../infra/storage/storage.service'
+import { AppRefService } from '../../app/facade/app-ref.service'
 import { AVATAR_PARENT_ID, FileService, MAX_CHILDREN } from '../file/file.service'
 import type { RecycleListQueryDto } from './dto/recycle.dto'
 
@@ -34,6 +35,7 @@ export class RecycleService {
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly fileService: FileService,
+    private readonly appRef: AppRefService,
   ) {}
 
   /**
@@ -302,6 +304,7 @@ export class RecycleService {
     options: { refundUsed?: boolean } = {},
   ): Promise<{ files: number; bytes: bigint }> {
     const ids: bigint[] = []
+    const fileIds: bigint[] = []
     const storageNames: string[] = []
     let bytes = BigInt(0)
     let fileCount = 0
@@ -317,6 +320,7 @@ export class RecycleService {
         if (row.isDir === 0) {
           fileCount++
           bytes += row.size
+          fileIds.push(row.id)
           if (row.storageName) storageNames.push(row.storageName)
         }
       }
@@ -326,6 +330,15 @@ export class RecycleService {
       for (const child of children) {
         queue.push(child.id)
       }
+    }
+
+    // P11 T103 / D96：彻底删除前预检应用引用（30021）——被数据应用引用的文件禁止物理清文件。
+    // cron 清理（cleanExpired）命中此异常时按单行失败记录并继续，等效「跳过被引用文件」。
+    if (fileIds.length > 0 && (await this.appRef.hasAttachmentRefs(userId, fileIds))) {
+      throw new BusinessException(
+        ErrorCode.CloudFileReferencedByApp,
+        '子树内文件被数据应用引用，禁止彻底删除；请先在应用中解除引用或还原该文件',
+      )
     }
 
     // 连带删除子树内文件的分享记录（R8）

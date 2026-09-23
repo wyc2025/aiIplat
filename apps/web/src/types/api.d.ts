@@ -462,3 +462,181 @@ export interface SiteCommentItem {
   replyAt: string | null
   createdAt: string
 }
+
+// ========== app 域实体（P11 数据应用） ==========
+
+/** 创建应用返回 */
+export interface AppCreateResult {
+  appCode: string
+  pubCode: string
+  status: string
+}
+
+/** 我的应用列表项 */
+export interface AppDefItem {
+  appCode: string
+  pubCode: string
+  name: string
+  description: string | null
+  /** draft / active */
+  status: string
+  tableCount: number
+  rowCount: number
+  pageCount: number
+  updatedAt: string
+}
+
+/** 字段类型七类（R88） */
+export type AppFieldType =
+  | 'text'
+  | 'number'
+  | 'datetime'
+  | 'bool'
+  | 'enum'
+  | 'attachment'
+  | 'ref'
+
+/** 字段定义视图 */
+export interface AppFieldView {
+  id: string
+  name: string
+  label: string
+  type: AppFieldType
+  required: boolean
+  defaultVal: unknown
+  enumOptions: Array<{ value: string; label: string }> | null
+  refTableId: string | null
+  refTableName: string | null
+  refMultiple: boolean
+  sort: number
+}
+
+/** 逻辑表视图 */
+export interface AppTableItem {
+  id: string
+  name: string
+  label: string
+  isSystem: boolean
+  fields: AppFieldView[]
+}
+
+/** 关系视图 */
+export interface AppRelationView {
+  id: string
+  type: string
+  fromTable: string
+  fromField: string
+  toTable: string
+  throughTable: string
+}
+
+/** 功能页视图 */
+export interface AppPageView {
+  id: string
+  code: string
+  name: string
+  route: string
+  kind: string
+  genBy: string
+  sort: number
+  schema: AppPageSchema
+}
+
+/** 功能页 schema（§5） */
+export interface AppPageSchema {
+  kind: 'admin'
+  layout: Array<{
+    type: 'filterBar' | 'table' | 'form' | 'detail'
+    bind: string
+    title?: string
+    fields?: string[]
+    columns?: string[]
+    rowActions?: string[]
+  }>
+  dataSources: Record<
+    string,
+    {
+      op: 'list' | 'get' | 'count'
+      table: string
+      fields?: string[]
+      filter?: Array<{ f: string; op: string; v?: unknown }>
+      sort?: Array<{ f: string; dir: 'asc' | 'desc' }>
+      size?: number
+    }
+  >
+  actions: Record<
+    string,
+    { tx?: boolean; steps: Array<{ op: 'create' | 'update' | 'delete'; table: string }> }
+  >
+}
+
+/** schema 全量打包 */
+export interface AppSchemaBundle {
+  app: {
+    appCode: string
+    pubCode: string
+    name: string
+    description: string | null
+    status: string
+  }
+  tables: AppTableItem[]
+  relations: AppRelationView[]
+  pages: AppPageView[]
+}
+
+/** 字段定义入参 */
+export interface AppFieldInput {
+  name: string
+  label: string
+  type: AppFieldType
+  required?: number
+  default?: unknown
+  enumOptions?: Array<{ value: string; label: string }>
+  refTable?: string
+}
+
+/** 数据行视图 */
+export interface DataRowView {
+  rowId: string
+  data: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+  expanded?: Record<string, unknown>
+}
+
+/** 查询 DSL */
+export interface DataQueryDsl {
+  appCode: string
+  op: 'list' | 'get' | 'count'
+  table: string
+  filter?: Array<{ f: string; op: string; v?: unknown }>
+  sort?: Array<{ f: string; dir: 'asc' | 'desc' }>
+  page?: number
+  size?: number
+  expand?: Array<{ f: string; fields?: string[] }>
+  rowId?: string
+}
+
+/** 动作执行入参 */
+export interface PageActionPayload {
+  appCode: string
+  pageCode: string
+  action: string
+  params?: Record<string, unknown>
+}
+
+/** CSV 导入预检返回 */
+export interface ImportPrepareResult {
+  taskId: string
+  mapping: Record<string, string>
+  previewRows: Array<Record<string, string>>
+  total: number
+}
+
+/** 导入进度 */
+export interface ImportProgress {
+  status: 'pending' | 'running' | 'done' | 'failed'
+  total: number
+  done: number
+  errors: Array<{ row: number; reason: string }>
+}

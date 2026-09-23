@@ -134,6 +134,8 @@ export const ErrorCode = {
   CloudMoveTargetInvalid: 30019,
   /** 站点根目录禁止直接删除（须先删除站点，P4E R52） */
   CloudSiteRootProtected: 30020,
+  /** 文件被应用数据引用，禁止删除（P11 D96：cloud 删除/彻底删除/回收站清理预检；复用方=app_attachment_ref） */
+  CloudFileReferencedByApp: 30021,
 
   // ========== site 域（40xxx 段，40101 起；40001/40100/40300/40400/42900 为通用码已占用，见 API.md §6.1） ==========
   /** 站点不存在或未开通 */
@@ -183,6 +185,28 @@ export const ErrorCode = {
    * 与 40112 的关系：内容池化后内容不再随站点删，无站点也可能有内容，故单列一码。
    */
   SiteUserHasContent: 40120,
+
+  // ========== app 域（50xxx 段，50001 起；50000 为通用内部错误已占用，见 API.md §18.3） ==========
+  /** 应用不存在或无权（统一属主校验；含系统表操作、越权表） */
+  AppNotFound: 50001,
+  /** 超出配额（message 带配额项：应用数/表数/行数/页数/附件/导入大小） */
+  AppQuotaExceeded: 50002,
+  /** 结构变更未通过数据校验（类型收窄遇存量违规，message 带前 10 个 rowId） */
+  AppSchemaShrinkInvalid: 50003,
+  /** 页面模式校验失败（schema 过 zod 失败，message 带路径） */
+  AppPageSchemaInvalid: 50004,
+  /** 数据校验失败（字段规则 / 动作步骤失败，事务回滚） */
+  AppDataInvalid: 50005,
+  /** 导入文件不合规（非 CSV / 超 5MB / 空文件 / 首行无列名） */
+  AppImportInvalid: 50006,
+  /** 功能页路由冲突（同应用内 route 重复） */
+  AppPageRouteConflict: 50007,
+  /** 草稿已过期或不存在（confirm 时草稿失效） */
+  AppDraftExpired: 50008,
+  /** 查询超出护栏（>2s 或非索引过滤 >1 万行） */
+  AppQueryGuardExceeded: 50009,
+  /** 动作与页面定义不符（action 未在 schema 声明） */
+  AppActionMismatch: 50010,
 } as const
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode]

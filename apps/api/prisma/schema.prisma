@@ -710,3 +710,174 @@ model SiteComment {
   @@index([siteId, articleId, auditStatus], map: "idx_comment_site_article_audit")
   @@map("site_comment")
 }
+
+// ========== 应用平台域（P11，表名 app_ 前缀） ==========
+// D87：用户表只是逻辑表，数据集中 app_record JSON 列；真实动态建表一票否决（击穿 Prisma 迁移/备份/沙箱）。
+// 全部软删可回溯（app_def/app_table/app_page/app_record）；逻辑外键（relationMode=prisma，无物理 FK）。
+
+/// 数据应用主档（D93：draft = AI 草稿不占 active 额度，限 3 个；active = 已入册）
+model AppDef {
+  id          BigInt    @id @default(autoincrement())
+  /// 应用标识：用户内唯一（R93 slug 化名称 + 冲突 "(1)"）
+  code        String    @map("code") @db.VarChar(64)
+  /// 全局唯一 12 位随机串（R93，创建即生成，P12 公开访问才启用）
+  pubCode     String    @unique @map("pub_code") @db.VarChar(12)
+  name        String    @map("name") @db.VarChar(50)
+  description String?   @map("description") @db.VarChar(200)
+  /// draft / active
+  status      String    @default("active") @map("status") @db.VarChar(10)
+  /// 属主（逻辑关联 sys_user，禁 JOIN）
+  ownerId     BigInt    @map("owner_id")
+  /// 溯源应用（P13 复制用，机制预留，本期不写）
+  sourceAppId BigInt?   @map("source_app_id")
+  /// 版本号（机制预留，本期不实现历史回滚）
+  version     Int       @default(1) @map("version")
+  deletedAt   DateTime? @map("deleted_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@unique([ownerId, code], map: "uk_app_owner_code")
+  @@index([ownerId, status, deletedAt], map: "idx_app_owner_status")
+  @@map("app_def")
+}
+
+/// 逻辑表（n:n 中间表也是一行，is_system=1 用户不可见、不计配额、不可删）
+model AppTable {
+  id        BigInt    @id @default(autoincrement())
+  appId     BigInt    @map("app_id")
+  /// 表标识（应用内唯一，slug）
+  name      String    @map("name") @db.VarChar(64)
+  label     String    @map("label") @db.VarChar(50)
+  /// 1 = 系统生成（n:n 中间表）
+  isSystem  Int       @default(0) @map("is_system") @db.TinyInt
+  /// 软删（D95）；软删时改名释放唯一槽（用户不可见）
+  deletedAt DateTime? @map("deleted_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  @@unique([appId, name], map: "uk_table_app_name")
+  @@index([appId, deletedAt], map: "idx_table_app")
+  @@map("app_table")
+}
+
+/// 字段定义 = 沙箱校验规则本体（R88 七类；D95 软删保留历史数据）
+model AppField {
+  id          BigInt    @id @default(autoincrement())
+  tableId     BigInt    @map("table_id")
+  name        String    @map("name") @db.VarChar(64)
+  label       String    @map("label") @db.VarChar(50)
+  /// text / number / datetime / bool / enum / attachment / ref
+  type        String    @map("type") @db.VarChar(20)
+  required    Int       @default(0) @map("required") @db.TinyInt
+  /// 默认值（JSON：字符串 / 数字 / 布尔）
+  defaultVal  Json?     @map("default_val")
+  /// enum 选项 [{ value, label }]（type=enum 必填）
+  enumOptions Json?     @map("enum_options")
+  /// ref 目标表（type=ref，1n 的 n 侧）
+  refTableId  BigInt?   @map("ref_table_id")
+  /// ref 是否多值（n:n 经 app_rel 中间表）
+  refMultiple Int       @default(0) @map("ref_multiple") @db.TinyInt
+  /// D95 软删（1 = 已删，数据保留）
+  isDeleted   Int       @default(0) @map("is_deleted") @db.TinyInt
+  sort        Int       @default(0) @map("sort")
+  deletedAt   DateTime? @map("deleted_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@unique([tableId, name], map: "uk_field_table_name")
+  @@index([tableId, isDeleted], map: "idx_field_table")
+  @@map("app_field")
+}
+
+/// 关系（仅 n:n 显式登记；1n 由 app_field.ref_table_id 承载，R89）
+model AppRel {
+  id             BigInt    @id @default(autoincrement())
+  appId          BigInt    @map("app_id")
+  fromTableId    BigInt    @map("from_table_id")
+  fromFieldId    BigInt    @map("from_field_id")
+  toTableId      BigInt    @map("to_table_id")
+  /// 本期仅 nm
+  type           String    @default("nm") @map("type") @db.VarChar(10)
+  /// 自动生成的中间表（app_table.is_system=1）
+  throughTableId BigInt    @map("through_table_id")
+  deletedAt      DateTime? @map("deleted_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@unique([appId, fromTableId, fromFieldId, toTableId], map: "uk_rel_app_from_to")
+  @@map("app_rel")
+}
+
+/// 数据行（D87：用户数据唯一落点；row_id 为对外可见主键，uuid）
+model AppRecord {
+  id        BigInt    @id @default(autoincrement())
+  appId     BigInt    @map("app_id")
+  tableId   BigInt    @map("table_id")
+  /// 对外可见主键（char(36) uuid）
+  rowId     String    @unique @map("row_id") @db.Char(36)
+  /// 字段名 → 值
+  data      Json      @map("data")
+  /// 热字段冗余生成列（每表 ≤5 个索引字段，R99）
+  rC1       String?   @map("r_c1") @db.VarChar(191)
+  rC2       String?   @map("r_c2") @db.VarChar(191)
+  rC3       String?   @map("r_c3") @db.VarChar(191)
+  rC4       String?   @map("r_c4") @db.VarChar(191)
+  rC5       String?   @map("r_c5") @db.VarChar(191)
+  createdBy BigInt?   @map("created_by")
+  /// 软删
+  deletedAt DateTime? @map("deleted_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  @@index([tableId, deletedAt], map: "idx_record_table")
+  @@index([tableId, rC1], map: "idx_record_table_rc1")
+  @@index([tableId, rC2], map: "idx_record_table_rc2")
+  @@index([tableId, rC3], map: "idx_record_table_rc3")
+  @@index([tableId, rC4], map: "idx_record_table_rc4")
+  @@index([tableId, rC5], map: "idx_record_table_rc5")
+  @@index([appId, updatedAt], map: "idx_record_app_updated")
+  @@map("app_record")
+}
+
+/// 功能页（R90 / §5：schema 声明多数据源与动作；kind=admin 本期，display 预留 P12）
+model AppPage {
+  id            BigInt    @id @default(autoincrement())
+  appId         BigInt    @map("app_id")
+  /// admin（本期）/ display（P12 预留）
+  kind          String    @default("admin") @map("kind") @db.VarChar(20)
+  /// 功能页标识（应用内唯一，路由段）
+  code          String    @map("code") @db.VarChar(64)
+  name          String    @map("name") @db.VarChar(50)
+  /// 应用内相对路径（应用内唯一，重复 50007）
+  route         String    @map("route") @db.VarChar(64)
+  schema        Json      @map("schema")
+  schemaVersion Int       @default(1) @map("schema_version")
+  /// ai / manual
+  genBy         String    @default("manual") @map("gen_by") @db.VarChar(10)
+  sort          Int       @default(0) @map("sort")
+  deletedAt     DateTime? @map("deleted_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@unique([appId, code], map: "uk_page_app_code")
+  @@unique([appId, route], map: "uk_page_app_route")
+  @@index([appId, kind, deletedAt], map: "idx_page_app_kind")
+  @@map("app_page")
+}
+
+/// 附件引用索引（D96：cloud 删除预检的查询底座；写路径经 DataService 同步维护）
+model AppAttachmentRef {
+  id        BigInt    @id @default(autoincrement())
+  appId     BigInt    @map("app_id")
+  tableId   BigInt    @map("table_id")
+  /// 逻辑关联 app_record
+  recordId  BigInt    @map("record_id")
+  fieldName String    @map("field_name") @db.VarChar(64)
+  /// 逻辑关联 cloud_file
+  fileId    BigInt    @map("file_id")
+  deletedAt DateTime? @map("deleted_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([fileId, deletedAt], map: "idx_attref_file")
+  @@index([appId, tableId, recordId], map: "idx_attref_record")
+  @@map("app_attachment_ref")
+}

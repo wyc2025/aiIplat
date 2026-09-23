@@ -131,6 +131,20 @@ export const CAPABILITY_MANIFEST: readonly CapabilityRow[] = [
     text: '站点管理：新建站点（受站点配额限制）、改标题描述与标识、启停、评论审核开关、删站（删站确认卡列明影响；文章等物理删除不可恢复，站点文件进回收站，标识立即释放）。',
     tools: ['create_site', 'update_site', 'delete_site'],
   },
+  {
+    key: 'app.data',
+    perms: null,
+    text: '数据应用：用对话建数据应用（自定义表/字段/关系）并自动生成管理页面，确认后入册（均需确认）。',
+    tools: [
+      'create_data_app',
+      'add_table',
+      'add_fields',
+      'set_relation',
+      'gen_admin_page',
+      'adjust_page',
+      'confirm_data_app',
+    ],
+  },
 ]
 
 /** 权限判定函数（由 SystemPromptService 注入 PermissionService 实现） */

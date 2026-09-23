@@ -70,6 +70,16 @@ interface StreamOutcome {
   meta: Record<string, unknown> | null
   /** 累积的助手文本（P10 用例：断言「模型确实读到了附件内容」） */
   content: string
+  /** write 工具的确认请求（P11 L 用例：自动批准 app 组写工具） */
+  confirms: StreamConfirm[]
+  /** meta 事件中的会话 id（P11 L 用例：追加推进消息须续接同一会话） */
+  conversationId: number | null
+}
+
+/** tool_confirm 事件（写工具确认卡） */
+interface StreamConfirm {
+  toolCallId: string
+  toolName: string
 }
 
 /** 云盘根下的附件留档目录（与前端/后端同口径，D84） */
@@ -104,15 +114,29 @@ async function chat(
   modelId: number,
   content: string,
   attachments?: Array<{ fileId: string }>,
+  conversationId?: number | null,
 ): Promise<StreamOutcome> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), CHAT_TIMEOUT_MS)
-  const outcome: StreamOutcome = { finished: false, errorEvent: null, bytes: 0, meta: null, content: '' }
+  const outcome: StreamOutcome = {
+    finished: false,
+    errorEvent: null,
+    bytes: 0,
+    meta: null,
+    content: '',
+    confirms: [],
+    conversationId: null,
+  }
   try {
     const res = await fetch(`${BASE}/api/ai/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ modelId, content, ...(attachments?.length ? { attachments } : {}) }),
+      body: JSON.stringify({
+        modelId,
+        content,
+        ...(attachments?.length ? { attachments } : {}),
+        ...(conversationId ? { conversationId } : {}),
+      }),
       signal: controller.signal,
     })
     if (!res.ok || !res.body) {
@@ -138,9 +162,21 @@ async function chat(
           try {
             const payload = JSON.parse(dataLine) as Record<string, unknown> & { type?: string; content?: string }
             if (payload.type === 'done') outcome.finished = true
-            else if (payload.type === 'meta') outcome.meta = payload
+            else if (payload.type === 'meta') {
+              outcome.meta = payload
+              const rawConv = (payload as { conversationId?: unknown }).conversationId
+              if (rawConv !== undefined && rawConv !== null) {
+                const parsed = Number(rawConv)
+                if (Number.isFinite(parsed)) outcome.conversationId = parsed
+              }
+            }
             else if (payload.type === 'delta' && typeof payload.content === 'string') outcome.content += payload.content
-            else if (payload.type === 'error') outcome.errorEvent = JSON.stringify(payload).slice(0, 200)
+            else if (payload.type === 'tool_confirm' && payload.toolCallId !== undefined) {
+              outcome.confirms.push({
+                toolCallId: String(payload.toolCallId),
+                toolName: String(payload.toolName ?? ''),
+              })
+            } else if (payload.type === 'error') outcome.errorEvent = JSON.stringify(payload).slice(0, 200)
           } catch {
             // 非 JSON data 行（心跳等）：忽略
           }
@@ -262,6 +298,140 @@ async function assertToolCall(
   const params = (row.params ?? {}) as Record<string, unknown>
   const reason = verify(params, row.result ?? '')
   return reason ? { ok: false, reason } : { ok: true, reason: `#${row.id} executed` }
+}
+
+// ==================== P11 数据应用写工具自动确认（L 用例） ====================
+
+/** app 组工具名（写工具，需确认卡批准后才会执行） */
+const APP_WRITE_TOOLS = new Set([
+  'create_data_app',
+  'add_table',
+  'add_fields',
+  'set_relation',
+  'gen_admin_page',
+  'adjust_page',
+  'confirm_data_app',
+])
+
+/** 批准一次写工具确认（SSE 流式返回总结；同时收集后续可能出现的确认） */
+async function confirmTool(
+  token: string,
+  toolCallId: string,
+  approved: boolean,
+): Promise<{ confirms: StreamConfirm[]; finished: boolean; errorEvent: string | null }> {
+  const confirms: StreamConfirm[] = []
+  let finished = false
+  let errorEvent: string | null = null
+  const res = await fetch(`${BASE}/api/ai/tool/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ toolCallId: Number(toolCallId), approved }),
+  })
+  if (!res.ok || !res.body) {
+    return { confirms, finished, errorEvent: `HTTP ${res.status}` }
+  }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (!finished) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let index = buffer.indexOf('\n\n')
+    while (index >= 0) {
+      const rawEvent = buffer.slice(0, index)
+      buffer = buffer.slice(index + 2)
+      const dataLine = /^data:\s*(.+)$/m.exec(rawEvent)?.[1]?.trim()
+      if (dataLine) {
+        try {
+          const payload = JSON.parse(dataLine) as Record<string, unknown> & { type?: string }
+          if (payload.type === 'done') finished = true
+          else if (payload.type === 'tool_confirm' && payload.toolCallId !== undefined) {
+            confirms.push({
+              toolCallId: String(payload.toolCallId),
+              toolName: String(payload.toolName ?? ''),
+            })
+          } else if (payload.type === 'error') errorEvent = JSON.stringify(payload).slice(0, 200)
+        } catch {
+          // 心跳等非 JSON 行
+        }
+      }
+      index = buffer.indexOf('\n\n')
+    }
+  }
+  return { confirms, finished, errorEvent }
+}
+
+/**
+ * 数据应用冒烟：清理历次 run 留下的「读书笔记」应用/草稿。
+ *
+ * 为什么必须清理：草稿上限 3 个（R91），L 用例每次重试都会新建草稿；不清理则第 2/3 次重试
+ * 直接被 50002 挡住（首轮实测暴露：3 次重试分别 app / app(1) / app(2)，第三次建应用即失败）。
+ */
+const SMOKE_APP_NAME = '读书笔记'
+
+async function cleanupSmokeApps(token: string): Promise<number> {
+  try {
+    const apps = await api<Array<{ appCode: string; name: string }>>(token, '/api/app')
+    const targets = apps.filter((item) => item.name.includes(SMOKE_APP_NAME))
+    for (const target of targets) {
+      await api(token, `/api/app/${target.appCode}`, { method: 'DELETE' })
+    }
+    return targets.length
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * L 用例的推进消息：实测模型每条用户消息只推进 1~2 个写工具就停下（会先汇报进度或询问），
+ * 需要像真实用户一样继续对话；每条推进消息后同样自动批准新出现的确认卡。
+ */
+const APP_FLOW_FOLLOW_UPS = [
+  '继续完成这个数据应用：补齐剩余的表（笔记表，含内容字段并关联到书），再生成一个管理页面。',
+  '继续：为这个数据应用生成管理页面（gen_admin_page）。',
+  '继续：确认这个数据应用入册（confirm_data_app）。',
+]
+
+/**
+ * 跑一遍数据应用创建链：首发消息 → 逐张确认卡自动批准（app 组写工具）→ 按需追加推进消息
+ * （每次同样批准新确认卡），直到 confirm_data_app 执行或推进消息用尽；返回被确认的工具名集合。
+ */
+async function runAppToolFlow(
+  token: string,
+  modelId: number,
+  prompt: string,
+): Promise<{ calledTools: string[]; errorEvent: string | null }> {
+  const called = new Set<string>()
+  let errorEvent: string | null = null
+
+  const drain = async (confirms: StreamConfirm[]): Promise<void> => {
+    const queue = [...confirms]
+    let rounds = 0
+    while (queue.length > 0 && rounds < 12) {
+      const next = queue.shift()!
+      called.add(next.toolName)
+      const follow = await confirmTool(token, next.toolCallId, true)
+      if (follow.errorEvent) errorEvent = follow.errorEvent
+      for (const confirm of follow.confirms) queue.push(confirm)
+      rounds += 1
+    }
+  }
+
+  const first = await chat(token, modelId, prompt)
+  if (first.errorEvent) errorEvent = first.errorEvent
+  await drain(first.confirms)
+
+  // 关键：追加推进消息必须续接**同一会话**（不带 conversationId 会新开会话，模型丢失上下文，
+  // 实测表现为只会重新 create_data_app/add_table，永远推进不到 gen_admin_page）
+  const conversationId = first.conversationId
+  for (const message of APP_FLOW_FOLLOW_UPS) {
+    if (called.has('confirm_data_app')) break
+    const outcome = await chat(token, modelId, message, undefined, conversationId)
+    if (outcome.errorEvent) errorEvent = outcome.errorEvent
+    await drain(outcome.confirms)
+  }
+  return { calledTools: [...called], errorEvent }
 }
 
 /** 自 cloud_file 向上拼出相对云盘根的路径（AI 工具按 path 寻址） */
@@ -523,6 +693,67 @@ async function main(): Promise<void> {
           reason: `夹具准备失败：${(error as Error).message}`,
         })
       }
+    }
+
+    // 用例 L：数据应用创建链（P11 T105 / R98）——create_data_app → add_table → gen_admin_page → confirm_data_app
+    console.log('L. 数据应用（create_data_app / add_table / gen_admin_page / confirm_data_app）')
+    {
+      const prompt =
+        '帮我建一个读书笔记数据应用：书（书名/作者/评分）和笔记（内容/关联书），再生成管理页面，最后确认入册。'
+      // 前置清理：释放历次 run 占用的草稿额度（否则第 2/3 次重试被 50002 挡）
+      const cleaned = await cleanupSmokeApps(token)
+      if (cleaned > 0) console.log(`  · 已清理历史「${SMOKE_APP_NAME}」应用/草稿 ${cleaned} 个`)
+      let lastReason = '未执行'
+      let done = false
+      for (let attempt = 1; attempt <= MAX_ATTEMPT && !done; attempt += 1) {
+        const since = new Date()
+        const flow = await runAppToolFlow(token, modelId, prompt)
+        const app = await prisma.appDef.findFirst({
+          where: { ownerId: userId, createdAt: { gte: since } },
+          orderBy: { id: 'desc' },
+        })
+        const calls = await prisma.aiToolCall.findMany({
+          where: {
+            userId,
+            createdAt: { gte: since },
+            toolName: { in: [...APP_WRITE_TOOLS] },
+            status: 'executed',
+          },
+          select: { toolName: true },
+        })
+        const executed = new Set(calls.map((call) => call.toolName))
+        if (!app) {
+          lastReason = `app_def 未落库（已确认工具：${flow.calledTools.join('、') || '无'}${flow.errorEvent ? `；${flow.errorEvent}` : ''}）`
+        } else if (app.status !== 'active') {
+          lastReason = `app_def 状态=${app.status}（应 active；已执行：${[...executed].join('、') || '无'}）`
+        } else if (
+          !executed.has('create_data_app') ||
+          !executed.has('add_table') ||
+          !executed.has('gen_admin_page')
+        ) {
+          lastReason = `app 组工具执行不全：${[...executed].join('、') || '无'}`
+        } else {
+          const tables = await prisma.appTable.count({
+            where: { appId: app.id, deletedAt: null, isSystem: 0 },
+          })
+          if (tables === 0) {
+            lastReason = 'app_table 未落库'
+          } else {
+            report('L 数据应用创建链（草稿→入册）', {
+              ok: true,
+              reason: `app=${app.code} status=active / ${tables} 张表 / 工具=${[...executed].join('、')}`,
+            })
+            done = true
+            break
+          }
+        }
+        console.log(`  · 第 ${attempt}/${MAX_ATTEMPT} 次未通过：${lastReason}`)
+        if (attempt < MAX_ATTEMPT) await sleep(RETRY_DELAY_MS)
+      }
+      if (!done) report('L 数据应用创建链（草稿→入册）', { ok: false, reason: lastReason })
+      // 收尾清理：不把冒烟产生的应用/草稿留在库里（占用正式额度与草稿额度）
+      const finalCleaned = await cleanupSmokeApps(token)
+      if (finalCleaned > 0) console.log(`  · 已清理本轮「${SMOKE_APP_NAME}」应用 ${finalCleaned} 个`)
     }
 
     console.log(`\n冒烟结果：通过 ${passed} 项，失败 ${failures.length} 项`)

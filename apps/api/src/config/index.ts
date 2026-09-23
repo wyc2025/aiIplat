@@ -4,6 +4,7 @@ import jwtConfig from './jwt.config'
 import uploadConfig from './upload.config'
 import siteConfig from './site.config'
 import aiConfig from './ai.config'
+import appConfig from './app.config'
 
 /** ConfigModule.forRoot({ load }) 统一注册入口 */
 export const configLoaders = [
@@ -13,4 +14,5 @@ export const configLoaders = [
   uploadConfig,
   siteConfig,
   aiConfig,
+  appConfig,
 ]

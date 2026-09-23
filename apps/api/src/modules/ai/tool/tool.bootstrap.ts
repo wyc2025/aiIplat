@@ -1,4 +1,5 @@
 import { Injectable, Logger, type OnModuleInit } from '@nestjs/common'
+import { AppFacade } from '../../app/facade/app-facade.service'
 import { CloudFacade } from '../../cloud/facade/cloud-facade.service'
 import { CreditService } from '../credit/credit.service'
 import { SiteFacade } from '../../site/facade/site-facade.service'
@@ -42,13 +43,21 @@ import { createReplySiteCommentTool } from './tools/reply-site-comment.tool'
 // P9 T92：文章导入 / 排版两件套（read 级：只解析/排版、不落库、不出确认卡）
 import { createFormatSiteArticleTool } from './tools/format-site-article.tool'
 import { createImportSiteArticleTool } from './tools/import-site-article.tool'
+// P11 T105：数据应用七件套（app 组，全 write 走确认卡；handler 只注入 AppFacade）
+import { createCreateDataAppTool } from './tools/create-data-app.tool'
+import { createAddTableTool } from './tools/add-table.tool'
+import { createAddFieldsTool } from './tools/add-fields.tool'
+import { createSetRelationTool } from './tools/set-relation.tool'
+import { createGenAdminPageTool } from './tools/gen-admin-page.tool'
+import { createAdjustPageTool } from './tools/adjust-page.tool'
+import { createConfirmDataAppTool } from './tools/confirm-data-app.tool'
 
 /**
- * 工具装配器：注入各域暴露的门面 Service，在模块启动时把注册表内全部工具（P9 起 30 个）注册到 ToolRegistry。
+ * 工具装配器：注入各域暴露的门面 Service，在模块启动时把注册表内全部工具（P11 起 37 个）注册到 ToolRegistry。
  * 新增工具 = tools/ 下加一个工厂 + 在此处 register + 在 tool.groups.ts 归组（R70）。
  * 域门面纪律（见 ARCHITECTURE §12.3）：handler 只注入域 exports 的 Service，零跨域 import 内部实现——
  * 站点系列（文件三件套 + create_site + CMS 七件套 + 评论三件套 + 生命周期两件套）只注入 SiteFacade；
- * 云盘五件套只注入 CloudFacade（P5 T72 起）。
+ * 云盘五件套只注入 CloudFacade（P5 T72 起）；数据应用七件套只注入 AppFacade（P11 T105）。
  */
 @Injectable()
 export class ToolBootstrap implements OnModuleInit {
@@ -60,6 +69,7 @@ export class ToolBootstrap implements OnModuleInit {
     private readonly creditService: CreditService,
     private readonly siteFacade: SiteFacade,
     private readonly cloudFacade: CloudFacade,
+    private readonly appFacade: AppFacade,
   ) {}
 
   private readonly logger = new Logger(ToolBootstrap.name)
@@ -102,6 +112,14 @@ export class ToolBootstrap implements OnModuleInit {
     // P9 T92：文章导入 + 排版两件套（D79/R79：包装 P8 纯函数，read 级，工具内零业务复写）
     this.registry.register(createImportSiteArticleTool(this.siteFacade))
     this.registry.register(createFormatSiteArticleTool(this.siteFacade))
+    // P11 T105：数据应用七件套（R88~R93；全 write 走确认卡，属主自服务 perms 留空）
+    this.registry.register(createCreateDataAppTool(this.appFacade))
+    this.registry.register(createAddTableTool(this.appFacade))
+    this.registry.register(createAddFieldsTool(this.appFacade))
+    this.registry.register(createSetRelationTool(this.appFacade))
+    this.registry.register(createGenAdminPageTool(this.appFacade))
+    this.registry.register(createAdjustPageTool(this.appFacade))
+    this.registry.register(createConfirmDataAppTool(this.appFacade))
 
     // P6 T77：工具归组校验（R70）——孤儿工具会让组路由漏发工具，启动即告警
     this.assertToolGroups()

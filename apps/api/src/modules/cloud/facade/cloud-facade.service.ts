@@ -153,6 +153,19 @@ function extOfName(name: string): string {
   return dot > 0 ? name.slice(dot + 1).toLowerCase() : ''
 }
 
+/** app 附件固定目录（P11 D96：附件字段强制落此目录，占云盘配额） */
+const APP_ATTACHMENTS_DIR = 'app-attachments'
+
+/**
+ * appCode → 安全目录段（防穿越）：仅允许小写字母数字与连字符、可带 "(n)" 冲突后缀；
+ * 非法返回 null（调用方抛 40001）。不 import app 域常量（跨域 import 违铁律 6，故本地白名单）。
+ */
+function sanitizeAppCodeSegment(code: string): string | null {
+  const trimmed = typeof code === 'string' ? code.trim() : ''
+  if (!/^[a-z0-9][a-z0-9-]{0,40}(\(\d{1,3}\))?$/.test(trimmed)) return null
+  return trimmed
+}
+
 /**
  * 云盘域门面：跨域（system/site 等）只通过本门面与 cloud 交互，禁止直接 import 内部 FileService（R6）。
  * 封装：删用户预检 hasFiles、头像记录登记 saveAvatar、公开机制（P4a）：resolvePublicPath / getPublicStream / createFolder / registerPublicFile。
@@ -382,6 +395,79 @@ export class CloudFacade {
       where: { userId },
       data: { used: next < BigInt(0) ? BigInt(0) : next },
     })
+  }
+
+  // ==================== P11 app 域附件门面（T103，D96） ====================
+
+  /**
+   * app 域附件上传（D96）：服务端**强制**落到用户云盘 `/app-attachments/{appCode}/`（不存在则逐段创建），
+   * 服务端拼路径防穿越（appCode 白名单校验，不含 `/` `.`）。占云盘配额，复用 registerPublicFile 记账链。
+   *
+   * 分域纪律：`maxBytes`（app 配置 10MB）由调用域传入，cloud 域不硬编码其它域口径，只再夹一层云盘单文件上限。
+   */
+  async uploadForApp(
+    userId: bigint,
+    appCode: string,
+    file: Express.Multer.File | undefined,
+    maxBytes: number,
+  ): Promise<{ fileId: string; path: string; name: string; ext: string; size: number }> {
+    if (!file?.path) {
+      throw new BusinessException(ErrorCode.ParamInvalid, '缺少上传文件（multipart 字段名 file）')
+    }
+    const segment = sanitizeAppCodeSegment(appCode)
+    if (!segment) {
+      throw new BusinessException(ErrorCode.ParamInvalid, 'appCode 非法')
+    }
+    const cloudLimit = this.config.get<number>('upload.cloudMaxFileSize', 100 * 1024 * 1024)
+    const limit = Math.min(maxBytes, cloudLimit)
+    if (file.size > limit) {
+      const mb = Math.max(1, Math.floor(limit / 1024 / 1024))
+      throw new BusinessException(ErrorCode.CloudFileTooLarge, `附件超出大小上限（${mb}MB）`)
+    }
+    const originalName = (file.originalname.split(/[\\/]/).pop() ?? '')
+      // eslint-disable-next-line no-control-regex -- 剔除控制字符正是本函数目的（防响应头/文件名注入）
+      .replace(/[\u0000-\u001f\u007f]/g, '')
+      .trim()
+    if (!originalName) {
+      throw new BusinessException(ErrorCode.ParamInvalid, '文件名无效')
+    }
+    if (originalName.length > 64) {
+      throw new BusinessException(ErrorCode.CloudDirLimitExceeded, '文件名不能超过 64 字符')
+    }
+    try {
+      const dirId = await this.ensureUserDir(userId, [APP_ATTACHMENTS_DIR, segment])
+      const { quota, used } = await this.fileService.getQuota(userId)
+      if (used + BigInt(file.size) > quota) {
+        throw new BusinessException(
+          ErrorCode.CloudQuotaExceeded,
+          `存储配额不足（已用 ${used.toString()} / 配额 ${quota.toString()} 字节）`,
+        )
+      }
+      const name = await this.fileService.resolveNameConflict(userId, dirId, originalName)
+      const ext = extOfName(name)
+      const storageName = await this.storage.moveToStorage(file.path, ext)
+      let created: CloudFile
+      try {
+        created = await this.registerPublicFile(userId, dirId, name, {
+          size: BigInt(file.size),
+          ext,
+          mime: RAW_MIME_MAP[ext] ?? 'application/octet-stream',
+          storageName,
+        })
+      } catch (error) {
+        await this.storage.remove(storageName).catch(() => undefined)
+        throw error
+      }
+      return {
+        fileId: created.id.toString(),
+        path: `${APP_ATTACHMENTS_DIR}/${segment}/${name}`,
+        name,
+        ext,
+        size: file.size,
+      }
+    } finally {
+      await this.storage.removeTmp(file.path)
+    }
   }
 
   // ==================== P4b 机械原语（T41，架构增补 §15.3） ====================

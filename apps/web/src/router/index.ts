@@ -36,6 +36,26 @@ export const staticRoutes: RouteRecordRaw[] = [
         component: () => import('@/views/profile/index.vue'),
         meta: { title: '个人中心', hidden: true },
       },
+      {
+        // P11 应用平台：结构编辑器 / 功能页编辑器（非菜单页，从应用中心卡片进入）
+        path: 'app-center/schema',
+        name: 'app-center-schema',
+        component: () => import('@/views/app/schema/index.vue'),
+        meta: { title: '结构编辑', hidden: true },
+      },
+      {
+        path: 'app-center/pages',
+        name: 'app-center-pages',
+        component: () => import('@/views/app/page-editor/index.vue'),
+        meta: { title: '功能页编辑', hidden: true },
+      },
+      {
+        // P11 功能页通配路由（API-P11 §2）：单组件按参数拉 schema 渲染，无需按页注册路由
+        path: 'app-center/app/:appCode/p/:pageCode',
+        name: 'app-center-function-page',
+        component: () => import('@/views/app/function-page/index.vue'),
+        meta: { title: '功能页', hidden: true },
+      },
     ],
   },
   {

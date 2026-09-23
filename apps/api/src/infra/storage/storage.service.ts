@@ -1,5 +1,5 @@
 import { createReadStream, createWriteStream } from 'node:fs'
-import { copyFile, mkdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import type { WriteStream } from 'node:fs'
 import type { Readable } from 'node:stream'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
@@ -85,6 +85,15 @@ export class StorageService implements OnModuleInit {
       if (this.isNotFound(error)) return false
       throw error
     }
+  }
+
+  /**
+   * 读取临时区文件到内存（P11 T103 CSV 导入：≤5MB，有界读取后即刻 removeTmp）。
+   * 业务代码禁止直接操作 fs，故临时区读取也走本服务。
+   */
+  async readTmp(tmpPath: string): Promise<Buffer> {
+    this.assertInsideTmp(tmpPath)
+    return readFile(tmpPath)
   }
 
   /** 删除临时区文件（不存在静默；上传校验失败后的回滚清理） */

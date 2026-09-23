@@ -10,6 +10,7 @@ import { BusinessException } from '../../../common/exceptions/business.exception
 import type { AuthUser } from '../../../gateway/guards/jwt.strategy'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { RedisService } from '../../../infra/redis/redis.service'
+import { AppFacade } from '../../app/facade/app-facade.service'
 import type { LoginDto, TokenPairDto } from './dto/login.dto'
 import type { RefreshDto } from './dto/refresh.dto'
 import { MenuTreeNode, type UserInfoResult } from './vo/userinfo.vo'
@@ -33,6 +34,7 @@ export class AuthService {
     private readonly redis: RedisService,
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
+    private readonly appFacade: AppFacade,
   ) {}
 
   /** 登录：校验锁定 → 校验账号密码 → 签发双 token 并缓存权限标识 */
@@ -136,7 +138,53 @@ export class AuthService {
 
     // 剔除敏感字段与关联中间表
     const { password: _password, userRoles: _userRoles, ...userInfo } = user
-    return { user: userInfo, roles, perms, menus: this.buildMenuTree(menus) }
+    const tree = this.buildMenuTree(menus)
+    await this.appendAppMenuSegment(tree, user.id)
+    return { user: userInfo, roles, perms, menus: tree }
+  }
+
+  /**
+   * R96：把「应用中心」节点的 children 追加为**实时动态段**（不落 sys_menu）：
+   *   应用中心 ▸ {应用名}(type=1) ▸ {功能页名}(type=2)
+   * 前端静态注册通配路由 `/app-center/app/:appCode/p/:pageCode`，菜单只驱动跳转；
+   * 功能页 component 留空（dynamic.ts 对空 component 跳过路由注册，不产生重复路由）。
+   * 应用删除/转草稿后，下次拉 userinfo 即时消失（零种子依赖，W1 教训的正面利用）。
+   */
+  private async appendAppMenuSegment(tree: MenuTreeNode[], userId: bigint): Promise<void> {
+    const center = tree.find((node) => node.path === '/app-center')
+    if (!center) return
+    const segments = await this.appFacade.getAppMenuSegments(userId)
+    if (segments.length === 0) return
+    const children = [...(center.children ?? [])]
+    segments.forEach((segment, appIndex) => {
+      const appNodeId = `dyn-app-${segment.appCode}`
+      children.push({
+        id: appNodeId,
+        parentId: center.id,
+        name: segment.name,
+        type: 1,
+        path: `/app-center/app/${segment.appCode}`,
+        component: null,
+        perms: null,
+        icon: 'Grid',
+        sort: 100 + appIndex,
+        visible: 1,
+        children: segment.pages.map((page, pageIndex) => ({
+          id: `${appNodeId}-${page.code}`,
+          parentId: appNodeId,
+          name: page.name,
+          type: 2,
+          path: `/app-center/app/${segment.appCode}/p/${page.code}`,
+          component: null,
+          perms: null,
+          icon: null,
+          sort: pageIndex + 1,
+          visible: 1,
+          children: [],
+        })),
+      })
+    })
+    center.children = children
   }
 
   /** 过滤出启用且未删除的角色 */

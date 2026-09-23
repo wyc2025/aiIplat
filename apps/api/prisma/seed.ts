@@ -399,6 +399,25 @@ const menuTree: MenuSeed[] = [
       },
     ],
   },
+  // P11：应用中心（登录用户均可访问；子菜单「我的应用」+ 后端按用户 active 应用实时追加的
+  // 「应用 ▸ 功能页」动态段 —— 动态段不落 sys_menu，R96；本目录零按钮权限标识，数据操作属主校验兜底）
+  {
+    name: '应用中心',
+    type: 1,
+    path: '/app-center',
+    icon: 'Grid',
+    sort: 7,
+    children: [
+      {
+        name: '我的应用',
+        type: 2,
+        path: 'app-center/center',
+        component: 'app/center/index',
+        icon: 'Grid',
+        sort: 1,
+      },
+    ],
+  },
   // 个人中心：路由存在但不进侧边栏菜单（visible=0，hidden 不参与侧边栏排序）
   {
     name: '个人中心',
@@ -529,6 +548,30 @@ async function main() {
       }
     }
     for (const menuId of siteMenuIds) {
+      await prisma.sysRoleMenu.upsert({
+        where: { roleId_menuId: { roleId: commonRole.id, menuId } },
+        update: {},
+        create: { roleId: commonRole.id, menuId },
+      })
+    }
+  }
+
+  // P11：common 角色授予「应用中心」整棵子树（目录 + 我的应用页；动态段不落 sys_menu，无需授予）
+  const appCenterDir = await prisma.sysMenu.findFirst({
+    where: { parentId: BigInt(0), name: '应用中心' },
+  })
+  if (appCenterDir) {
+    const appMenuIds: bigint[] = [appCenterDir.id]
+    const appPending: bigint[] = [appCenterDir.id]
+    while (appPending.length > 0) {
+      const parentId = appPending.pop()!
+      const children = await prisma.sysMenu.findMany({ where: { parentId } })
+      for (const child of children) {
+        appMenuIds.push(child.id)
+        appPending.push(child.id)
+      }
+    }
+    for (const menuId of appMenuIds) {
       await prisma.sysRoleMenu.upsert({
         where: { roleId_menuId: { roleId: commonRole.id, menuId } },
         update: {},

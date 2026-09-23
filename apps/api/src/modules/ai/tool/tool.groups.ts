@@ -13,8 +13,15 @@
  * - 本文件不改权限语义：先权限过滤、再组路由（R70）。
  */
 
-/** 工具组名（P6：create 组自本期起称 site 组 / CMS 与文件分开，见 API-P6 §13.6 说明） */
-export type ToolGroupName = 'common' | 'system' | 'siteFile' | 'siteCms' | 'siteLifecycle' | 'cloud'
+/** 工具组名（P6：create 组自本期起称 site 组 / CMS 与文件分开；P11 新增 app 数据应用组） */
+export type ToolGroupName =
+  | 'common'
+  | 'system'
+  | 'siteFile'
+  | 'siteCms'
+  | 'siteLifecycle'
+  | 'cloud'
+  | 'app'
 
 /**
  * 分组常量表（工具名 → 组）：与 ToolBootstrap 注册表同源维护。
@@ -47,6 +54,16 @@ export const TOOL_GROUPS: Record<ToolGroupName, readonly string[]> = {
   siteLifecycle: ['create_site', 'update_site', 'delete_site'],
   /** 云盘（站点之外的云盘文件管理） */
   cloud: ['list_cloud_files', 'read_cloud_file', 'write_cloud_file', 'move_cloud_files', 'delete_cloud_files'],
+  /** 数据应用（P11 T105：应用/表/关系/功能页，属主自服务，全 write 走确认卡） */
+  app: [
+    'create_data_app',
+    'add_table',
+    'add_fields',
+    'set_relation',
+    'gen_admin_page',
+    'adjust_page',
+    'confirm_data_app',
+  ],
 }
 
 /** 全部组名（顺序固定，便于日志与测试断言） */
@@ -57,6 +74,7 @@ export const ALL_TOOL_GROUPS: readonly ToolGroupName[] = [
   'siteCms',
   'siteLifecycle',
   'cloud',
+  'app',
 ]
 
 /**
@@ -73,6 +91,8 @@ export const KEYWORD_TO_GROUPS: Record<string, readonly ToolGroupName[]> = {
   '站点|建站|网站|个人网站|描述|简介|删站|删除站点|新建站点|开通站点': ['siteLifecycle', 'siteFile'],
   // 云盘：站点之外的云盘文件管理
   '云盘|文件|目录|文件夹|整理|移动|删除文件|上传|下载|笔记|文档|我的文件': ['cloud'],
+  // 数据应用（P11 R98）：建应用/建表/字段/关系/管理页面
+  '应用|数据应用|建应用|建表|数据表|表结构|字段|关系|管理页|功能页|后台|记账|书单|库存|相册': ['app'],
   // 系统管理：在线用户 / 用户 / 角色
   '在线|踢人|下线|用户|成员|角色|权限|账号': ['system'],
 }

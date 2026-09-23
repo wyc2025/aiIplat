@@ -38,4 +38,10 @@ export const RedisKey = {
   sharePass: (token: string, sid: string) => `share:pass:${token}:${sid}`,
   /** 分享提取码错误计数（IP+token，连续 5 次锁 10 分钟，照登录 10102 口径）：share:passfail:{ip}:{token}（P4d R42） */
   sharePassFail: (ip: string, token: string) => `share:passfail:${ip}:${token}`,
+
+  // ========== app 域（P11 T100） ==========
+  /** 应用 schema 全量打包缓存：app:schema:{appId}，结构/页面变更即 DEL，TTL 600s（R99） */
+  appSchema: (appId: string) => `app:schema:${appId}`,
+  /** CSV 导入任务进度：app:import:{taskId}，JSON {status,total,done,errors}，TTL 1h（T103 用） */
+  appImport: (taskId: string) => `app:import:${taskId}`,
 } as const

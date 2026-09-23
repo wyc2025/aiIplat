@@ -7,6 +7,7 @@ import { BusinessException } from '../../../common/exceptions/business.exception
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { StorageService } from '../../../infra/storage/storage.service'
 import { SiteRootService } from '../../site/facade/site-root.service'
+import { AppRefService } from '../../app/facade/app-ref.service'
 import type {
   FileListQueryDto,
   MkdirDto,
@@ -52,6 +53,7 @@ export class FileService {
     private readonly config: ConfigService,
     private readonly storage: StorageService,
     private readonly siteRoot: SiteRootService,
+    private readonly appRef: AppRefService,
   ) {}
 
   /** 目录内容列表：文件夹在前（名称升序），文件在后（修改时间倒序），不分页 */
@@ -281,6 +283,13 @@ export class FileService {
       throw new BusinessException(
         ErrorCode.CloudSiteRootProtected,
         '站点根目录不能直接删除，请先到「个人网站 → 站点列表」删除站点',
+      )
+    }
+    // P11 T103 / D96：被数据应用引用的文件禁止删除（30021），先解除引用/还原
+    if (await this.appRef.hasAttachmentRefs(userId, [target.id])) {
+      throw new BusinessException(
+        ErrorCode.CloudFileReferencedByApp,
+        '该文件被数据应用引用，禁止删除；请先在应用中解除引用',
       )
     }
     await this.prisma.cloudFile.update({
