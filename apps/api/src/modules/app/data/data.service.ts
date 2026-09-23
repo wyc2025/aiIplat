@@ -10,7 +10,13 @@ import { AdminService } from '../admin/admin.service'
 import { REL_FROM_FIELD, REL_TO_FIELD } from '../schema/schema.constants'
 import { SchemaService } from '../schema/schema.service'
 import type { ResolvedTable } from '../schema/schema.types'
-import type { DataQueryDto, QueryFilterDto, RecordQueryDto } from './dto/data.dto'
+import type {
+  DataQueryDto,
+  QueryExpandDto,
+  QueryFilterDto,
+  QuerySortDto,
+  RecordQueryDto,
+} from './dto/data.dto'
 
 /** 事务客户端或普通客户端（动作多步写共用） */
 export type Db = Prisma.TransactionClient
@@ -95,6 +101,48 @@ export class DataService {
   /** get 语义糖（GET /app/data/record） */
   async getRecord(userId: bigint, dto: RecordQueryDto) {
     return this.query(userId, { appCode: dto.appCode, op: 'get', table: dto.table, rowId: dto.rowId })
+  }
+
+  /**
+   * 公开面执行入口（P12 T110，铁律 5 复用 A 侧双路径执行器与护栏）。
+   *
+   * 调用方（PubDataService）已完成「应用已公开 + 表已暴露 + R104 参数白名单 + 字段白名单」校验，
+   * 本方法只负责执行与护栏（50009），返回**未裁剪**行视图（含 n:n 多值与 expand），
+   * 由调用方按 R101 白名单投影后输出。
+   * - op=get：行不存在 → **40400**（公开面统一防探测码，D100；A 侧保持 50001 语义不变）；
+   * - op=list：返回排序后的全量行与 total，分页由调用方切片。
+   */
+  async queryForPublic(
+    app: AppDef,
+    table: ResolvedTable,
+    plan: {
+      op: 'list' | 'get'
+      rowId?: string
+      filter?: QueryFilterDto[]
+      sort?: QuerySortDto[]
+      expand?: QueryExpandDto[]
+    },
+  ): Promise<{ rows: DataRowView[]; total: number }> {
+    const started = Date.now()
+    if (plan.op === 'get') {
+      const row = plan.rowId ? await this.findRow(table, plan.rowId) : null
+      if (!row) {
+        throw new BusinessException(ErrorCode.NotFound, '资源不存在')
+      }
+      const views = await this.toViews(app, table, [row], plan.expand)
+      await this.assertNotTimeout(started)
+      return { rows: views, total: views.length }
+    }
+    const shape = await this.queryRows(app, table, {
+      appCode: app.code,
+      op: 'list',
+      table: table.name,
+      filter: plan.filter,
+      sort: plan.sort,
+      expand: plan.expand,
+    })
+    await this.assertNotTimeout(started)
+    return shape
   }
 
   /**

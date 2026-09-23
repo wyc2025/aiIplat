@@ -8,6 +8,9 @@ import {
   createTable,
   deleteField,
   deleteTable,
+  exposeField,
+  exposeTable,
+  getPubConfig,
   getSchema,
 } from '@/api/app'
 import { confirmDialog } from '@/utils/confirm'
@@ -26,6 +29,52 @@ const loadError = ref(false)
 const bundle = ref<AppSchemaBundle | null>(null)
 
 const userTables = computed(() => (bundle.value?.tables ?? []).filter((table) => !table.isSystem))
+
+/**
+ * P12 T113：公开暴露明细（表级 isExposed / 字段级 isExposed）。
+ * 默认值与后端一致（新表 0 / 新字段 1），未拉取到时按默认渲染，避免开关跳动。
+ */
+const pubInfo = ref<{ tables: Map<string, number>; fields: Map<string, number> }>({
+  tables: new Map(),
+  fields: new Map(),
+})
+
+async function loadPubInfo(): Promise<void> {
+  if (!appCode.value) return
+  try {
+    const config = await getPubConfig(appCode.value)
+    const tables = new Map<string, number>()
+    const fields = new Map<string, number>()
+    for (const table of config.tables) {
+      tables.set(table.id, table.isExposed)
+      for (const field of table.fields) fields.set(field.id, field.isExposed)
+    }
+    pubInfo.value = { tables, fields }
+  } catch {
+    pubInfo.value = { tables: new Map(), fields: new Map() }
+  }
+}
+
+/** 表级暴露开关（关闭后该表字段开关前端禁用——受表门禁 R100） */
+async function toggleTableExpose(tableId: string, value: number): Promise<void> {
+  try {
+    await exposeTable(appCode.value, tableId, value)
+    ElMessage.success(value === 1 ? '该表已加入公开面' : '该表已移出公开面')
+    await loadPubInfo()
+  } catch {
+    await loadPubInfo()
+  }
+}
+
+/** 字段级暴露开关（表未暴露时禁用；服务端仍以表门禁为准） */
+async function toggleFieldExpose(fieldId: string, value: number): Promise<void> {
+  try {
+    await exposeField(appCode.value, fieldId, value)
+    await loadPubInfo()
+  } catch {
+    await loadPubInfo()
+  }
+}
 
 function emptyField(): AppFieldInput {
   return { name: '', label: '', type: 'text' }
@@ -219,6 +268,8 @@ async function submitRelation(): Promise<void> {
     relDialog.submitting = false
   }
 }
+// 进入结构页即拉取公开暴露明细（P12 T113；appCode 来自 route.query，setup 阶段已可用）
+void loadPubInfo()
 </script>
 
 <template>
@@ -280,6 +331,16 @@ async function submitRelation(): Promise<void> {
             <span class="v-table-card__code">{{ table.name }}</span>
           </div>
           <div>
+            <el-switch
+              :model-value="pubInfo.tables.get(table.id) ?? 0"
+              :active-value="1"
+              :inactive-value="0"
+              size="small"
+              inline-prompt
+              active-text="公开"
+              inactive-text="公开"
+              @change="(value: number | string | boolean) => toggleTableExpose(table.id, Number(value))"
+            />
             <el-button
               size="small"
               @click="openFieldDialog(table.id, table.name)"
@@ -339,6 +400,21 @@ async function submitRelation(): Promise<void> {
                 关联 {{ row.refTableName }}{{ row.refMultiple ? '（多值）' : '' }}
               </span>
               <span v-else>—</span>
+            </template>
+          </el-table-column>
+          <el-table-column
+            label="公开"
+            width="80"
+          >
+            <template #default="{ row }">
+              <el-switch
+                :model-value="pubInfo.fields.get(row.id) ?? 1"
+                :active-value="1"
+                :inactive-value="0"
+                size="small"
+                :disabled="(pubInfo.tables.get(table.id) ?? 0) === 0"
+                @change="(value: number | string | boolean) => toggleFieldExpose(row.id, Number(value))"
+              />
             </template>
           </el-table-column>
           <el-table-column

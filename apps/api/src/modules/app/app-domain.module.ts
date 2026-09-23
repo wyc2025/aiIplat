@@ -5,6 +5,7 @@ import { AppFacadeModule } from './facade/app-facade.module'
 import { AppRefModule } from './facade/app-ref.module'
 import { ImportModule } from './import/import.module'
 import { PageModule } from './page/page.module'
+import { PubModule } from './pub/pub.module'
 import { SchemaModule } from './schema/schema.module'
 
 /**
@@ -26,6 +27,7 @@ import { SchemaModule } from './schema/schema.module'
     DataModule,
     ImportModule,
     PageModule,
+    PubModule,
     AppRefModule,
     AppFacadeModule,
   ],

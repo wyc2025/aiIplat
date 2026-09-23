@@ -213,6 +213,8 @@ export class ImportService {
       }
       task.progress = { status: 'done', total: task.rows.length, done, errors }
       await this.writeProgress(taskId, task.progress)
+      // R105 写后失效：导入事务逐行提交完成后 DEL 该应用公开数据缓存
+      await this.adminService.invalidatePubCache(app.id)
     } catch (error) {
       task.progress = {
         status: 'failed',

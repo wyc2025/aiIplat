@@ -1,9 +1,16 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put, Query } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger'
 import { CurrentUser } from '../../../gateway/decorators/current-user.decorator'
 import { OperationLog } from '../../../gateway/decorators/operation-log.decorator'
 import { AdminService } from './admin.service'
-import { CreateAppDto, ListAppQueryDto, UpdateAppDto } from './dto/admin.dto'
+import {
+  CreateAppDto,
+  ExposeFieldDto,
+  ExposeTableDto,
+  ListAppQueryDto,
+  PublishAppDto,
+  UpdateAppDto,
+} from './dto/admin.dto'
 
 /**
  * 数据应用管理（P11 T101，API-P11 §1.1）。
@@ -64,5 +71,54 @@ export class AdminController {
   @ApiOperation({ summary: 'draft → active（确认入册，查配额；草稿过期/不存在 50008）' })
   confirm(@CurrentUser('userId') userId: string, @Param('code') code: string) {
     return this.adminService.confirm(BigInt(userId), code)
+  }
+
+  // ===== P12 T109：公开面暴露管理（API §19.1）=====
+
+  @Put(':code/publish')
+  @OperationLog('应用中心', '发布应用')
+  @ApiParam({ name: 'code', description: '应用 code' })
+  @ApiOperation({
+    summary: '发布/取消发布（置 1 走 R103 校验，缺项 50012；置 0 即时失效公开端）',
+  })
+  publish(
+    @CurrentUser('userId') userId: string,
+    @Param('code') code: string,
+    @Body() dto: PublishAppDto,
+  ) {
+    return this.adminService.publish(BigInt(userId), code, dto.isPublic)
+  }
+
+  @Get(':code/pub-config')
+  @ApiParam({ name: 'code', description: '应用 code' })
+  @ApiOperation({ summary: '公开总览（状态/链接/表字段暴露明细/公开页/当前缺项清单）' })
+  pubConfig(@CurrentUser('userId') userId: string, @Param('code') code: string) {
+    return this.adminService.pubConfig(BigInt(userId), code)
+  }
+
+  @Put(':code/tables/:tid/expose')
+  @OperationLog('应用中心', '设置表公开')
+  @ApiParam({ name: 'code', description: '应用 code' })
+  @ApiOperation({ summary: '表级暴露开关（R100）' })
+  setTableExpose(
+    @CurrentUser('userId') userId: string,
+    @Param('code') code: string,
+    @Param('tid', ParseIntPipe) tid: number,
+    @Body() dto: ExposeTableDto,
+  ) {
+    return this.adminService.setTableExpose(BigInt(userId), code, BigInt(tid), dto.isExposed)
+  }
+
+  @Put(':code/fields/:fid/expose')
+  @OperationLog('应用中心', '设置字段公开')
+  @ApiParam({ name: 'code', description: '应用 code' })
+  @ApiOperation({ summary: '字段级暴露开关（R100；受表门禁）' })
+  setFieldExpose(
+    @CurrentUser('userId') userId: string,
+    @Param('code') code: string,
+    @Param('fid', ParseIntPipe) fid: number,
+    @Body() dto: ExposeFieldDto,
+  ) {
+    return this.adminService.setFieldExpose(BigInt(userId), code, BigInt(fid), dto.isExposed)
   }
 }

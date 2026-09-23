@@ -5,13 +5,16 @@ import { ElMessage } from 'element-plus'
 import {
   createPage,
   deletePage,
+  getApp,
+  getPubConfig,
   getSchema,
   listPages,
+  publishPage,
   updatePage,
   type AppPageListItem,
 } from '@/api/app'
 import { confirmDialog } from '@/utils/confirm'
-import { pageSchemaTemplate } from '../utils/schema'
+import { displayPageSchemaTemplate, pageSchemaTemplate } from '../utils/schema'
 
 /**
  * 功能页编辑器（P11 T106 / R97）：
@@ -34,8 +37,46 @@ const dialog = reactive({
   name: '',
   route: '',
   table: '',
+  /** 页面类型：admin 管理页 / display 公开展示页（P12 T113；落库类型由 schema.kind 决定） */
+  kind: 'admin' as 'admin' | 'display',
   schemaText: '',
 })
+
+/** P12 T113：公开状态（pageId → isPublic）与公开凭证（预览新窗口用） */
+const pubPages = ref<Map<string, number>>(new Map())
+const pubCode = ref('')
+
+async function loadPubInfo(): Promise<void> {
+  if (!appCode.value) return
+  try {
+    const [config, app] = await Promise.all([getPubConfig(appCode.value), getApp(appCode.value)])
+    pubPages.value = new Map(config.publicPages.map((page) => [page.id, page.isPublic]))
+    pubCode.value = app.pubCode
+  } catch {
+    pubPages.value = new Map()
+  }
+}
+
+/** 展示页公开开关（R108；admin 页不可公开 → 列表对 admin 行不渲染开关） */
+async function togglePagePublic(page: AppPageListItem, value: number): Promise<void> {
+  try {
+    await publishPage(appCode.value, page.id, value)
+    ElMessage.success(value === 1 ? '该展示页已公开' : '已取消公开')
+  } catch {
+    // 请求层已提示
+  } finally {
+    await loadPubInfo()
+  }
+}
+
+/** 公开预览（新窗口）：需应用已发布，否则公开端 40400 */
+function previewPublic(page: AppPageListItem): void {
+  if (!pubCode.value) {
+    ElMessage.warning('未取到公开凭证，请稍后重试')
+    return
+  }
+  window.open(`${window.location.origin}/pub/app/${pubCode.value}/p/${page.code}`, '_blank')
+}
 
 async function load(): Promise<void> {
   if (!appCode.value) return
@@ -51,6 +92,7 @@ async function load(): Promise<void> {
       schema: page.schema as unknown as Record<string, unknown>,
     }))
     pages.value = list
+    await loadPubInfo()
   } catch {
     pages.value = []
     loadError.value = true
@@ -61,17 +103,26 @@ async function load(): Promise<void> {
 
 onMounted(load)
 
+/** 按当前「页面类型 + 主表」重填 schema 模板（admin = 可写管理页 / display = 只读展示页） */
+function applyTemplate(): void {
+  const table = dialog.table
+  dialog.schemaText = JSON.stringify(
+    dialog.kind === 'display'
+      ? displayPageSchemaTemplate(table)
+      : pageSchemaTemplate(table, tableLabels.value[table] ?? table),
+    null,
+    2,
+  )
+}
+
 function openCreate(): void {
   const firstTable = tables.value[0] ?? ''
   dialog.editingId = ''
   dialog.name = ''
   dialog.route = ''
+  dialog.kind = 'admin'
   dialog.table = firstTable
-  dialog.schemaText = JSON.stringify(
-    pageSchemaTemplate(firstTable, tableLabels.value[firstTable] ?? firstTable),
-    null,
-    2,
-  )
+  applyTemplate()
   dialog.visible = true
 }
 
@@ -204,8 +255,37 @@ function openPage(page: AppPageListItem): void {
         width="90"
       />
       <el-table-column
+        label="类型"
+        width="90"
+      >
+        <template #default="{ row }">
+          <el-tag
+            size="small"
+            :type="row.kind === 'display' ? 'success' : 'info'"
+          >
+            {{ row.kind === 'display' ? '展示页' : '管理页' }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column
+        label="公开"
+        width="80"
+      >
+        <template #default="{ row }">
+          <el-switch
+            v-if="row.kind === 'display'"
+            :model-value="pubPages.get(row.id) ?? 0"
+            :active-value="1"
+            :inactive-value="0"
+            size="small"
+            @change="(value: number | string | boolean) => togglePagePublic(row as AppPageListItem, Number(value))"
+          />
+          <span v-else>—</span>
+        </template>
+      </el-table-column>
+      <el-table-column
         label="操作"
-        width="220"
+        width="300"
         fixed="right"
       >
         <template #default="{ row }">
@@ -215,6 +295,14 @@ function openPage(page: AppPageListItem): void {
             @click="openPage(row as AppPageListItem)"
           >
             打开
+          </el-button>
+          <el-button
+            v-if="row.kind === 'display'"
+            link
+            type="success"
+            @click="previewPublic(row as AppPageListItem)"
+          >
+            预览
           </el-button>
           <el-button
             link
@@ -258,11 +346,28 @@ function openPage(page: AppPageListItem): void {
         </el-form-item>
         <el-form-item
           v-if="!dialog.editingId"
+          label="页面类型"
+        >
+          <el-radio-group
+            v-model="dialog.kind"
+            @change="applyTemplate"
+          >
+            <el-radio-button value="admin">
+              管理页
+            </el-radio-button>
+            <el-radio-button value="display">
+              展示页（公开只读）
+            </el-radio-button>
+          </el-radio-group>
+          <span class="v-page-editor__hint">展示页无表单/动作，用于公开只读浏览（P12）</span>
+        </el-form-item>
+        <el-form-item
+          v-if="!dialog.editingId"
           label="主表"
         >
           <el-select
             v-model="dialog.table"
-            @change="() => { dialog.schemaText = JSON.stringify(pageSchemaTemplate(dialog.table, tableLabels[dialog.table] ?? dialog.table), null, 2) }"
+            @change="applyTemplate"
           >
             <el-option
               v-for="table in tables"
@@ -303,6 +408,11 @@ function openPage(page: AppPageListItem): void {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 16px;
+}
+.v-page-editor__hint {
+  margin-left: 10px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 .v-app-pages__title {
   margin: 0;

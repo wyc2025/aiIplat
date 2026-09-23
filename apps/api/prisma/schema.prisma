@@ -732,6 +732,8 @@ model AppDef {
   sourceAppId BigInt?   @map("source_app_id")
   /// 版本号（机制预留，本期不实现历史回滚）
   version     Int       @default(1) @map("version")
+  /// 公开发布开关（P12 D101 属主自助；0 = 未公开，公开面一律 40400）
+  isPublic    Int       @default(0) @map("is_public") @db.TinyInt
   deletedAt   DateTime? @map("deleted_at")
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
@@ -750,6 +752,8 @@ model AppTable {
   label     String    @map("label") @db.VarChar(50)
   /// 1 = 系统生成（n:n 中间表）
   isSystem  Int       @default(0) @map("is_system") @db.TinyInt
+  /// 表级暴露门禁（P12 R100；0 = 未暴露，字段开关受其约束）
+  isExposed Int       @default(0) @map("is_exposed") @db.TinyInt
   /// 软删（D95）；软删时改名释放唯一槽（用户不可见）
   deletedAt DateTime? @map("deleted_at")
   createdAt DateTime  @default(now()) @map("created_at")
@@ -779,6 +783,8 @@ model AppField {
   refMultiple Int       @default(0) @map("ref_multiple") @db.TinyInt
   /// D95 软删（1 = 已删，数据保留）
   isDeleted   Int       @default(0) @map("is_deleted") @db.TinyInt
+  /// 字段级暴露（P12 R100；默认 1，实际生效须表 is_exposed=1）
+  isExposed   Int       @default(1) @map("is_exposed") @db.TinyInt
   sort        Int       @default(0) @map("sort")
   deletedAt   DateTime? @map("deleted_at")
   createdAt   DateTime  @default(now()) @map("created_at")
@@ -838,12 +844,14 @@ model AppRecord {
   @@map("app_record")
 }
 
-/// 功能页（R90 / §5：schema 声明多数据源与动作；kind=admin 本期，display 预留 P12）
+/// 功能页（R90 / §5：schema 声明多数据源与动作；kind=admin 管理侧 / display 公开展示页见 P12 §28.4）
 model AppPage {
   id            BigInt    @id @default(autoincrement())
   appId         BigInt    @map("app_id")
-  /// admin（本期）/ display（P12 预留）
+  /// admin（管理侧）/ display（P12 公开展示页）
   kind          String    @default("admin") @map("kind") @db.VarChar(20)
+  /// display 页公开标记（P12 R102/R108；admin 页恒 0，不入动态菜单）
+  isPublic      Int       @default(0) @map("is_public") @db.TinyInt
   /// 功能页标识（应用内唯一，路由段）
   code          String    @map("code") @db.VarChar(64)
   name          String    @map("name") @db.VarChar(50)

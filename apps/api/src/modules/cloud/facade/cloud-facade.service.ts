@@ -35,6 +35,17 @@ export interface PublicFileStream {
   updateTime: Date
 }
 
+/** 应用附件流结果（P12 D104 最小只读通道；引用索引与暴露校验由 pub/ 调用方完成，本方法不做业务校验） */
+export interface AppAttachmentStream {
+  stream: Readable
+  name: string
+  ext: string | null
+  size: bigint
+  mime: string | null
+  /** 最后修改时间（ETag/304 与 Last-Modified 用，照公开层口径） */
+  updateTime: Date
+}
+
 /** 公开路径解析的最大下行深度（§14.4 有界逐段下行） */
 const RESOLVE_MAX_DEPTH = 10
 
@@ -249,6 +260,33 @@ export class CloudFacade {
       mime: file.mime,
       ext: file.ext,
       name: file.name,
+      updateTime: file.updateTime,
+    }
+  }
+
+  /**
+   * 获取应用附件流（P12 D104 / ARCHITECTURE §28.1）：公开面输出附件字段文件的最小只读通道。
+   * 仅做「行存在 + 非目录」读取——**引用索引（app_attachment_ref）与暴露校验由 pub/ 调用方完成**，
+   * 本方法不重复业务校验（调用方已保证 fileId 来自有效引用且表·字段已暴露）。
+   * 行已删/是目录 → BusinessException 40400（公开面统一防探测码，禁止 500）。
+   * @param range 可选字节区间（公开文件流复用 §14.4 Range 语义）
+   */
+  async getAppAttachmentStream(
+    fileId: bigint,
+    range?: { start: number; end: number },
+  ): Promise<AppAttachmentStream> {
+    const file = await this.prisma.cloudFile.findFirst({
+      where: { id: fileId, deletedAt: null, isDir: 0 },
+    })
+    if (!file || !file.storageName) {
+      throw new BusinessException(ErrorCode.NotFound, '资源不存在')
+    }
+    return {
+      stream: this.storage.createReadStream(file.storageName, range),
+      name: file.name,
+      ext: file.ext,
+      size: file.size,
+      mime: file.mime,
       updateTime: file.updateTime,
     }
   }

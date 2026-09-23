@@ -2,7 +2,16 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { confirmApp, createApp, deleteApp, listApps } from '@/api/app'
+import { useClipboard } from '@vueuse/core'
+import {
+  confirmApp,
+  createApp,
+  deleteApp,
+  getPubConfig,
+  listApps,
+  publishApp,
+  type PubConfig,
+} from '@/api/app'
 import { confirmDialog } from '@/utils/confirm'
 import { formatTime } from '@/utils/format'
 import type { AppDefItem } from '@/types/api'
@@ -24,6 +33,73 @@ const form = reactive<{ name: string; description: string; mode: 'blank' | 'draf
 })
 const rules = {
   name: [{ required: true, message: '请输入应用名称', trigger: 'blur' }],
+}
+
+/** P12 T113：公开/发布弹窗（暴露三开关总览 + 发布开关 + 公开链接 + 缺项引导） */
+const pubDialog = reactive<{
+  visible: boolean
+  appCode: string
+  appName: string
+  loading: boolean
+  saving: boolean
+  config: PubConfig | null
+}>({ visible: false, appCode: '', appName: '', loading: false, saving: false, config: null })
+const { copy: copyToClipboard } = useClipboard({ legacy: true })
+
+/** 公开链接（后端返回相对路径，这里补站点域名供复制） */
+function pubFullUrl(config: PubConfig | null): string {
+  if (!config?.pubUrl) return ''
+  return `${window.location.origin}${config.pubUrl}`
+}
+
+async function openPub(item: AppDefItem): Promise<void> {
+  pubDialog.visible = true
+  pubDialog.appCode = item.appCode
+  pubDialog.appName = item.name
+  pubDialog.config = null
+  await refreshPubConfig()
+}
+
+async function refreshPubConfig(): Promise<void> {
+  pubDialog.loading = true
+  try {
+    pubDialog.config = await getPubConfig(pubDialog.appCode)
+  } catch {
+    pubDialog.config = null
+  } finally {
+    pubDialog.loading = false
+  }
+}
+
+async function togglePublish(next: number): Promise<void> {
+  pubDialog.saving = true
+  try {
+    await publishApp(pubDialog.appCode, next)
+    ElMessage.success(next === 1 ? '已发布：公开链接已生效' : '已取消公开')
+    await refreshPubConfig()
+    await load()
+  } catch {
+    // 请求层已提示（50012 的 message 内含缺项清单）
+    await refreshPubConfig()
+  } finally {
+    pubDialog.saving = false
+  }
+}
+
+async function copyPubUrl(): Promise<void> {
+  const url = pubFullUrl(pubDialog.config)
+  if (!url) return
+  try {
+    await copyToClipboard(url)
+    ElMessage.success('公开链接已复制')
+  } catch {
+    ElMessage.error('复制失败，请手动复制')
+  }
+}
+
+function openPublicPreview(): void {
+  const url = pubFullUrl(pubDialog.config)
+  if (url) window.open(url, '_blank')
 }
 
 async function load(): Promise<void> {
@@ -197,6 +273,14 @@ function goPages(item: AppDefItem): void {
               功能页
             </el-button>
             <el-button
+              size="small"
+              type="success"
+              plain
+              @click="openPub(item)"
+            >
+              公开
+            </el-button>
+            <el-button
               v-if="item.status === 'draft'"
               size="small"
               type="primary"
@@ -269,6 +353,114 @@ function goPages(item: AppDefItem): void {
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- P12 T113：公开与发布（R100/R103/R108） -->
+    <el-dialog
+      v-model="pubDialog.visible"
+      :title="`公开设置 · ${pubDialog.appName}`"
+      width="640px"
+    >
+      <div v-loading="pubDialog.loading">
+        <el-alert
+          v-if="pubDialog.config && pubDialog.config.missing.length > 0"
+          type="warning"
+          :closable="false"
+          show-icon
+          class="pub-missing"
+        >
+          <template #title>
+            发布前还差 {{ pubDialog.config.missing.length }} 项
+          </template>
+          <ul class="pub-missing__list">
+            <li
+              v-for="(item, index) in pubDialog.config.missing.slice(0, 6)"
+              :key="index"
+            >
+              {{ item }}
+            </li>
+          </ul>
+        </el-alert>
+
+        <el-form label-width="90px">
+          <el-form-item label="公开发布">
+            <el-switch
+              :model-value="pubDialog.config?.isPublic ?? 0"
+              :active-value="1"
+              :inactive-value="0"
+              :loading="pubDialog.saving"
+              @change="(value: number | string | boolean) => togglePublish(Number(value))"
+            />
+            <span class="pub-hint">开启后任何拿到公开链接的人都能只读访问已暴露数据</span>
+          </el-form-item>
+
+          <el-form-item
+            v-if="pubDialog.config"
+            label="公开链接"
+          >
+            <el-input
+              :model-value="pubFullUrl(pubDialog.config)"
+              readonly
+            >
+              <template #append>
+                <el-button @click="copyPubUrl">
+                  复制
+                </el-button>
+              </template>
+            </el-input>
+            <el-button
+              v-if="pubDialog.config.isPublic === 1"
+              link
+              type="primary"
+              @click="openPublicPreview"
+            >
+              新窗口预览
+            </el-button>
+          </el-form-item>
+
+          <el-form-item label="暴露表">
+            <el-tag
+              v-for="table in pubDialog.config?.exposedTables ?? []"
+              :key="table.id"
+              class="pub-tag"
+              type="success"
+              size="small"
+            >
+              {{ table.label }}（{{ table.tableCode }}）
+            </el-tag>
+            <span
+              v-if="(pubDialog.config?.exposedTables?.length ?? 0) === 0"
+              class="pub-hint"
+            >
+              暂无暴露表，请在「结构」编辑器里为表开启公开
+            </span>
+          </el-form-item>
+
+          <el-form-item label="公开展示页">
+            <el-tag
+              v-for="page in pubDialog.config?.publicPages ?? []"
+              :key="page.id"
+              class="pub-tag"
+              :type="page.isPublic === 1 ? 'success' : 'info'"
+              size="small"
+            >
+              {{ page.name }}{{ page.isPublic === 1 ? '' : '（未公开）' }}
+            </el-tag>
+            <span
+              v-if="(pubDialog.config?.publicPages?.length ?? 0) === 0"
+              class="pub-hint"
+            >
+              暂无展示页，请在「功能页」编辑器里新建 display 类型页面
+            </span>
+          </el-form-item>
+        </el-form>
+      </div>
+
+      <template #footer>
+        <el-button @click="pubDialog.visible = false">
+          关闭
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -321,5 +513,21 @@ function goPages(item: AppDefItem): void {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+.pub-missing {
+  margin-bottom: 12px;
+}
+.pub-missing__list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+.pub-hint {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.pub-tag {
+  margin: 0 6px 6px 0;
 }
 </style>

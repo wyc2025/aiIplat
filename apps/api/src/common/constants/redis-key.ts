@@ -44,4 +44,16 @@ export const RedisKey = {
   appSchema: (appId: string) => `app:schema:${appId}`,
   /** CSV 导入任务进度：app:import:{taskId}，JSON {status,total,done,errors}，TTL 1h（T103 用） */
   appImport: (taskId: string) => `app:import:${taskId}`,
+
+  // ===== app 域公开面（P12 T108~T112，R105）=====
+  /** 公开面 manifest 缓存：app:pub:{appId}:manifest，TTL 600s */
+  appPubManifest: (appId: string) => `app:pub:${appId}:manifest`,
+  /** 公开面页 schema 缓存：app:pub:{appId}:schema:{pageCode}，TTL 600s */
+  appPubPageSchema: (appId: string, pageCode: string) => `app:pub:${appId}:schema:${pageCode}`,
+  /** 公开面页 schema 前缀（SCAN 批量失效用）：app:pub:{appId}:schema: */
+  appPubSchemaPrefix: (appId: string) => `app:pub:${appId}:schema:`,
+  /** 公开面数据缓存前缀（SCAN 批量失效用）：app:pub:{appId}:data: */
+  appPubDataPrefix: (appId: string) => `app:pub:${appId}:data:`,
+  /** 公开面限流计数（60 次/分/IP，R106）：app:pub:rate:{ip}，INCR + 首次 60s TTL */
+  appPubRate: (ip: string) => `app:pub:rate:${ip}`,
 } as const

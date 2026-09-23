@@ -10,12 +10,25 @@ import { DataService } from '../data/data.service'
 import { invalidateAppSchema } from '../schema/schema.cache'
 import { SchemaService } from '../schema/schema.service'
 import type { ResolvedTable } from '../schema/schema.types'
+import { invalidatePubAll } from '../pub/pub.cache'
 import { buildAdminPageSchema, pickMainTable } from './page.builder'
 import { validatePageSchema, type PageSchemaContext } from './page.schema'
 import type { CreatePageDto, PageActionDto, UpdatePageDto } from './dto/page.dto'
 
 /** 页面 code 唯一后缀最大尝试 */
 const CODE_SUFFIX_MAX = 100
+
+/** 页类型常量（P12：display 公开展示页；admin 管理页恒不可公开） */
+export const PAGE_KIND_ADMIN = 'admin'
+export const PAGE_KIND_DISPLAY = 'display'
+
+/**
+ * 由已过校验的 schema.kind 判定落库页类型（单一事实来源：schema 说了算，
+ * 避免 DTO 与 schema 双写不一致造成「kind=admin 但 schema 是 display」的脏数据）。
+ */
+function resolvePageKind(schema: Record<string, unknown>): string {
+  return schema.kind === PAGE_KIND_DISPLAY ? PAGE_KIND_DISPLAY : PAGE_KIND_ADMIN
+}
 /** 单动作步骤上限（与校验器一致） */
 const MAX_STEPS = 10
 
@@ -85,7 +98,7 @@ export class PageService {
     const page = await this.prisma.appPage.create({
       data: {
         appId: app.id,
-        kind: 'admin',
+        kind: resolvePageKind(dto.schema),
         code,
         name: dto.name.trim(),
         route: dto.route,
@@ -112,7 +125,11 @@ export class PageService {
     if (dto.schema !== undefined) {
       const ctx = await this.buildContext(app.id)
       validatePageSchema(dto.schema, ctx)
+      const nextKind = resolvePageKind(dto.schema)
       data.schema = dto.schema as Prisma.InputJsonValue
+      data.kind = nextKind
+      // display → admin 回退时清公开标记（admin 页恒不可公开，R108）
+      if (nextKind === PAGE_KIND_ADMIN && page.isPublic === 1) data.isPublic = 0
     }
     if (Object.keys(data).length === 0) {
       throw new BusinessException(ErrorCode.ParamInvalid, '没有需要更新的字段')
@@ -254,6 +271,8 @@ export class PageService {
       }
       return stepResults
     })
+    // R105 写后失效：事务提交后 DEL 该应用公开数据缓存（公开端即时可见）
+    await this.adminService.invalidatePubCache(app.id)
     return { ok: true, results }
   }
 
@@ -294,7 +313,26 @@ export class PageService {
     return { values, rowId: typeof rowId === 'string' ? rowId : null }
   }
 
-  /** 校验上下文：非系统表 → 字段名集合（页面只允许引用用户表） */
+  /**
+   * 公开 / 取消公开 display 页（P12 R108）：仅 display 页可公开（admin 页 → 50004）；
+   * 置 1 不单独校验暴露（发布时统一走 R103），改动即失效公开面缓存。
+   */
+  async setPublic(userId: bigint, appCode: string, pageId: bigint, isPublic: number) {
+    const app = await this.adminService.assertOwned(userId, appCode)
+    const page = await this.requirePage(app.id, pageId)
+    if (page.kind !== PAGE_KIND_DISPLAY) {
+      throw new BusinessException(ErrorCode.AppPageSchemaInvalid, '仅展示页（display）可公开，管理页恒不可公开')
+    }
+    const flag = isPublic === 1 ? 1 : 0
+    if (page.isPublic !== flag) {
+      await this.prisma.appPage.update({ where: { id: page.id }, data: { isPublic: flag } })
+    }
+    await invalidateAppSchema(this.redis, app.id)
+    await invalidatePubAll(this.redis, app.id)
+    return { ok: true, pageCode: page.code, isPublic: flag }
+  }
+
+  /** 校验上下文：非系统表 → 字段名集合 + 同应用页 code 集合（页面只允许引用用户表；display rowLink 校验用） */
   private async buildContext(appId: bigint): Promise<PageSchemaContext> {
     const tables = await this.schemaService.listResolvedTables(appId)
     const map = new Map<string, Set<string>>()
@@ -302,7 +340,11 @@ export class PageService {
       if (table.isSystem) continue
       map.set(table.name, new Set(table.fields.map((field) => field.name)))
     }
-    return { tables: map }
+    const pages = await this.prisma.appPage.findMany({
+      where: { appId, deletedAt: null },
+      select: { code: true },
+    })
+    return { tables: map, pages: new Set(pages.map((page) => page.code)) }
   }
 
   private async assertPageQuota(appId: bigint): Promise<void> {

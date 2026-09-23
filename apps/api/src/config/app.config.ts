@@ -41,4 +41,18 @@ export default registerAs('app', () => ({
   queryTimeoutMs: readPositiveInt('APP_QUERY_TIMEOUT_MS', 2000),
   /** 草稿过期清理天数（默认 7） */
   draftTtlDays: readPositiveInt('APP_DRAFT_TTL_DAYS', 7),
+
+  // ===== P12 公开面（R104/R105/R106，架构增补 §28.7）=====
+  /** 公开列表 size 上限（R104，默认 20） */
+  pubListMaxSize: readPositiveInt('APP_PUB_LIST_MAX_SIZE', 50),
+  /** 公开 filter 组数上限（R104） */
+  pubFilterMaxGroups: readPositiveInt('APP_PUB_FILTER_MAX_GROUPS', 3),
+  /** 公开 sort 字段数上限（R104） */
+  pubSortMaxFields: readPositiveInt('APP_PUB_SORT_MAX_FIELDS', 2),
+  /** 公开数据缓存 TTL（秒；R105 写后失效兜底） */
+  pubDataCacheTtlSeconds: readPositiveInt('APP_PUB_DATA_CACHE_TTL_SECONDS', 60),
+  /** 公开 manifest / schema 缓存 TTL（秒；R105） */
+  pubManifestCacheTtlSeconds: readPositiveInt('APP_PUB_MANIFEST_CACHE_TTL_SECONDS', 600),
+  /** 公开端点限流（次/分/IP；R106 触发 42900） */
+  pubRateLimitPerMinute: readPositiveInt('APP_PUB_RATE_LIMIT_PER_MINUTE', 60),
 }))

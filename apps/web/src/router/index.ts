@@ -100,6 +100,20 @@ export const staticRoutes: RouteRecordRaw[] = [
     meta: { title: '文件查看', hidden: true },
   },
   {
+    // P12 数据应用公开展示页（免登录，凭 pubCode 访问）：索引 → 重定向首个公开页
+    path: '/pub/app/:pubCode',
+    name: 'pub-app-index',
+    component: () => import('@/views/app/public/index.vue'),
+    meta: { title: '公开页', hidden: true },
+  },
+  {
+    // P12 数据应用公开展示页宿主（按 pageCode 拉 manifest + schema 渲染）
+    path: '/pub/app/:pubCode/p/:pageCode',
+    name: 'pub-app-page',
+    component: () => import('@/views/app/public/index.vue'),
+    meta: { title: '公开页', hidden: true },
+  },
+  {
     // 兜底：匹配所有未注册路径。直接渲染 404 组件而非 redirect——
     // redirect 会在全局守卫之前把导航劫持到 /404，导致整页刷新直达深层路径
     // （动态路由尚未注册）时守卫拿不到原始 path 而永远 404；

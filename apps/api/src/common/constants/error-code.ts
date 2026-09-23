@@ -207,6 +207,8 @@ export const ErrorCode = {
   AppQueryGuardExceeded: 50009,
   /** 动作与页面定义不符（action 未在 schema 声明） */
   AppActionMismatch: 50010,
+  /** 发布校验未过（P12 R103：无暴露表 / 无公开 display 页 / 公开页数据源未全暴露；message 带缺项清单） */
+  AppPublishInvalid: 50012,
 } as const
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode]

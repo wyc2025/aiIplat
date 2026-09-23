@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
-import { IsIn, IsOptional, IsString, Length } from 'class-validator'
+import { Type } from 'class-transformer'
+import { IsIn, IsInt, IsOptional, IsString, Length } from 'class-validator'
 
 /** 创建数据应用（API-P11 §1.1） */
 export class CreateAppDto {
@@ -44,4 +45,31 @@ export class ListAppQueryDto {
   @IsOptional()
   @IsIn(['draft', 'active'], { message: "status 仅允许 'draft' / 'active'" })
   status?: 'draft' | 'active'
+}
+
+/** 发布 / 取消发布应用（P12 §19.1，R103 校验） */
+export class PublishAppDto {
+  @ApiProperty({ description: '1 = 公开发布（走 R103 校验）；0 = 取消公开（公开端即时失效）', enum: [0, 1] })
+  @Type(() => Number)
+  @IsInt()
+  @IsIn([0, 1], { message: 'isPublic 仅允许 0 / 1' })
+  isPublic!: number
+}
+
+/** 表级暴露开关（P12 §19.1，R100） */
+export class ExposeTableDto {
+  @ApiProperty({ description: '1 = 暴露该表（字段开关受其门禁）；0 = 关闭暴露', enum: [0, 1] })
+  @Type(() => Number)
+  @IsInt()
+  @IsIn([0, 1], { message: 'isExposed 仅允许 0 / 1' })
+  isExposed!: number
+}
+
+/** 字段级暴露开关（P12 §19.1，R100） */
+export class ExposeFieldDto {
+  @ApiProperty({ description: '1 = 暴露该字段（须其表已暴露才生效）；0 = 隐藏', enum: [0, 1] })
+  @Type(() => Number)
+  @IsInt()
+  @IsIn([0, 1], { message: 'isExposed 仅允许 0 / 1' })
+  isExposed!: number
 }
