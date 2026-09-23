@@ -16,7 +16,7 @@
 | `import/` | CSV 导入导出（异步任务 + 进度）                       | ImportService（`@nestjs/schedule` 照回收站清理先例） |
 | `facade/` | AppFacade 实现（gateway 侧接口在此域实现？否——见 §3） | —                                                    |
 
-> 跨域调用方向：ai 域 → AppFacade（gateway/，工具执行）；app 域 → CloudFacade（附件上传）；cloud 域 → AppFacade（删除预检）。**app 域自身不实现 Facade**——Facade 全部在 `gateway/`，app 域导出 Service 供 gateway 组装（照 CloudFacade/SiteFacade 既有先例）。
+> 跨域调用方向：ai 域 → AppFacade（工具执行）；app 域 → CloudFacade（附件上传）；cloud 域 → AppRefService（删除预检）。**跨域门面一律落在 `modules/<域>/facade/`**（CloudFacade / SiteFacade / AppFacade 既有先例）；`gateway/` 只承载横切关注点（guards / interceptors / 统一响应 / 异常过滤），不放业务门面。app 域导出门面 Service 供跨域模块注入，零跨域 import 域内实现。
 
 ## 2. 数据模型（7 张 app_* 表，relationMode="prisma" 逻辑外键）
 
@@ -65,12 +65,12 @@ seed（幂等，deploy.sh 种子步骤同步）：菜单「应用中心」（一
 ## 3. Facade 拓扑（铁律 3/6，防环照 P4d 先例）
 
 ```
-ai 域(T105 工具 handler) ──▶ gateway/AppFacade.createAppDraft/addTable/…（受控方法集）
-cloud 域(删除/还原/彻底删除前预检) ──▶ gateway/AppFacade.getAttachmentRefs(userId, fileId[])
-app 域(附件上传) ──▶ gateway/CloudFacade.uploadForApp(userId, appCode, file)
+ai 域(T105 工具 handler) ──▶ modules/app/facade/AppFacade.createAppDraft/addTable/…（受控方法集）
+cloud 域(删除/还原/彻底删除前预检) ──▶ modules/app/facade/AppRefService.getAttachmentRefs(userId, fileId[])
+app 域(附件上传) ──▶ modules/cloud/facade/CloudFacade.uploadForApp(userId, appCode, file)
 ```
 
-- AppFacade 只依赖 app 域导出的 Service 接口，不 import 业务模块；cloud↔app 两向各走各的 Facade 门面，无 import 环；
+- 门面落在域内 `facade/` 子目录（**不是 `gateway/`**：gateway 只放横切层），AppFacade 只依赖 app 域内 Service，不 import 其它域内部文件；cloud↔app 两向各走各的门面，无 import 环；
 - `getAttachmentRefs` 只查 app_attachment_ref（带 deleted_at 过滤），不读 app_record.data；
 - 还原/彻底删除也要预检（回收站还原文件时引用仍存在 → 允许；彻底删除物理清文件 → 阻断 30021）。
 
@@ -85,6 +85,7 @@ app 域(附件上传) ──▶ gateway/CloudFacade.uploadForApp(userId, appCode
 ```json
 {
   "op": "list",
+  "appCode": "book-notes",
   "table": "article",
   "filter": [
     { "f": "status", "op": "eq", "v": "published" },
@@ -185,7 +186,7 @@ app 域(附件上传) ──▶ gateway/CloudFacade.uploadForApp(userId, appCode
 
 ## 9. 安全
 
-- 全量参数绑定（Prisma prepared）；zod 双道（R94）；渲染器禁 v-html 用户串（AdminRenderer 全文本插值）；
+- 全量参数绑定（Prisma prepared）；schema 双道校验（R94，落地为手写结构校验：zod 非既有依赖、铁律 7 禁新增）；渲染器禁 v-html 用户串（AdminRenderer 全文本插值）；
 - 所有端点属主校验（assertOwned，照 ai 域先例）；草稿/应用/表/页全部软删可回溯；
 - 附件：上传走 CloudFacade.uploadForApp（强制目录前缀 `/app-attachments/{appCode}/`，服务端拼路径防穿越）；下载/预览沿用 cloud 既有鉴权；
 - 操作日志：应用创建/删除、结构变更、导入导出挂 @OperationLog。

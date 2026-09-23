@@ -18,26 +18,26 @@
 
 ### 1.2 结构管理（表/字段/关系）
 
-| 方法   | 路径                              | 说明                                                                                                                                                            |
-| ------ | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | /api/app/:code/schema             | **全量打包**（def+tables+fields+rels+pages，含系统中间表标注 isSystem）——前端首屏一次拉取；Redis 缓存                                                           |
-| POST   | /api/app/:code/tables             | 建表 `{ name, label, fields: [{ name, label, type, required?, default?, enumOptions?, refTable?, refMultiple? }] }`；超 20 表 **50002**；字段类型非法 **50005** |
-| PUT    | /api/app/:code/tables/:tid        | 改 label；改名走迁移式（重写字段引用，v1 禁止改表名）                                                                                                           |
-| DELETE | /api/app/:code/tables/:tid        | 软删（is_system 表 **50001** 语义「系统表不可删」）；被引用的表（其他表 ref 指向它）需先处理引用，阻断并列出引用方                                              |
-| POST   | /api/app/:code/tables/:tid/fields | 加字段（字段名应用内唯一）                                                                                                                                      |
-| PUT    | /api/app/:code/fields/:fid        | 改 label/必填/默认值/枚举选项                                                                                                                                   |
-| DELETE | /api/app/:code/fields/:fid        | **软删**（D95：is_deleted=1，数据保留）                                                                                                                         |
-| POST   | /api/app/:code/fields/:fid/shrink | 类型收窄（text→enum / number→enum）：先跑存量校验，不合规 **50003**（message 带前 10 个违规 rowId）                                                             |
-| POST   | /api/app/:code/relations          | 建 n:n `{ fromTable, fromField, toTable }` → 自动生成中间表（isSystem）；重复建返回现存                                                                         |
+| 方法   | 路径                              | 说明                                                                                                                                                                                                                                      |
+| ------ | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | /api/app/:code/schema             | **全量打包**（def+tables+fields+rels+pages，含系统中间表标注 isSystem）——前端首屏一次拉取；Redis 缓存                                                                                                                                     |
+| POST   | /api/app/:code/tables             | 建表 `{ name, label, fields: [{ name, label, type, required?, default?, enumOptions?, refTable? }] }`；超 20 表 **50002**；字段类型非法 **50005**（1n 经 `refTable` 自动建模；n:n 由 `POST /relations` 专责，故本端点不收 `refMultiple`） |
+| PUT    | /api/app/:code/tables/:tid        | 改 label；改名走迁移式（重写字段引用，v1 禁止改表名）                                                                                                                                                                                     |
+| DELETE | /api/app/:code/tables/:tid        | 软删（is_system 表 **50001** 语义「系统表不可删」）；被引用的表（其他表 ref 指向它）需先处理引用，阻断并列出引用方                                                                                                                        |
+| POST   | /api/app/:code/tables/:tid/fields | 加字段（字段名应用内唯一）                                                                                                                                                                                                                |
+| PUT    | /api/app/:code/fields/:fid        | 改 label/必填/默认值/枚举选项                                                                                                                                                                                                             |
+| DELETE | /api/app/:code/fields/:fid        | **软删**（D95：is_deleted=1，数据保留）                                                                                                                                                                                                   |
+| POST   | /api/app/:code/fields/:fid/shrink | 类型收窄（text→enum / number→enum）：先跑存量校验，不合规 **50003**（message 带前 10 个违规 rowId）                                                                                                                                       |
+| POST   | /api/app/:code/relations          | 建 n:n `{ fromTable, fromField, toTable }` → 自动生成中间表（isSystem）；重复建返回现存                                                                                                                                                   |
 
 ### 1.3 功能页
 
-| 方法   | 路径                      | 说明                                                                                                                |
-| ------ | ------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| GET    | /api/app/:code/pages      | 列表（功能页：code/name/route/genBy/sort）                                                                          |
-| POST   | /api/app/:code/pages      | 新建 `{ name, route, schema, genBy }`；schema 过 zod，失败 **50004**（message 带路径）；同应用 route 重复 **50007** |
-| PUT    | /api/app/:code/pages/:pid | 更新 schema/name/sort                                                                                               |
-| DELETE | /api/app/:code/pages/:pid | 软删                                                                                                                |
+| 方法   | 路径                      | 说明                                                                                                                                             |
+| ------ | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| GET    | /api/app/:code/pages      | 列表（功能页：code/name/route/genBy/sort）                                                                                                       |
+| POST   | /api/app/:code/pages      | 新建 `{ name, route, schema, genBy }`；schema 过**手写结构校验**（零新依赖，R94），失败 **50004**（message 带路径）；同应用 route 重复 **50007** |
+| PUT    | /api/app/:code/pages/:pid | 更新 schema/name/sort                                                                                                                            |
+| DELETE | /api/app/:code/pages/:pid | 软删                                                                                                                                             |
 
 ### 1.4 沙箱数据（DataService 出口）
 
@@ -49,12 +49,12 @@
 
 ### 1.5 导入导出与附件
 
-| 方法 | 路径                                  | 说明                                                                                                                                                                           |
-| ---- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| POST | /api/app/:code/import                 | multipart（CSV ≤5MB）→ 解析 + 自动映射 → 返回 `{ taskId, mapping, previewRows[5] }` 待确认                                                                                     |
-| POST | /api/app/:code/import/:taskId/confirm | 确认映射 `{ mapping }` → 异步导入；进度 `GET /api/app/import/:taskId`（`{ status, total, done, errors: [{row,reason}] }`）；文件不合规 **50006**                               |
-| GET  | /api/app/:code/export                 | `?table=` 流式 CSV（≤5 万行，超出截断并在文件尾注释行说明）                                                                                                                    |
-| POST | /api/app/:code/attachment             | multipart 上传附件字段用文件：服务端经 CloudFacade.uploadForApp 强制落 `/app-attachments/{appCode}/` + 建引用行；返回 `{ fileId, path, size }`；≤10MB 超了复用云盘码 **30003** |
+| 方法 | 路径                                  | 说明                                                                                                                                                                                                   |
+| ---- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| POST | /api/app/:code/import                 | multipart（CSV ≤5MB）→ 解析 + 自动映射 → 返回 `{ taskId, mapping, previewRows[5] }` 待确认                                                                                                             |
+| POST | /api/app/:code/import/:taskId/confirm | 确认映射 `{ mapping }` → 异步导入；进度 `GET /api/app/import/:taskId`（`{ status, total, done, errors: [{row,reason}] }`）；文件不合规 **50006**                                                       |
+| GET  | /api/app/:code/export                 | `?table=` 流式 CSV（≤5 万行，超出截断并在文件尾注释行说明）                                                                                                                                            |
+| POST | /api/app/:code/attachment             | multipart 上传附件字段用文件：服务端经 CloudFacade.uploadForApp 强制落 `/app-attachments/{appCode}/` + 建引用行；返回 `{ fileId, path, size }`；单文件 >10MB 复用云盘码 **30004**（CloudFileTooLarge） |
 
 ## 2. userinfo 菜单动态段（修改既有）
 
@@ -76,7 +76,7 @@
 | 50001 | 应用不存在或无权             | 统一属主校验；含系统表操作                                                  |
 | 50002 | 超出配额：{message 带项}     | 应用数/表数/行数/页数/附件/导入大小                                         |
 | 50003 | 结构变更未通过数据校验       | 类型收窄遇存量违规（带 rowId 清单）                                         |
-| 50004 | 页面模式校验失败             | schema 过 zod 失败（带路径）                                                |
+| 50004 | 页面模式校验失败             | schema 手写结构校验失败（带路径）                                           |
 | 50005 | 数据校验失败                 | 字段规则/动作步骤失败（事务回滚）                                           |
 | 50006 | 导入文件不合规               | 非 CSV/超 5MB/空文件/首行无列名                                             |
 | 50007 | 功能页路由冲突               | 同应用内 route 重复                                                         |
@@ -89,15 +89,15 @@
 
 > write 级全走确认卡；perms 留空（属主自服务，handler 内 assertOwned，同 common 组先例）；app 组关键词入 KEYWORD_TO_GROUPS（「应用/建表/数据应用/后台/管理页」等）。
 
-| 工具             | parameters                                                                                                     | 成功返回要点                                                            |
-| ---------------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| create_data_app  | `{ name, description? }`                                                                                       | `{ ok, appCode, status: 'draft' }`（draft 不占额度）                    |
-| add_table        | `{ appCode, table, label, fields: [{ name, label, type, required?, enumOptions?, refTable?, refMultiple? }] }` | `{ ok, table, created: [字段名] }`（refTable 自动建 1n）                |
-| add_fields       | `{ appCode, table, fields: [同上] }`                                                                           | `{ ok, created: [] }`                                                   |
-| set_relation     | `{ appCode, fromTable, fromField, toTable }`                                                                   | `{ ok, relation: 'nm', throughTable }`（幂等）                          |
-| gen_admin_page   | `{ appCode, name, purpose }`                                                                                   | `{ ok, pageCode, route, blocks: n }`（purpose 描述功能，AI 选表与区块） |
-| adjust_page      | `{ appCode, pageCode, instruction }`                                                                           | `{ ok, changed: 摘要 }`                                                 |
-| confirm_data_app | `{ appCode }`                                                                                                  | `{ ok, status: 'active', menuHint: '功能页已挂到应用中心菜单' }`        |
+| 工具             | parameters                                                                                       | 成功返回要点                                                                  |
+| ---------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| create_data_app  | `{ name, description? }`                                                                         | `{ ok, appCode, status: 'draft' }`（draft 不占额度）                          |
+| add_table        | `{ appCode, table, label, fields: [{ name, label, type, required?, enumOptions?, refTable? }] }` | `{ ok, table, created: [字段名] }`（refTable 自动建 1n；n:n 走 set_relation） |
+| add_fields       | `{ appCode, table, fields: [同上] }`                                                             | `{ ok, created: [] }`                                                         |
+| set_relation     | `{ appCode, fromTable, fromField, toTable }`                                                     | `{ ok, relation: 'nm', throughTable }`（幂等）                                |
+| gen_admin_page   | `{ appCode, name, purpose }`                                                                     | `{ ok, pageCode, route, blocks: n }`（purpose 描述功能，AI 选表与区块）       |
+| adjust_page      | `{ appCode, pageCode, instruction }`                                                             | `{ ok, changed: 摘要 }`                                                       |
+| confirm_data_app | `{ appCode }`                                                                                    | `{ ok, status: 'active', menuHint: '功能页已挂到应用中心菜单' }`              |
 
 **冒烟新增 L 用例**（R98）：提示词「帮我建一个读书笔记数据应用：书（书名/作者/评分）和笔记（内容/关联书），再生成管理页面」→ 判据：`ai_tool_call` 出现 create_data_app/add_table/gen_admin_page 调用且 `app_def`(status=draft→active) 与 `app_table` 落库。 J/K 用例候选排除：云盘候选查询排除 `/app-attachments/`（照 §26.9-11 先例）。
 
