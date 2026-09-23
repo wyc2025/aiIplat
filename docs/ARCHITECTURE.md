@@ -333,28 +333,29 @@ apps/api/src/
 
 **cloud 错误码 30xxx 段（30xxx 为 cloud 域业务错误）**
 
-| code  | 文案                                                   | 处理                     |
-| ----- | ------------------------------------------------------ | ------------------------ |
-| 30001 | 文件/文件夹不存在或无权访问                            | 刷新当前目录列表         |
-| 30002 | 同目录下已存在同名项                                   | 提示更换名称             |
-| 30003 | 存储配额不足                                           | 提示用量与配额，引导清理 |
-| 30004 | 文件超出大小限制                                       | 提示上限值               |
-| 30005 | 该类型不支持预览                                       | 提示"请下载查看"         |
-| 30006 | 超出目录限制（深度>10 / 单目录>500 项 / 名称>64 字符） | 提示具体限制             |
-| 30007 | 回收站记录不存在                                       | 刷新回收站列表           |
-| 30008 | 分享链接无效（不存在/已停止/已过期/文件已删/未过审）   | 访客页提示失效           |
-| 30009 | 文件夹暂不支持创建分享链接                             | 提示                     |
-| 30010 | 文件未通过内容审核，禁止分享                           | 提示（开关开启后生效）   |
-| 30011 | 用户仍有云盘文件，禁止删除                             | 提示（R10 删用户预检）   |
-| 30012 | 该文件类型不支持在线编辑（非文本白名单扩展名，P4b）    | 提示"请下载后编辑"       |
-| 30013 | 内容超出在线编辑上限（1MB，P4b）                       | 提示"请下载后编辑"       |
-| 30014 | 压缩包格式不支持或已损坏（P4c）                        | 提示"仅支持 zip 解压"    |
-| 30015 | 解压超限（条目数 / 累计总大小 / 单条目，P4c）          | 提示超限具体原因         |
-| 30016 | 压缩包含非法路径条目（Zip Slip 整包拒绝，P4c）         | 提示压缩包非法           |
-| 30017 | 该分享需要提取码（未验证或凭证过期，P4d）              | 跳密码门禁页             |
-| 30018 | 提取码错误（含连续 5 次锁 10 分钟，P4d）               | 门禁页提示剩余次数       |
-| 30019 | 非法移动目标（自身子树 / 站点根 / 回收站，P4d）        | 提示                     |
-| 30020 | 站点根目录禁止直接删除（须先删除站点，P4e R52）        | 提示先到站点列表删站     |
+| code  | 文案                                                   | 处理                       |
+| ----- | ------------------------------------------------------ | -------------------------- |
+| 30001 | 文件/文件夹不存在或无权访问                            | 刷新当前目录列表           |
+| 30002 | 同目录下已存在同名项                                   | 提示更换名称               |
+| 30003 | 存储配额不足                                           | 提示用量与配额，引导清理   |
+| 30004 | 文件超出大小限制                                       | 提示上限值                 |
+| 30005 | 该类型不支持预览                                       | 提示"请下载查看"           |
+| 30006 | 超出目录限制（深度>10 / 单目录>500 项 / 名称>64 字符） | 提示具体限制               |
+| 30007 | 回收站记录不存在                                       | 刷新回收站列表             |
+| 30008 | 分享链接无效（不存在/已停止/已过期/文件已删/未过审）   | 访客页提示失效             |
+| 30009 | 文件夹暂不支持创建分享链接                             | 提示                       |
+| 30010 | 文件未通过内容审核，禁止分享                           | 提示（开关开启后生效）     |
+| 30011 | 用户仍有云盘文件，禁止删除                             | 提示（R10 删用户预检）     |
+| 30012 | 该文件类型不支持在线编辑（非文本白名单扩展名，P4b）    | 提示"请下载后编辑"         |
+| 30013 | 内容超出在线编辑上限（1MB，P4b）                       | 提示"请下载后编辑"         |
+| 30014 | 压缩包格式不支持或已损坏（P4c）                        | 提示"仅支持 zip 解压"      |
+| 30015 | 解压超限（条目数 / 累计总大小 / 单条目，P4c）          | 提示超限具体原因           |
+| 30016 | 压缩包含非法路径条目（Zip Slip 整包拒绝，P4c）         | 提示压缩包非法             |
+| 30017 | 该分享需要提取码（未验证或凭证过期，P4d）              | 跳密码门禁页               |
+| 30018 | 提取码错误（含连续 5 次锁 10 分钟，P4d）               | 门禁页提示剩余次数         |
+| 30019 | 非法移动目标（自身子树 / 站点根 / 回收站，P4d）        | 提示                       |
+| 30020 | 站点根目录禁止直接删除（须先删除站点，P4e R52）        | 提示先到站点列表删站       |
+| 30021 | 文件被应用数据引用，禁止删除（P11 D96）                | 提示先删除应用中的引用数据 |
 
 ### 4.8 个人网站（site 域）架构约定（P4a）
 
@@ -2562,3 +2563,122 @@ app 域（附件上传）          ──▶ CloudFacade.uploadForApp
 展示应用 B / 市场 → P12/P13（`app_page.kind` 已分 admin/display，`app_def.pub_code/source_app_id` 已建）；
 app_record 分表（单表 ≥500 万行）；富文本字段（引 DOMPurify 需特批，先 Markdown 文本）；
 AI 创建 agent 化 → P14；行级操作审计（data 外追加 diff 列）。
+
+### 27.10 错误码 50xxx 段（应用平台，P11；P11 走查 W1 收齐）
+
+| 码    | 含义                                              | 处理                                 |
+| ----- | ------------------------------------------------- | ------------------------------------ |
+| 50001 | 应用不存在或无权（统一属主校验，含系统表操作）    | 刷新应用列表 / 回应用中心            |
+| 50002 | 超出配额（message 带配额项）                      | 提示配额项与上限                     |
+| 50003 | 结构变更未通过数据校验（带 rowId 清单）           | 提示违规行，可导出 CSV 后修正        |
+| 50004 | 页面 schema 校验失败（带路径）                    | 编辑器就地高亮错误路径               |
+| 50005 | 数据校验失败（字段规则 / 动作步骤）               | 表单就地提示（事务已回滚）           |
+| 50006 | 导入文件不合规（非 CSV / 超限 / 空 / 首行无列名） | 提示具体原因，重新选择文件           |
+| 50007 | 功能页路由冲突（同应用 route 重复）               | 提示更换 route                       |
+| 50008 | 草稿已过期或不存在                                | 提示重新发起（AI 草稿 TTL 7 天）     |
+| 50009 | 查询超出护栏（>2s 或内存路径 >1 万行）            | 提示缩小筛选范围                     |
+| 50010 | 动作与页面定义不符（action 未在 schema 声明）     | AI 工具回喂；前端提示刷新页面 schema |
+
+- 段位起点 **50001**（50000 为通用内部错误）；端点侧同表见 API §18.3。
+- 本段**无 50011**（P11 封顶 50010）；P12 续用 50012（发布校验未过），见 §28。
+
+## 28. 数据应用 B 侧（公开与展示）（P12，增补并入）
+
+> 来源：`docs/P12/ARCHITECTURE-P12-增补.md`（并入本节）+ `docs/P12/PRD-P12-PATCH1-可视化页编辑器.md`（T115，前端零后端改动）。
+> 编号：D97~~D105 / R100~~R113 / T108~T115。**零新依赖、零新表（+4 列）、零新 AI 工具（37 不变）**。
+> 核心模式复制开放层已验证的「@Public + 独立限流 + 40400 防探测」（§14.4 / §16.2 先例）。
+
+### 28.1 域结构增量（apps/api/src/modules/app/）
+
+| 位置               | 增量                                                                                 | 说明                                                                                                                                                |
+| ------------------ | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pub/`（新子目录） | PubController（`/api/pub/app/**`）、PubDataService、pub.cache / pub-mime             | 免登录公开面，@Public + @SkipTransform，独立限流 60/min/IP                                                                                          |
+| `admin/`           | AdminController 扩展 5 端点（publish / pub-config / 两级 expose / 页 publish）       | 登录 + 属主（assertOwned 50001）+ 写挂 @OperationLog                                                                                                |
+| `page/`            | page.schema.ts 扩展 display 校验（R102）与 rowLink 校验                              | 手写校验风格沿用（零依赖）                                                                                                                          |
+| `page.service`     | 页类型由 `schema.kind` 单一定源（admin/display），display↔admin 回退时清 `is_public` | 避免 DTO 与 schema 双写不一致                                                                                                                       |
+| `data/`            | DataService 新增公开执行入口 `queryForPublic`（复用双路径执行器）                    | 调用方已完成公开/暴露/参数校验，本方法只执行 + 护栏（50009）                                                                                        |
+| CloudFacade        | 新增 `getAppAttachmentStream(fileId, range?)` 最小只读方法                           | app→cloud 沿用既有 CloudFacadeModule；返回 stream + name/ext/size/mime/updateTime；**调用方（pub/）已完成引用索引与暴露校验**，方法内不重复业务校验 |
+
+cloud 域零改动；site 域零改动；不新建反向 Facade（AppRefModule 维持 P11 原状）。
+
+### 28.2 数据模型增量（+0 表 +4 列）
+
+迁移 `20260924100000_app_pub_exposure`：
+
+| 表        | 列                      | 默认 | 说明                               |
+| --------- | ----------------------- | ---- | ---------------------------------- |
+| app_def   | `is_public` tinyint(1)  | 0    | 公开发布开关（D101 属主自助）      |
+| app_table | `is_exposed` tinyint(1) | 0    | 表级暴露门禁                       |
+| app_field | `is_exposed` tinyint(1) | 1    | 字段级暴露（受表门禁，R100）       |
+| app_page  | `is_public` tinyint(1)  | 0    | display 页公开标记（admin 页恒 0） |
+
+- 查询路径：公开面全走 `app_def.uk(pub_code)` 定位，无需新索引；回滚 = 删列，零数据迁移。
+- **app_binding 不建**（D99）：绑定语义由三开关 + 页 schema dataSources 表达。
+
+### 28.3 公开数据服务（PubDataService）
+
+- **投影白名单（R101）**：有效暴露集合 = 应用 is_public ∧ 表 is_exposed ∧ 字段 is_exposed ∧ 非内部列；输出键 = `app_field.name` + 内置三件套（rowId/createdAt/updatedAt）。
+  - 落地注记：暴露集合**每请求按 DB 现算**（不缓存字段定义）→ 暴露开关/新增字段/结构变更立即生效，无缓存失真面；代价是每请求两条小查询（app_table 命中 + app_field 命中）。
+- **查询执行复用（铁律 5）**：入参从 A 侧 DSL JSON 改为 R104 固定参数（GET query 解析 → 同一执行计划）；双路径（r_cN 下推 / 内存 1 万行护栏）、2s 超时（50009）、n:n 回填（from_id/to_id + r_c1/r_c2）、expand ≤1 层语义与 A 侧完全一致；expand 目标表未暴露 → 40001。
+  - 落地注记：R104 的排序键允许内置三件套（rowId/createdAt/updatedAt），而 A 侧执行器只认 r_cN 列 → **排序键含内置字段时改在结果集上本地排序**（其余情况仍走索引下推），分页语义不变。
+- **缓存（R105）**：`app:pub:{appId}:manifest|schema:*|data:*`；data TTL 60s、manifest/schema 600s；写后失效 = **页动作事务提交后**（PageService）与 **CSV 导入批次完成后**（ImportService）经 `AdminService.invalidatePubCache(appId)` SCAN DEL `app:pub:{appId}:data:*`；发布/取消/暴露开关/页公开即 `invalidatePubAll`。
+- **防探测（D100）**：pub_code → app_def（is_public=1 ∧ deleted_at null）任一失败 → 40400；表/行/文件校验失败同码；参数校验 40001、限流 42900 为例外（开放层同款例外结构）。
+
+### 28.4 display 页模式增量（schema_version=1 兼容扩展）
+
+```json
+{
+  "kind": "display",
+  "layout": [
+    { "type": "filterBar", "bind": "mainList", "fields": ["title:contains"] },
+    {
+      "type": "table",
+      "bind": "mainList",
+      "columns": ["title", "tag_ids:expand:tag"],
+      "rowLink": { "page": "book_detail", "rowIdParam": "rowId" }
+    },
+    {
+      "type": "detail",
+      "bind": "bookDetail",
+      "fields": ["title", "cover:attachment", "tag_ids:ref:tag:multiple"]
+    }
+  ],
+  "dataSources": {
+    "mainList": {
+      "op": "list",
+      "table": "book",
+      "sort": [{ "f": "createdAt", "dir": "desc" }],
+      "size": 20
+    },
+    "bookDetail": { "op": "get", "table": "book" }
+  }
+}
+```
+
+- **校验（R102）**：kind=display → 禁 form 区块、禁 actions；table 禁 rowActions；detail 必须绑 op=get 数据源；rowLink.page 必须存在于同应用（ctx.pages）；dataSources op 仅 list/get（禁 count）；字段 DSL 语法白名单 + 基础字段存在 + expand/ref 目标表存在。
+- **取值语义**：list 数据源直接渲染；get 数据源的 rowId 从公开路由 query 取（参数名 rowIdParam，默认 `rowId`；缺失 → 空态「参数缺失」，不报错）。
+- **保存时不强制暴露**；发布时统一 R103 校验（缺项 50012，message 带前 5 项 + 总数）。
+
+### 28.5 前端（apps/web）
+
+- `components/app-renderer/` 增 **PublicRenderer**：filterBar / table / detail 三区块只读渲染；字段 DSL 解析（`parseFieldSpec`）、展示格式化（`displayCell`）与 AdminRenderer 同源复用；**附件 → `/api/pub/app/{pubCode}/file/{fileId}`**；全文本插值禁 v-html（沿用）。
+- **公开路由**：`/pub/app/:pubCode`（索引 → 重定向首个公开页，无公开页 → 空态提示）+ `/pub/app/:pubCode/p/:pageCode`（宿主，按参数拉 manifest + schema）；`router/guard.ts` 的 `isPublicRoute` 白名单加入 `/pub/`（照 `/view/*` 先例：**前端白名单与后端 @Public 任一缺失都不可匿名访问**，验收须双端核对）。
+- 公开 API 层 `api/app/pub.ts`：**故意不走 `utils/request`**（照 `api/cloud/public.ts` 先例），用 fetch 直取统一响应体保留 code（区分 40400 与 40001）；管理侧 5 端点函数并入 `api/app/index.ts`。
+- 管理 UI（PRD §8）：应用中心「公开」弹窗（发布开关 + 链接复制 + 缺项引导 + 新窗口预览）、结构编辑器表/字段暴露开关（表关闭则字段禁用）、页编辑器类型选择（管理页/展示页）+ 公开开关 + 预览。
+
+### 28.6 安全清单
+
+- 公开端点：@Public + 独立限流 60/min/IP + 40400 防探测 + @SkipTransform（流式/裸响应）。
+- 全参数绑定（Prisma prepared）；白名单投影；渲染器禁 v-html。
+- 附件流三道闸：① `app_attachment_ref` 引用存在（deleted_at 过滤）② 所属表·字段有效暴露 ③ MIME 口径 R26（文本强制 `text/plain; charset=utf-8`；html/htm/svg 强制 attachment；图片/音视频/PDF inline；白名单外 octet-stream + attachment）；`?download=1` 出 attachment + `filename*=UTF-8''` 原名。附件 MIME 表按域边界**自持一份**（`pub/pub-mime.ts`，照 cloud `pub-mime.ts` / site `mime.ts` 先例）。
+- pub_code 只经 path 传递（照 share token 先例，不进 query/Referer）；公开读不写 @OperationLog，管理侧写操作照挂。
+
+### 28.7 配置增量（src/config/app.config.ts，env 前缀 `APP_*`，均可不配）
+
+`app.pubListMaxSize=50` / `app.pubFilterMaxGroups=3` / `app.pubSortMaxFields=2` /
+`app.pubDataCacheTtlSeconds=60` / `app.pubManifestCacheTtlSeconds=600` / `app.pubRateLimitPerMinute=60`
+
+### 28.8 与 P13 的接缝
+
+- `is_public` 只是「自助公开」开关；P13 市场发布 = 独立状态机（审核中/已上架/已下架）+ 快照投影（D103），**不复用 is_public 做审核态**。
+- `pub_code` / `source_app_id` P11 已就位；市场复制产生的副本 `is_public=0` 起步，复制不携带公开态。
