@@ -434,6 +434,80 @@ async function runAppToolFlow(
   return { calledTools: [...called], errorEvent }
 }
 
+// ==================== P13 公开面写三件套自动确认（N 用例） ====================
+
+/** P13 市场/公开链路工具（写工具，需确认卡批准后才会执行） */
+const MARKET_WRITE_TOOLS = new Set(['expose_data_app', 'publish_data_app', 'submit_market_app'])
+
+/**
+ * N 用例推进消息：实测模型每条用户消息通常只推进 1~2 个写工具（先汇报缺项再问是否继续），
+ * 需要像真实用户一样续接同一会话继续推进（50012 缺项引导路径靠它走完）。
+ */
+const MARKET_FLOW_FOLLOW_UPS = [
+  '继续：按发布缺项补齐暴露（表与展示页），然后开启公开发布（publish_data_app）。',
+  '继续：把这个应用提交到应用市场审核（submit_market_app）。',
+]
+
+/** N 用例展示页夹具（最小合法 display schema，R102：仅 table 区块、无动作） */
+const DISPLAY_PAGE_FIXTURE = {
+  kind: 'display',
+  dataSources: { books: { op: 'list', table: 'book', fields: ['title'] } },
+  layout: [{ type: 'table', bind: 'books', columns: ['title'] }],
+}
+
+/**
+ * 跑一遍「公开并提交市场」链：首发消息 → 逐张确认卡自动批准 → 按需追加推进消息，
+ * 直到 submit_market_app 执行或推进消息用尽；返回被确认的工具名集合。
+ */
+async function runMarketToolFlow(
+  token: string,
+  modelId: number,
+  prompt: string,
+): Promise<{ calledTools: string[]; errorEvent: string | null }> {
+  const called = new Set<string>()
+  let errorEvent: string | null = null
+
+  const drain = async (confirms: StreamConfirm[]): Promise<void> => {
+    const queue = [...confirms]
+    let rounds = 0
+    while (queue.length > 0 && rounds < 12) {
+      const next = queue.shift()!
+      called.add(next.toolName)
+      const follow = await confirmTool(token, next.toolCallId, true)
+      if (follow.errorEvent) errorEvent = follow.errorEvent
+      for (const confirm of follow.confirms) queue.push(confirm)
+      rounds += 1
+    }
+  }
+
+  const first = await chat(token, modelId, prompt)
+  if (first.errorEvent) errorEvent = first.errorEvent
+  await drain(first.confirms)
+
+  const conversationId = first.conversationId
+  for (const message of MARKET_FLOW_FOLLOW_UPS) {
+    if (called.has('submit_market_app')) break
+    const outcome = await chat(token, modelId, message, undefined, conversationId)
+    if (outcome.errorEvent) errorEvent = outcome.errorEvent
+    await drain(outcome.confirms)
+  }
+  return { calledTools: [...called], errorEvent }
+}
+
+/** 祖先目录链上是否存在已删/缺失目录（存在则该文件按 path 不可寻址） */
+async function hasDeletedAncestor(prisma: PrismaClient, parentId: bigint): Promise<boolean> {
+  let cursor = parentId
+  for (let depth = 0; depth < 10 && cursor !== USER_ROOT_ID; depth += 1) {
+    const parent = await prisma.cloudFile.findFirst({
+      where: { id: cursor },
+      select: { parentId: true, deletedAt: true },
+    })
+    if (!parent || parent.deletedAt) return true
+    cursor = parent.parentId
+  }
+  return false
+}
+
 /** 自 cloud_file 向上拼出相对云盘根的路径（AI 工具按 path 寻址） */
 async function resolveCloudPath(
   prisma: PrismaClient,
@@ -548,7 +622,7 @@ async function main(): Promise<void> {
     console.log('I. import_site_article（导入解析）')
     // 候选过滤：排除附件夹具目录（J/K 的夹具含 >2MB 大文件，导入链上限 2MB 会被 30013 拒），并限体积 ≤2MB
     const attachmentDirId = await ensureAttachmentDir(token)
-    const candidate = await prisma.cloudFile.findFirst({
+    const candidates = await prisma.cloudFile.findMany({
       where: {
         userId,
         deletedAt: null,
@@ -558,8 +632,18 @@ async function main(): Promise<void> {
         parentId: { not: BigInt(attachmentDirId) },
       },
       orderBy: { id: 'desc' },
-      select: { name: true, parentId: true, size: true },
+      take: 20,
+      select: { id: true, name: true, parentId: true, size: true },
     })
+    // 候选必须**在存活目录链上**：回收站里的文件夹（已软删）其子行仍可能 deletedAt=null，
+    // 按路径寻址会 30001（实测：t116readme 被删后其 README.txt 仍在，直接选它就必然失败）
+    let candidate: (typeof candidates)[number] | null = null
+    for (const item of candidates) {
+      if (!(await hasDeletedAncestor(prisma, item.parentId))) {
+        candidate = item
+        break
+      }
+    }
     if (!candidate) {
       console.log('  · 跳过：云盘里没有 md/markdown/txt 文件（先上传一个再重跑可覆盖本用例）')
     } else {
@@ -813,6 +897,111 @@ async function main(): Promise<void> {
           console.log(`  · 已清理夹具应用 ${fixtureCode}`)
         } catch {
           // 清理失败不判失败（软删幂等，下次 run 或人工清理）
+        }
+      }
+    }
+
+    // 用例 N：数据应用公开并提交市场（P13 T120 / D110 / R122）——expose → publish → submit
+    console.log('N. 数据应用公开与市场提交（expose_data_app / publish_data_app / submit_market_app）')
+    {
+      const caseLabel = 'N 公开并提交市场（expose→publish→submit）'
+      const fixtureName = `冒烟市场${Date.now().toString().slice(-5)}`
+      let fixtureCode = ''
+      let lastReason = '夹具未准备'
+      let done = false
+      try {
+        const fixture = await api<{ appCode: string }>(token, '/api/app', {
+          method: 'POST',
+          json: { name: fixtureName, mode: 'blank' },
+        })
+        fixtureCode = fixture.appCode
+        await api(token, `/api/app/${fixtureCode}/tables`, {
+          method: 'POST',
+          json: { name: 'book', label: '书', fields: [{ name: 'title', label: '书名', type: 'text' }] },
+        })
+        await api(token, `/api/app/${fixtureCode}/pages`, {
+          method: 'POST',
+          json: { name: '书展示', route: 'book-display', genBy: 'manual', schema: DISPLAY_PAGE_FIXTURE },
+        })
+        console.log(`  · 夹具应用 ${fixtureCode}（1 表 + 1 展示页，均未暴露未发布 → 发布缺项非空）`)
+      } catch (error) {
+        console.log(`  · 夹具准备失败：${(error as Error).message}`)
+      }
+
+      if (!fixtureCode) {
+        report(caseLabel, { ok: false, reason: lastReason })
+      } else {
+        const prompt =
+          `把应用「${fixtureCode}」公开发布，然后提交到应用市场审核；` +
+          '缺什么就按缺项补齐（不要问我，直接执行）。'
+        for (let attempt = 1; attempt <= MAX_ATTEMPT && !done; attempt += 1) {
+          const since = new Date()
+          const flow = await runMarketToolFlow(token, modelId, prompt)
+          const calls = await prisma.aiToolCall.findMany({
+            where: {
+              userId,
+              createdAt: { gte: since },
+              toolName: { in: [...MARKET_WRITE_TOOLS] },
+              status: 'executed',
+            },
+            orderBy: { id: 'asc' },
+            select: { id: true, toolName: true, result: true },
+          })
+          const executed = new Set(calls.map((call) => call.toolName))
+          const submit = calls.find((call) => call.toolName === 'submit_market_app')
+          if (!executed.has('expose_data_app')) {
+            lastReason = `未执行 expose_data_app（已确认：${flow.calledTools.join('、') || '无'}${flow.errorEvent ? `；${flow.errorEvent}` : ''}）`
+          } else if (!executed.has('publish_data_app')) {
+            lastReason = `未执行 publish_data_app（已执行：${[...executed].join('、')}）`
+          } else if (!submit) {
+            lastReason = `未执行 submit_market_app（已执行：${[...executed].join('、')}）`
+          } else if (!(submit.result ?? '').includes('listingCode')) {
+            lastReason = `submit 结果未含 listingCode：${(submit.result ?? '').slice(0, 80)}`
+          } else {
+            const listing = await prisma.marketListing.findFirst({
+              where: { publisherId: userId, name: fixtureName },
+              orderBy: { id: 'desc' },
+            })
+            if (!listing) {
+              lastReason = 'market_listing 未落库'
+            } else if (listing.status !== 'pending') {
+              lastReason = `market_listing 状态=${listing.status}（应 pending）`
+            } else {
+              const order = calls.map((call) => call.toolName)
+              const indexExpose = order.indexOf('expose_data_app')
+              const indexPublish = order.indexOf('publish_data_app')
+              const indexSubmit = order.indexOf('submit_market_app')
+              if (!(indexExpose < indexPublish && indexPublish < indexSubmit)) {
+                lastReason = `工具顺序不符：${order.join(' → ')}`
+              } else {
+                report(caseLabel, {
+                  ok: true,
+                  reason: `app=${fixtureCode} listing=${listing.code} status=pending 顺序=${order.join(' → ')}`,
+                })
+                done = true
+                break
+              }
+            }
+          }
+          console.log(`  · 第 ${attempt}/${MAX_ATTEMPT} 次未通过：${lastReason}`)
+          if (attempt < MAX_ATTEMPT) await sleep(RETRY_DELAY_MS)
+        }
+        if (!done) report(caseLabel, { ok: false, reason: lastReason })
+
+        // 收尾清理：条目（pending 无下架入口）与应用都不留库
+        try {
+          const removed = await prisma.marketListing.deleteMany({
+            where: { publisherId: userId, name: fixtureName },
+          })
+          if (removed.count > 0) console.log(`  · 已清理市场条目 ${removed.count} 条`)
+        } catch {
+          // 清理失败不判失败（下次 run 或人工清理）
+        }
+        try {
+          await api(token, `/api/app/${fixtureCode}`, { method: 'DELETE' })
+          console.log(`  · 已清理夹具应用 ${fixtureCode}`)
+        } catch {
+          // 同上
         }
       }
     }

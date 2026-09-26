@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useClipboard } from '@vueuse/core'
@@ -8,10 +8,13 @@ import {
   createApp,
   deleteApp,
   getPubConfig,
+  getSchema,
   listApps,
   publishApp,
+  queryData,
   type PubConfig,
 } from '@/api/app'
+import { listMySubmissions, submitToMarket } from '@/api/market'
 import { confirmDialog } from '@/utils/confirm'
 import { formatTime } from '@/utils/format'
 import type { AppDefItem } from '@/types/api'
@@ -115,7 +118,108 @@ async function load(): Promise<void> {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  void loadMyListings()
+})
+
+// ==================== P13 T121：发布到市场（R118 ~120） ====================
+
+/** 与后端 market.demoMaxRowsPerTable 默认值一致（服务端为唯一权威，超限提交由后端 50015 拒绝） */
+const DEMO_MAX_ROWS_PER_TABLE = 100
+
+/** appCode → 活跃条目状态（pending / approved）；置灰提示用 */
+const activeListing = ref<Record<string, 'pending' | 'approved'>>({})
+
+const marketDialog = reactive<{
+  visible: boolean
+  appCode: string
+  appName: string
+  loading: boolean
+  submitting: boolean
+  withDemo: boolean
+  tables: Array<{ name: string; label: string; rows: number | null }>
+}>({
+  visible: false,
+  appCode: '',
+  appName: '',
+  loading: false,
+  submitting: false,
+  withDemo: false,
+  tables: [],
+})
+
+/** 勾选演示数据且存在超限表 → 红字提示（提交仍会被后端拒绝，此处只做前置提醒） */
+const demoOverflow = computed(
+  () =>
+    marketDialog.withDemo &&
+    marketDialog.tables.some((table) => (table.rows ?? 0) > DEMO_MAX_ROWS_PER_TABLE),
+)
+
+async function loadMyListings(): Promise<void> {
+  try {
+    const rows = await listMySubmissions()
+    const map: Record<string, 'pending' | 'approved'> = {}
+    for (const row of rows) {
+      if (!row.appCode) continue
+      if (row.status === 'pending' || row.status === 'approved') map[row.appCode] = row.status
+    }
+    activeListing.value = map
+  } catch {
+    activeListing.value = {}
+  }
+}
+
+async function openMarket(item: AppDefItem): Promise<void> {
+  marketDialog.visible = true
+  marketDialog.appCode = item.appCode
+  marketDialog.appName = item.name
+  marketDialog.withDemo = false
+  marketDialog.tables = []
+  marketDialog.loading = true
+  try {
+    const schema = await getSchema(item.appCode)
+    const tables = schema.tables
+      .filter((table) => !table.isSystem)
+      .map((table) => ({ name: table.name, label: table.label, rows: null as number | null }))
+    marketDialog.tables = tables
+    // 逐表行数预览（失败置 null，不阻塞提交）；必须遍历**响应式代理**（marketDialog.tables），
+    // 遍历原始数组会改到裸对象上、不触发更新（表现为永远显示「读取失败」）
+    for (const table of marketDialog.tables) {
+      try {
+        const result = await queryData({ appCode: item.appCode, op: 'count', table: table.name })
+        table.rows = result.total ?? 0
+      } catch {
+        table.rows = null
+      }
+    }
+  } catch {
+    marketDialog.tables = []
+  } finally {
+    marketDialog.loading = false
+  }
+}
+
+async function submitMarket(): Promise<void> {
+  if (demoOverflow.value) {
+    ElMessage.warning(`演示数据超出上限（单表 ${DEMO_MAX_ROWS_PER_TABLE} 行），请先清理数据或取消勾选`)
+    return
+  }
+  marketDialog.submitting = true
+  try {
+    const result = await submitToMarket({
+      appCode: marketDialog.appCode,
+      withDemoData: marketDialog.withDemo,
+    })
+    ElMessage.success(`已提交（条目 ${result.listingCode}），等待管理员审核`)
+    marketDialog.visible = false
+    await Promise.all([load(), loadMyListings()])
+  } catch {
+    // 请求层已提示（50013 重复提交 / 50015 内容不合规）
+  } finally {
+    marketDialog.submitting = false
+  }
+}
 
 function openCreate(): void {
   form.name = ''
@@ -279,6 +383,34 @@ function goPages(item: AppDefItem): void {
               @click="openPub(item)"
             >
               公开
+            </el-button>
+            <!-- P13 T121：发布到市场（未提交过显示主按钮；已有活跃条目置灰提示） -->
+            <el-tooltip
+              v-if="item.status === 'active' && activeListing[item.appCode]"
+              :content="
+                activeListing[item.appCode] === 'approved'
+                  ? '已在市场在架（可重新提交需先下架）'
+                  : '已提交，等待审核'
+              "
+            >
+              <span>
+                <el-button
+                  size="small"
+                  plain
+                  disabled
+                >
+                  已提交市场
+                </el-button>
+              </span>
+            </el-tooltip>
+            <el-button
+              v-else-if="item.status === 'active'"
+              size="small"
+              type="primary"
+              plain
+              @click="openMarket(item)"
+            >
+              发布到市场
             </el-button>
             <el-button
               v-if="item.status === 'draft'"
@@ -461,6 +593,82 @@ function goPages(item: AppDefItem): void {
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- P13 T121：发布到市场（withDemoData 勾选 + 逐表行数预览，R118） -->
+    <el-dialog
+      v-model="marketDialog.visible"
+      :title="`发布到市场 · ${marketDialog.appName}`"
+      width="560px"
+    >
+      <div v-loading="marketDialog.loading">
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          class="market-tip"
+        >
+          <template #title>
+            提交即冻结结构快照（之后修改源应用不影响该条目），进入人工审核队列
+          </template>
+        </el-alert>
+
+        <el-form label-width="110px">
+          <el-form-item label="附带演示数据">
+            <el-switch v-model="marketDialog.withDemo" />
+            <span class="pub-hint">勾选后把现有数据一并提交（每表 ≤ {{ DEMO_MAX_ROWS_PER_TABLE }} 行；附件字段不随复制迁移）</span>
+          </el-form-item>
+          <el-form-item label="数据行预览">
+            <div
+              v-if="marketDialog.tables.length === 0"
+              class="pub-hint"
+            >
+              该应用没有逻辑表，将只分享结构
+            </div>
+            <div
+              v-else
+              class="market-tables"
+            >
+              <div
+                v-for="table in marketDialog.tables"
+                :key="table.name"
+                class="market-tables__row"
+              >
+                <span>{{ table.label }}（{{ table.name }}）</span>
+                <span
+                  :class="{
+                    'market-tables__count--over':
+                      marketDialog.withDemo && (table.rows ?? 0) > DEMO_MAX_ROWS_PER_TABLE,
+                  }"
+                >
+                  {{ table.rows === null ? '读取失败' : `${table.rows} 行` }}
+                </span>
+              </div>
+            </div>
+          </el-form-item>
+        </el-form>
+
+        <p
+          v-if="demoOverflow"
+          class="market-overflow"
+        >
+          存在超过 {{ DEMO_MAX_ROWS_PER_TABLE }} 行的表：提交会被拒绝，请先清理数据或取消勾选
+        </p>
+      </div>
+
+      <template #footer>
+        <el-button @click="marketDialog.visible = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="marketDialog.submitting"
+          :disabled="demoOverflow"
+          @click="submitMarket"
+        >
+          提交审核
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -529,5 +737,29 @@ function goPages(item: AppDefItem): void {
 }
 .pub-tag {
   margin: 0 6px 6px 0;
+}
+.market-tip {
+  margin-bottom: 12px;
+}
+.market-tables {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+}
+.market-tables__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.market-tables__count--over {
+  color: var(--el-color-danger);
+  font-weight: 600;
+}
+.market-overflow {
+  margin: 0;
+  font-size: 12px;
+  color: var(--el-color-danger);
 }
 </style>

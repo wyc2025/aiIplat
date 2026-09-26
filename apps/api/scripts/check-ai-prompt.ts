@@ -175,6 +175,17 @@ function main(): void {
     `groups=${appPubRoute.groups.join(',')} 下发 ${appPubInjected.length}/${names.length}`,
   )
 
+  // P13 T120（R122）：市场/暴露复合词根（精准复合词，不得抢 siteCms 的「发布/审核」等泛词）
+  const marketRoute = resolveToolGroups('把我的应用提交到应用市场')
+  const marketInjected = inject(permittedAll, marketRoute.groups, marketRoute.fallback)
+  check(
+    '「应用市场」命中 app 组且含 submit_market_app',
+    !marketRoute.fallback &&
+      marketRoute.groups.includes('app') &&
+      marketInjected.includes('submit_market_app'),
+    `groups=${marketRoute.groups.join(',')} 下发 ${marketInjected.length}/${names.length}`,
+  )
+
   const weatherRoute = resolveToolGroups('今天天气怎么样')
   check(
     '无命中 → 全量兜底',

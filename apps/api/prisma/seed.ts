@@ -400,7 +400,8 @@ const menuTree: MenuSeed[] = [
     ],
   },
   // P11：应用中心（登录用户均可访问；子菜单「我的应用」+ 后端按用户 active 应用实时追加的
-  // 「应用 ▸ 功能页」动态段 —— 动态段不落 sys_menu，R96；本目录零按钮权限标识，数据操作属主校验兜底）
+  // 「应用 ▸ 功能页」动态段 —— 动态段不落 sys_menu，R96；P13 增「应用市场」页
+  // 与 admin 专属「市场审核」页（market:review，**须从 common 角色授予中排除**））
   {
     name: '应用中心',
     type: 1,
@@ -415,6 +416,23 @@ const menuTree: MenuSeed[] = [
         component: 'app/center/index',
         icon: 'Grid',
         sort: 1,
+      },
+      {
+        name: '应用市场',
+        type: 2,
+        path: 'app-center/market',
+        component: 'market/index',
+        icon: 'Shop',
+        sort: 2,
+      },
+      {
+        name: '市场审核',
+        type: 2,
+        path: 'app-center/market-review',
+        component: 'market/review/index',
+        perms: 'market:review',
+        icon: 'Checked',
+        sort: 3,
       },
     ],
   },
@@ -556,7 +574,9 @@ async function main() {
     }
   }
 
-  // P11：common 角色授予「应用中心」整棵子树（目录 + 我的应用页；动态段不落 sys_menu，无需授予）
+  // P11：common 角色授予「应用中心」整棵子树（目录 + 我的应用 + P13 应用市场页；
+  // 动态段不落 sys_menu，无需授予）。**排除市场审核页**（market:review 属 admin 专属，
+  // 菜单级 perms 会计入权限集合，若不排除 = 普通用户拿到审核权限）
   const appCenterDir = await prisma.sysMenu.findFirst({
     where: { parentId: BigInt(0), name: '应用中心' },
   })
@@ -567,6 +587,7 @@ async function main() {
       const parentId = appPending.pop()!
       const children = await prisma.sysMenu.findMany({ where: { parentId } })
       for (const child of children) {
+        if (child.perms === 'market:review') continue
         appMenuIds.push(child.id)
         appPending.push(child.id)
       }

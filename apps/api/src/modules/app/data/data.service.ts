@@ -177,6 +177,40 @@ export class DataService {
   }
 
   /**
+   * P13 R118：市场提交时读取演示数据（≤cap 行/表，超出即 truncated=true 由调用方 50015 拒绝）。
+   * - 经 toViews 附着多值 ref（n:n 以 rowId[] 形式返回，供复制方按旧→新 rowId 重映射）；
+   * - attachment 类型字段值**强制置 null**（文件不随复制迁移，R118）；
+   * - 行本身就是「原样 JSON」，不做白名单裁剪（复制方仍经 DataService 写路径写入）。
+   */
+  async snapshotRows(
+    app: AppDef,
+    table: ResolvedTable,
+    cap: number,
+  ): Promise<{ rows: Array<{ rowId: string; data: Record<string, unknown> }>; truncated: boolean }> {
+    const records = await this.prisma.appRecord.findMany({
+      where: { tableId: table.id, deletedAt: null },
+      orderBy: { id: 'asc' },
+      take: cap + 1,
+    })
+    const truncated = records.length > cap
+    const slice = truncated ? records.slice(0, cap) : records
+    const views = await this.toViews(app, table, slice)
+    const attachmentFields = new Set(
+      table.fields.filter((field) => field.type === 'attachment').map((field) => field.name),
+    )
+    return {
+      truncated,
+      rows: views.map((view) => {
+        const data: Record<string, unknown> = { ...view.data }
+        for (const name of attachmentFields) {
+          if (Object.prototype.hasOwnProperty.call(data, name)) data[name] = null
+        }
+        return { rowId: view.rowId, data }
+      }),
+    }
+  }
+
+  /**
    * 过滤 + 排序（返回已排序的全量行，分页由调用方切片）。
    * DB 路径（可全下推）走 where/orderBy；否则内存路径（硬上限 1 万行，超出 50009）。
    */
@@ -266,8 +300,20 @@ export class DataService {
     return { id: row.id, rowId }
   }
 
-  /** 更新行（部分字段；未提供字段保持原值） */
-  async updateRow(
+  /**
+   * P13 R119：单行独立事务写入（市场复制演示数据用）——错误行跳过由调用方 try/catch 承担，
+   * 事务边界在此收口（照 ImportService 逐行事务先例）。
+   */
+  async createRowStandalone(
+    app: AppDef,
+    table: ResolvedTable,
+    values: Record<string, unknown>,
+    userId: bigint,
+  ): Promise<{ id: bigint; rowId: string }> {
+    return this.prisma.$transaction((tx) => this.createRow(tx, app, table, values, userId))
+  }
+
+  /** 更新行（部分字段；未提供字段保持原值） */  async updateRow(
     db: Db,
     app: AppDef,
     table: ResolvedTable,

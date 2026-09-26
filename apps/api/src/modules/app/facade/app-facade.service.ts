@@ -1,14 +1,55 @@
 import { Injectable } from '@nestjs/common'
-import { AdminService } from '../admin/admin.service'
+import { AdminService, PAGE_KIND_DISPLAY } from '../admin/admin.service'
+import { DataService } from '../data/data.service'
 import { PageService } from '../page/page.service'
 import { SchemaService } from '../schema/schema.service'
 import type { FieldDefDto } from '../schema/dto/schema.dto'
+import type { ResolvedTable } from '../schema/schema.types'
+import { ErrorCode } from '../../../common/constants/error-code'
+import { BusinessException } from '../../../common/exceptions/business.exception'
 
 /** AI 工具建表入参（工具契约 API-P11 §4 的域内投影） */
 export interface AppTableDefInput {
   table: string
   label: string
   fields: FieldDefDto[]
+}
+
+/** 演示数据行（R118：含源行 rowId 供复制方重映射引用） */
+export interface DemoRow {
+  rowId: string
+  data: Record<string, unknown>
+}
+
+/** 结构快照的 app 域投影（P13 R117；market 域组装后传入，app 域不反向依赖 market） */
+export interface MarketSnapshotInput {
+  version: number
+  tables: Array<{
+    name: string
+    label: string
+    fields: Array<{
+      name: string
+      label: string
+      type: string
+      required?: boolean
+      default?: unknown
+      enumOptions?: Array<{ value: string; label: string }> | null
+      refTable?: string | null
+      refMultiple?: boolean
+    }>
+  }>
+  rels: Array<{ fromTable: string; fromField: string; toTable: string }>
+  pages: Array<{ name: string; route: string; schema: Record<string, unknown>; genBy?: string }>
+}
+
+/** 复制物化结果（R119） */
+export interface MaterializeResult {
+  ok: true
+  appCode: string
+  tableCount: number
+  pageCount: number
+  rowCount: number
+  skippedRows: number
 }
 
 /**
@@ -29,6 +70,7 @@ export class AppFacade {
     private readonly adminService: AdminService,
     private readonly schemaService: SchemaService,
     private readonly pageService: PageService,
+    private readonly dataService: DataService,
   ) {}
 
   /** AI 创建应用草稿（工具 create_data_app；draft 不占 active 额度，限 3 个） */
@@ -145,6 +187,302 @@ export class AppFacade {
     return { ok: true, apps: await this.adminService.listWithPubState(userId) }
   }
 
+  // ==================== P13：应用市场（快照导出 / 公开开关 / 复制物化） ====================
+
+  /**
+   * P13 R117：导出结构快照源数据（**只读**，market 域据此物化快照）。
+   * 返回 schema 全量打包（表含字段全量、n:n 关系、功能页 schema 原样）+ 应用元数据；
+   * 供 market 域组装快照并落 `market_listing.snapshot`。
+   */
+  async exportStructure(userId: bigint, appCode: string): Promise<{
+    ok: true
+    appId: string
+    name: string
+    description: string | null
+    status: string
+    tables: Array<{
+      name: string
+      label: string
+      fields: Array<{
+        name: string
+        label: string
+        type: string
+        required: boolean
+        defaultVal: unknown
+        enumOptions: Array<{ value: string; label: string }> | null
+        refTableName: string | null
+        refMultiple: boolean
+        sort: number
+      }>
+    }>
+    rels: Array<{ fromTable: string; fromField: string; toTable: string }>
+    pages: Array<{
+      name: string
+      route: string
+      kind: string
+      genBy: string
+      sort: number
+      schema: Record<string, unknown>
+    }>
+  }> {
+    const app = await this.adminService.assertOwned(userId, appCode)
+    const bundle = await this.schemaService.getSchema(userId, appCode)
+    return {
+      ok: true,
+      appId: app.id.toString(),
+      name: app.name,
+      description: app.description,
+      status: app.status,
+      tables: bundle.tables
+        .filter((table) => !table.isSystem)
+        .map((table) => ({
+          name: table.name,
+          label: table.label,
+          fields: table.fields.map((field) => ({
+            name: field.name,
+            label: field.label,
+            type: field.type,
+            required: field.required,
+            defaultVal: field.defaultVal ?? null,
+            enumOptions: field.enumOptions,
+            refTableName: field.refTableName,
+            refMultiple: field.refMultiple,
+            sort: field.sort,
+          })),
+        })),
+      rels: bundle.relations.map((rel) => ({
+        fromTable: rel.fromTable,
+        fromField: rel.fromField,
+        toTable: rel.toTable,
+      })),
+      pages: bundle.pages.map((page) => ({
+        name: page.name,
+        route: page.route,
+        kind: page.kind,
+        genBy: page.genBy,
+        sort: page.sort,
+        schema: (page.schema ?? {}) as Record<string, unknown>,
+      })),
+    }
+  }
+
+  /**
+   * P13 R118：读取演示数据（每表 ≤cap 行；超限由 market 域 50015 拒绝，不静默截断）。
+   * attachment 字段值经 DataService 置 null；多值 ref 以源 rowId[] 返回（复制时重映射）。
+   */
+  async readDemoRows(
+    userId: bigint,
+    appCode: string,
+    cap: number,
+  ): Promise<{
+    ok: true
+    tables: Array<{ table: string; rows: DemoRow[]; truncated: boolean }>
+  }> {
+    const app = await this.adminService.assertOwned(userId, appCode)
+    const tables = await this.schemaService.listResolvedTables(app.id)
+    const result: Array<{ table: string; rows: DemoRow[]; truncated: boolean }> = []
+    for (const table of tables) {
+      if (table.isSystem) continue
+      const snapshot = await this.dataService.snapshotRows(app, table, cap)
+      result.push({ table: table.name, rows: snapshot.rows, truncated: snapshot.truncated })
+    }
+    return { ok: true, tables: result }
+  }
+
+  /**
+   * P13 R122 / D110：公开总开关（AI 工具 `publish_data_app`）。
+   * 开启未过 R103 时**不抛错**，返回 `ok:false + missing[]` 供模型按缺项引导用户先 expose。
+   */
+  async setPublic(
+    userId: bigint,
+    appCode: string,
+    isPublic: number,
+  ): Promise<{
+    ok: boolean
+    isPublic: number
+    pubCode?: string
+    pubUrl?: string
+    missing?: string[]
+  }> {
+    try {
+      const result = await this.adminService.publish(userId, appCode, isPublic)
+      return {
+        ok: true,
+        isPublic: result.isPublic,
+        pubCode: result.pubCode,
+        pubUrl: result.pubUrl,
+      }
+    } catch (error) {
+      if (error instanceof BusinessException && error.code === ErrorCode.AppPublishInvalid) {
+        const config = await this.adminService.pubConfig(userId, appCode)
+        return {
+          ok: false,
+          isPublic: 0,
+          pubCode: config.pubCode,
+          pubUrl: config.pubUrl,
+          missing: config.missing,
+        }
+      }
+      throw error
+    }
+  }
+
+  /**
+   * P13 R122 / D110：粒度暴露开关（AI 工具 `expose_data_app`）。
+   * - target=table：按表名解析；
+   * - target=field：name 支持 `表.字段` 或应用内唯一字段名；
+   * - target=page：name 支持页 code 或页名，**仅 display 页可公开**，否则 50004（R110）。
+   */
+  async setExposure(
+    userId: bigint,
+    appCode: string,
+    target: 'table' | 'field' | 'page',
+    name: string,
+    isExposed: number,
+  ): Promise<{ ok: true; target: string; name: string; isExposed: number }> {
+    const flag = isExposed === 1 ? 1 : 0
+    const key = name.trim()
+    if (!key) {
+      throw new BusinessException(ErrorCode.ParamInvalid, 'name 不能为空')
+    }
+
+    if (target === 'table') {
+      const app = await this.adminService.assertOwned(userId, appCode)
+      const table = await this.schemaService.resolveTableByName(app.id, key)
+      const result = await this.adminService.setTableExpose(userId, appCode, table.id, flag)
+      return { ok: true, target, name: result.tableCode, isExposed: result.isExposed }
+    }
+
+    if (target === 'field') {
+      const config = await this.adminService.pubConfig(userId, appCode)
+      const found = this.locateField(config.tables, key)
+      if (!found) {
+        throw new BusinessException(ErrorCode.AppNotFound, `字段不存在或无权：${key}`)
+      }
+      const result = await this.adminService.setFieldExpose(userId, appCode, BigInt(found.id), flag)
+      return { ok: true, target, name: result.field, isExposed: result.isExposed }
+    }
+
+    const pages = await this.pageService.list(userId, appCode)
+    const page = pages.find((item) => item.code === key || item.name === key)
+    if (!page) {
+      throw new BusinessException(ErrorCode.AppNotFound, `功能页不存在或无权：${key}`)
+    }
+    if (page.kind !== PAGE_KIND_DISPLAY) {
+      throw new BusinessException(
+        ErrorCode.AppPageSchemaInvalid,
+        `仅展示页（display）可公开，当前页为 ${page.kind}：${key}`,
+      )
+    }
+    await this.pageService.setPublic(userId, appCode, BigInt(page.id), flag)
+    return { ok: true, target, name: page.code, isExposed: flag }
+  }
+
+  /**
+   * P13 R119 / ARCH §29.3：市场复制物化（market 域编排，app 域内完成）。
+   *
+   * 流程：建 active 应用（50002 配额；source_app_id 记谱系）→ 按依赖拓扑重建表/字段 →
+   * 重建 n:n 关系（中间表由 SchemaService 生成）→ 重建功能页（schema 原样，全私有）→
+   * 演示数据逐行独立事务写入（引用按旧→新 rowId 重映射，错误行跳过并计数）。
+   * 结构阶段任一步失败 = 整体回滚（软删刚建的应用）；数据阶段失败只计数不中断（R119）。
+   */
+  async materializeListing(
+    userId: bigint,
+    input: {
+      name: string
+      description?: string | null
+      sourceAppId: bigint
+      snapshot: MarketSnapshotInput
+      demoData?: Record<string, DemoRow[]> | null
+    },
+  ): Promise<MaterializeResult> {
+    const app = await this.adminService.createMaterialized(
+      userId,
+      input.name,
+      input.description ?? null,
+      input.sourceAppId,
+    )
+    let tableCount = 0
+    let pageCount = 0
+    let rowCount = 0
+    let skippedRows = 0
+    try {
+      const order = this.orderSnapshotTables(input.snapshot)
+      for (const tableName of order) {
+        const table = input.snapshot.tables.find((item) => item.name === tableName)
+        if (!table) continue
+        // 多值 ref 字段由 createRelation 连同中间表一起重建（R117），此处跳过
+        const fields: FieldDefDto[] = table.fields
+          .filter((field) => !field.refMultiple)
+          .map((field) => ({
+            name: field.name,
+            label: field.label,
+            type: field.type,
+            required: field.required ? 1 : 0,
+            default: field.default ?? undefined,
+            enumOptions: field.enumOptions?.length ? field.enumOptions : undefined,
+            refTable: field.refTable ?? undefined,
+          }))
+        await this.schemaService.createTable(userId, app.code, {
+          name: table.name,
+          label: table.label,
+          fields,
+        })
+        tableCount++
+      }
+
+      for (const rel of input.snapshot.rels) {
+        await this.schemaService.createRelation(userId, app.code, {
+          fromTable: rel.fromTable,
+          fromField: rel.fromField,
+          toTable: rel.toTable,
+        })
+      }
+
+      for (const page of input.snapshot.pages) {
+        await this.pageService.create(userId, app.code, {
+          name: page.name,
+          route: page.route,
+          schema: page.schema,
+          genBy: page.genBy === 'ai' ? 'ai' : 'manual',
+        })
+        pageCount++
+      }
+
+      const demoData = input.demoData ?? null
+      if (demoData) {
+        const rowIdMap = new Map<string, string>()
+        for (const tableName of order) {
+          const rows = demoData[tableName]
+          if (!rows || rows.length === 0) continue
+          const table = await this.schemaService.resolveTableByName(app.id, tableName)
+          for (const row of rows) {
+            const values = this.remapRowValues(table, row.data, rowIdMap)
+            try {
+              const created = await this.dataService.createRowStandalone(app, table, values, userId)
+              rowIdMap.set(row.rowId, created.rowId)
+              rowCount++
+            } catch (error) {
+              // 演示数据逐行独立事务：业务校验失败只跳过并计数（R119），非业务异常上抛
+              if (!(error instanceof BusinessException)) throw error
+              skippedRows++
+            }
+          }
+        }
+      }
+    } catch (error) {
+      await this.adminService.remove(userId, app.code).catch(() => undefined)
+      throw error
+    }
+
+    return { ok: true, appCode: app.code, tableCount, pageCount, rowCount, skippedRows }
+  }
+
+  /** P13 R120：按 id 批量取应用 code（market 域「我的提交」回填 appCode；只读） */
+  async appCodesByIds(userId: bigint, ids: bigint[]): Promise<Array<{ id: string; code: string }>> {
+    return this.adminService.appCodesByIds(userId, ids)
+  }
+
   /** R96：userinfo 菜单动态段（active 应用 ▸ 功能页），供 auth 域拼装菜单树 */
   async getAppMenuSegments(
     userId: bigint,
@@ -152,5 +490,90 @@ export class AppFacade {
     Array<{ appCode: string; name: string; pages: Array<{ code: string; name: string }> }>
   > {
     return this.adminService.getAppMenuSegments(userId)
+  }
+
+  // ==================== P13 内部辅助 ====================
+
+  /**
+   * 表重建顺序（拓扑）：被引用的表先建（ref 字段的 refTable / n:n 关系的 toTable）。
+   * 存在环时剩余按快照原顺序追加（环内引用由 DataService 写路径的运行期校验兜底）。
+   */
+  private orderSnapshotTables(snapshot: MarketSnapshotInput): string[] {
+    const names = snapshot.tables.map((table) => table.name)
+    const deps = new Map<string, Set<string>>(names.map((name) => [name, new Set<string>()]))
+    for (const table of snapshot.tables) {
+      const bag = deps.get(table.name)
+      if (!bag) continue
+      for (const field of table.fields) {
+        if (field.refTable && field.refTable !== table.name && deps.has(field.refTable)) {
+          bag.add(field.refTable)
+        }
+      }
+    }
+    for (const rel of snapshot.rels) {
+      const bag = deps.get(rel.fromTable)
+      if (bag && rel.fromTable !== rel.toTable && deps.has(rel.toTable)) bag.add(rel.toTable)
+    }
+
+    const ordered: string[] = []
+    const resolved = new Set<string>()
+    let progressed = true
+    while (ordered.length < names.length && progressed) {
+      progressed = false
+      for (const name of names) {
+        if (resolved.has(name)) continue
+        const waiting = [...(deps.get(name) ?? [])].some((dep) => !resolved.has(dep))
+        if (waiting) continue
+        ordered.push(name)
+        resolved.add(name)
+        progressed = true
+      }
+    }
+    for (const name of names) {
+      if (!resolved.has(name)) ordered.push(name)
+    }
+    return ordered
+  }
+
+  /** 演示数据行引用重映射（旧 rowId → 新 rowId；未映射的引用（含跨表尚未创建/被跳过的行）置空） */
+  private remapRowValues(
+    table: ResolvedTable,
+    data: Record<string, unknown>,
+    rowIdMap: Map<string, string>,
+  ): Record<string, unknown> {
+    const values: Record<string, unknown> = {}
+    for (const field of table.fields) {
+      if (!Object.prototype.hasOwnProperty.call(data, field.name)) continue
+      const raw = data[field.name]
+      if (field.refMultiple) {
+        const list = Array.isArray(raw) ? raw : []
+        values[field.name] = list
+          .map((item) => rowIdMap.get(String(item)))
+          .filter((item): item is string => Boolean(item))
+        continue
+      }
+      if (field.type === 'ref') {
+        values[field.name] = typeof raw === 'string' ? (rowIdMap.get(raw) ?? null) : null
+        continue
+      }
+      values[field.name] = raw
+    }
+    return values
+  }
+
+  /** 按 `表.字段` 或应用内唯一字段名定位字段（公开总览的字段清单内查找；歧义/未命中返回 null） */
+  private locateField(
+    tables: Array<{ tableCode: string; fields: Array<{ id: string; name: string }> }>,
+    key: string,
+  ): { id: string; name: string } | null {
+    const dot = key.indexOf('.')
+    if (dot > 0) {
+      const tableCode = key.slice(0, dot)
+      const fieldName = key.slice(dot + 1)
+      const table = tables.find((item) => item.tableCode === tableCode)
+      return table?.fields.find((field) => field.name === fieldName) ?? null
+    }
+    const hits = tables.flatMap((table) => table.fields.filter((field) => field.name === key))
+    return hits.length === 1 ? hits[0] : null
   }
 }

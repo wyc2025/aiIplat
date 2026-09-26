@@ -209,6 +209,14 @@ export const ErrorCode = {
   AppActionMismatch: 50010,
   /** 发布校验未过（P12 R103：无暴露表 / 无公开 display 页 / 公开页数据源未全暴露；message 带缺项清单） */
   AppPublishInvalid: 50012,
+
+  // ========== market 域（50xxx 段续：50013 起，P13 D108/D109） ==========
+  /** 该应用已有待审或在架条目（每应用同时仅允许 1 个活跃条目，R121/D108） */
+  MarketListingConflict: 50013,
+  /** 市场条目不存在或未上架（详情/复制防探测；不暴露未上架条目存在性） */
+  MarketListingNotFound: 50014,
+  /** 提交内容不合规（演示数据超 100 行/表、快照超限或结构非法；message 带原因） */
+  MarketSubmitInvalid: 50015,
 } as const
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode]

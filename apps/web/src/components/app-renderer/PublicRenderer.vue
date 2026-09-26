@@ -79,6 +79,24 @@ const filters = reactive<Record<string, string>>({})
 
 const rowIdParam = (): string => props.rowIdParam ?? 'rowId'
 
+/**
+ * 公开端点返回的是**平铺投影**（暴露字段直接在顶层，expand 结果在 `expanded`，API §19.2）；
+ * 而渲染器与 `displayCell` 按 `DataRowView`（`row.data` / `row.expanded`）消费
+ * → 此处归一（P13 T122 浏览器匿名取证发现：未归一则 `displayCell` 读 `row.data.name` 直接抛错、表格空白）。
+ */
+function toRowView(item: Record<string, unknown>): DataRowView {
+  const { rowId, createdAt, updatedAt, expanded, ...rest } = item
+  return {
+    rowId: rowId === undefined || rowId === null ? '' : String(rowId),
+    data: rest,
+    createdAt: createdAt === undefined || createdAt === null ? '' : String(createdAt),
+    updatedAt: updatedAt === undefined || updatedAt === null ? '' : String(updatedAt),
+    ...(expanded && typeof expanded === 'object'
+      ? { expanded: expanded as Record<string, unknown> }
+      : {}),
+  }
+}
+
 function dsOf(block: DisplayBlock): DisplayDataSource {
   return schema.value.dataSources?.[block.bind] ?? {}
 }
@@ -100,7 +118,7 @@ async function loadDetail(block: DisplayBlock): Promise<void> {
     const detail = await pubAppDataDetail(props.pubCode, ds.table, rowId, {
       expand: expandOf(block.bind),
     })
-    store.row[block.bind] = detail as unknown as DataRowView
+    store.row[block.bind] = toRowView(detail)
   } catch (error) {
     store.error[block.bind] = error instanceof Error ? error.message : '数据加载失败'
   } finally {
@@ -143,7 +161,7 @@ async function loadList(block: DisplayBlock): Promise<void> {
       filter: applied,
       expand: expandOf(block.bind),
     })
-    store.rows[block.bind] = payload.list as unknown as DataRowView[]
+    store.rows[block.bind] = payload.list.map(toRowView)
   } catch (error) {
     store.error[block.bind] = error instanceof Error ? error.message : '数据加载失败'
     store.rows[block.bind] = []

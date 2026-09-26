@@ -32,7 +32,7 @@ export const CAPABILITY_MANIFEST: readonly CapabilityRow[] = [
   {
     key: 'personal',
     perms: null,
-    text: '个人账号：查或改我的昵称等资料（改需确认）、查我的套餐剩余积分。',
+    text: '个人账号：查/改我的资料（改需确认）、查套餐剩余积分。',
     tools: ['get_my_profile', 'update_my_profile', 'get_my_credits'],
   },
   {
@@ -62,7 +62,7 @@ export const CAPABILITY_MANIFEST: readonly CapabilityRow[] = [
   {
     key: 'cloud.read',
     perms: 'cloud:file:list',
-    text: '云盘查看：列云盘目录（可递归）、读文本文件（默认只回开头 2 万字符，大文件按 nextOffset 分段续读）。',
+    text: '云盘查看：列目录（可递归）、读文本文件（默认只回前 2 万字符，大文件用 nextOffset 续读）。',
     tools: ['list_cloud_files', 'read_cloud_file'],
   },
   {
@@ -74,31 +74,31 @@ export const CAPABILITY_MANIFEST: readonly CapabilityRow[] = [
   {
     key: 'cloud.delete',
     perms: 'cloud:file:delete',
-    text: '云盘删除：删除到回收站（可在回收站还原，需确认）。',
+    text: '云盘删除：删除到回收站（可还原，需确认）。',
     tools: ['delete_cloud_files'],
   },
   {
     key: 'site.file',
     perms: 'site:site:manage',
-    text: '站点文件：列站点目录、读站点文本文件、改站点页面与样式（影响线上站点，写入需确认）。',
+    text: '站点文件：列目录、读文本文件、改页面与样式（影响线上站点，写入需确认）。',
     tools: ['list_site_files', 'read_site_file', 'write_site_files'],
   },
   {
     key: 'site.article.read',
     perms: 'site:article:list',
-    text: '文章查看：按状态或栏目列**内容池**全部文章（可按发表站点筛）、读文章全文（含 markdown 正文）。',
+    text: '文章查看：按状态/栏目列**内容池**全部文章（可按站点筛）、读全文（含 markdown 正文）。',
     tools: ['list_site_articles', 'read_site_article'],
   },
   {
     key: 'site.article.create',
     perms: 'site:article:create',
-    text: '代写文章：新建文章默认草稿（用户明示「直接发布」才公开），可指定栏目、标签、封面；可从云盘 md/txt 文件导入解析后入草稿；草稿可不选站（只进内容池），发布需明确发表站点（siteIds，可多站）（需确认）。',
+    text: '代写文章：新建默认草稿（用户明示「直接发布」才公开），可指定栏目/标签/封面；可从云盘 md/txt 导入；草稿可不选站，发布需明确站点（siteIds 可多站）（需确认）。',
     tools: ['create_site_article', 'import_site_article'],
   },
   {
     key: 'site.article.update',
     perms: 'site:article:update',
-    text: '改写文章：更新已有文章的标题、正文、栏目、标签；可对正文一键排版（只排版不落库，确认后再更新）；siteIds 可整体替换发表站点（空数组 = 全站下架，文章本体保留）（需确认）。',
+    text: '改写文章：更新标题/正文/栏目/标签；可一键排版正文（只排版不落库，确认后再更新）；siteIds 可整体替换发表站点（空数组 = 全站下架，文章保留）（需确认）。',
     tools: ['update_site_article', 'format_site_article'],
   },
   {
@@ -122,13 +122,13 @@ export const CAPABILITY_MANIFEST: readonly CapabilityRow[] = [
   {
     key: 'site.comment',
     perms: 'site:comment:audit',
-    text: '评论管理：查待审评论、批量通过或驳回（单次 ≤20 条）、以作者身份回复或清除回复（审核与回复均需确认）。',
+    text: '评论管理：查待审评论、批量通过或驳回（≤20 条）、以作者身份回复或清除回复（均需确认）。',
     tools: ['list_site_comments', 'audit_site_comments', 'reply_site_comment'],
   },
   {
     key: 'site.lifecycle',
     perms: 'site:site:manage',
-    text: '站点管理：新建站点（受站点配额限制）、改标题描述与标识、启停、评论审核开关、删站（删站确认卡列明影响；文章等物理删除不可恢复，站点文件进回收站，标识立即释放）。',
+    text: '站点管理：新建站点（受配额限制）、改标题描述与标识、启停、评论审核开关、删站（确认卡列明影响，不可恢复）。',
     tools: ['create_site', 'update_site', 'delete_site'],
   },
   {
@@ -149,8 +149,27 @@ export const CAPABILITY_MANIFEST: readonly CapabilityRow[] = [
     // P12-PATCH2 T116（R114/R115）：公开面只读能力行——让模型知道「应用可公开发布」并能拿到 pubCode
     key: 'app.pub',
     perms: null,
-    text: '查数据应用公开状态：列应用、公开凭证 pubCode、公开链接与发布缺项（只读，不代发布）。',
+    text: '查数据应用公开状态：列应用、公开凭证 pubCode、公开链接与发布缺项（只读）。',
     tools: ['list_data_apps'],
+  },
+  {
+    // P13 T120（R122/D110）：公开面写三件套——暴露/发布/市场提交（合注预算已按 R123 腾挪）
+    key: 'app.expose',
+    perms: null,
+    text: '数据应用暴露：开关表/字段/展示页的公开范围（需确认）。',
+    tools: ['expose_data_app'],
+  },
+  {
+    key: 'app.publish',
+    perms: null,
+    text: '数据应用发布：暴露齐备后开启公开（匿名可访问，关闭即失效）（需确认）。',
+    tools: ['publish_data_app'],
+  },
+  {
+    key: 'app.market',
+    perms: null,
+    text: '应用市场：提交上架审核（冻结结构快照 + 可选演示数据，通过后可被复制）（需确认）。',
+    tools: ['submit_market_app'],
   },
 ]
 

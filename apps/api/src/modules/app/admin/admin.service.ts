@@ -116,6 +116,36 @@ export class AdminService {
     return { appCode: app.code, pubCode: app.pubCode, status: app.status }
   }
 
+  /**
+   * P13 R119：市场复制建应用（直接 active，占接收方配额 50002；code 冲突自动 "(1)" 照 R93；
+   * 记谱系 source_app_id）。仅供 AppFacade.materializeListing 使用，不暴露 REST 端点。
+   */
+  async createMaterialized(
+    userId: bigint,
+    name: string,
+    description: string | null,
+    sourceAppId: bigint,
+  ): Promise<AppDef> {
+    const trimmed = name.trim()
+    if (!trimmed) {
+      throw new BusinessException(ErrorCode.ParamInvalid, '应用名称不能为空')
+    }
+    await this.assertActiveQuota(userId)
+    const code = await this.uniqueCode(userId, trimmed)
+    const pubCode = await this.genPubCode()
+    return this.prisma.appDef.create({
+      data: {
+        code,
+        pubCode,
+        name: trimmed,
+        description: description?.trim() || null,
+        status: APP_STATUS_ACTIVE,
+        ownerId: userId,
+        sourceAppId,
+      },
+    })
+  }
+
   /** 我的应用列表（不分页；?status=draft 只看草稿），附统计数字（批量 groupBy，避免 N+1） */
   async list(userId: bigint, query: ListAppQueryDto) {
     const where: Prisma.AppDefWhereInput = { ownerId: userId, deletedAt: null }
@@ -258,7 +288,13 @@ export class AdminService {
       tables.filter((table) => table.isExposed === 1).map((table) => [table.name, table]),
     )
     if (exposedTableByName.size === 0) {
-      missing.push('至少需要 1 张已暴露的表')
+      // P13 R122：缺项文案带**可操作清单**（模型据此调用 expose_data_app 补齐，人类同样够用）
+      const names = tables.map((table) => table.name)
+      missing.push(
+        names.length > 0
+          ? `至少需要 1 张已暴露的表（本应用表：${names.join('、')}）`
+          : '至少需要 1 张已暴露的表（当前应用没有逻辑表）',
+      )
     }
 
     const fields = tables.length
@@ -289,7 +325,19 @@ export class AdminService {
       select: { code: true, name: true, schema: true },
     })
     if (publicPages.length === 0) {
-      missing.push('至少需要 1 个已公开的展示页（display）')
+      // 同上：列出可用 display 页（含 code），模型可用 expose_data_app(target=page) 直接公开
+      const displayPages = await this.prisma.appPage.findMany({
+        where: { appId, deletedAt: null, kind: PAGE_KIND_DISPLAY },
+        select: { code: true, name: true },
+        orderBy: [{ sort: 'asc' }, { id: 'asc' }],
+      })
+      missing.push(
+        displayPages.length > 0
+          ? `至少需要 1 个已公开的展示页（display）；可用展示页：${displayPages
+              .map((page) => `${page.name}(${page.code})`)
+              .join('、')}`
+          : '至少需要 1 个已公开的展示页（display）；当前应用没有展示页，请先新建 display 页',
+      )
     }
 
     for (const page of publicPages) {
@@ -532,6 +580,19 @@ export class AdminService {
       })
     }
     return result
+  }
+
+  /**
+   * P13 R120：按 id 批量取本用户未删应用的 code（市场「我的提交」回填 appCode 用；只读）。
+   * 返回 id 字符串 → code 的映射；非本人/已删应用不在结果中。
+   */
+  async appCodesByIds(userId: bigint, ids: bigint[]): Promise<Array<{ id: string; code: string }>> {
+    if (ids.length === 0) return []
+    const apps = await this.prisma.appDef.findMany({
+      where: { ownerId: userId, id: { in: ids }, deletedAt: null },
+      select: { id: true, code: true },
+    })
+    return apps.map((app) => ({ id: app.id.toString(), code: app.code }))
   }
 
   /** 软删过期草稿（R91：7 天未确认自动清理；cron 每日触发，可手动调用验证） */

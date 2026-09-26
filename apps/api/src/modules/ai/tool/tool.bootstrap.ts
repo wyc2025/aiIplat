@@ -3,6 +3,7 @@ import { AppFacade } from '../../app/facade/app-facade.service'
 import { CloudFacade } from '../../cloud/facade/cloud-facade.service'
 import { CreditService } from '../credit/credit.service'
 import { SiteFacade } from '../../site/facade/site-facade.service'
+import { MarketFacade } from '../../market/facade/market-facade.service'
 import { OnlineService } from '../../system/online/online.service'
 import { RoleService } from '../../system/role/role.service'
 import { UserService } from '../../system/user/user.service'
@@ -53,6 +54,10 @@ import { createAdjustPageTool } from './tools/adjust-page.tool'
 import { createConfirmDataAppTool } from './tools/confirm-data-app.tool'
 // P12-PATCH2 T116：数据应用公开面只读一件套（R114/D106；写工具归 P13）
 import { createListDataAppsTool } from './tools/list-data-apps.tool'
+// P13 T120：数据应用公开面写工具三件套（D110/R122：publish/expose 走 AppFacade，submit 走 MarketFacade）
+import { createPublishDataAppTool } from './tools/publish-data-app.tool'
+import { createExposeDataAppTool } from './tools/expose-data-app.tool'
+import { createSubmitMarketAppTool } from './tools/submit-market-app.tool'
 
 /**
  * 工具装配器：注入各域暴露的门面 Service，在模块启动时把注册表内全部工具（P12-PATCH2 起 38 个）注册到 ToolRegistry。
@@ -73,6 +78,7 @@ export class ToolBootstrap implements OnModuleInit {
     private readonly siteFacade: SiteFacade,
     private readonly cloudFacade: CloudFacade,
     private readonly appFacade: AppFacade,
+    private readonly marketFacade: MarketFacade,
   ) {}
 
   private readonly logger = new Logger(ToolBootstrap.name)
@@ -125,6 +131,10 @@ export class ToolBootstrap implements OnModuleInit {
     this.registry.register(createConfirmDataAppTool(this.appFacade))
     // P12-PATCH2 T116：数据应用公开面只读一件套（零参数、零写副作用；不代发布）
     this.registry.register(createListDataAppsTool(this.appFacade))
+    // P13 T120：公开面写工具三件套（D110：publish/expose 经 AppFacade，submit 经 MarketFacade；全 write 走确认卡）
+    this.registry.register(createPublishDataAppTool(this.appFacade))
+    this.registry.register(createExposeDataAppTool(this.appFacade))
+    this.registry.register(createSubmitMarketAppTool(this.marketFacade))
 
     // P6 T77：工具归组校验（R70）——孤儿工具会让组路由漏发工具，启动即告警
     this.assertToolGroups()

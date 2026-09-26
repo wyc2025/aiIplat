@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 import { AppFacadeModule } from '../../app/facade/app-facade.module'
 import { CloudModule } from '../../cloud/cloud.module'
+import { MarketFacadeModule } from '../../market/facade/market-facade.module'
 import { CreditModule } from '../credit/credit.module'
 import { SiteModule } from '../../site/site.module'
 import { OnlineModule } from '../../system/online/online.module'
@@ -26,6 +27,7 @@ import { ToolRegistry } from './tool.registry'
     SiteModule,
     CloudModule,
     AppFacadeModule,
+    MarketFacadeModule,
   ],
   providers: [ToolRegistry, ToolBootstrap],
   exports: [ToolRegistry],

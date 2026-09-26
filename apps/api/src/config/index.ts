@@ -5,6 +5,7 @@ import uploadConfig from './upload.config'
 import siteConfig from './site.config'
 import aiConfig from './ai.config'
 import appConfig from './app.config'
+import marketConfig from './market.config'
 
 /** ConfigModule.forRoot({ load }) 统一注册入口 */
 export const configLoaders = [
@@ -15,4 +16,5 @@ export const configLoaders = [
   siteConfig,
   aiConfig,
   appConfig,
+  marketConfig,
 ]

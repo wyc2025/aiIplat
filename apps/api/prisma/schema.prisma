@@ -889,3 +889,46 @@ model AppAttachmentRef {
   @@index([appId, tableId, recordId], map: "idx_attref_record")
   @@map("app_attachment_ref")
 }
+
+// ==================== P13：应用市场（D107 快照式） ====================
+
+/// 应用市场条目（D107：提交那一刻物化结构快照；审核与复制都只针对快照，源应用后续变更不影响在架版本）。
+/// 状态机 pending → approved | rejected → delisted（D108）；「同应用 1 个活跃条目」为应用层校验（50013）。
+model MarketListing {
+  id            BigInt    @id @default(autoincrement())
+  /// 市场条目编号（对外展示用；slug 化 + 4 位随机，全局唯一）
+  code          String    @unique @map("code") @db.VarChar(64)
+  /// 发布者（逻辑关联 sys_user，禁 JOIN）
+  publisherId   BigInt    @map("publisher_id")
+  /// 快照时冗余昵称（防用户改名影响在架卡片）
+  publisherName String?   @map("publisher_name") @db.VarChar(50)
+  /// 谱系：来源应用 id（副本的 app_def.source_app_id 同样记它，照 R93/ARCH §28.8）
+  sourceAppId   BigInt    @map("source_app_id")
+  /// 快照时冗余（与源应用解耦）
+  name          String    @map("name") @db.VarChar(50)
+  description   String?   @map("description") @db.VarChar(200)
+  /// 结构快照（R117）：{ version, tables:[{name,label,fields:[…]}], rels:[…], pages:[…] }
+  snapshot      Json      @map("snapshot")
+  /// 演示数据（R118）：{ 表名: [ { 字段: 值 } ] }，attachment 字段值已置 null
+  demoData      Json?     @map("demo_data")
+  /// 1 = 含演示数据（列表卡片标记，免解析 JSON）
+  hasDemo       Int       @default(0) @map("has_demo") @db.TinyInt
+  /// pending / approved / rejected / delisted
+  status        String    @default("pending") @map("status") @db.VarChar(10)
+  /// 审核意见（拒绝必填，D108）
+  reviewNote    String?   @map("review_note") @db.VarChar(500)
+  /// 审核人（逻辑关联 sys_user）
+  reviewerId    BigInt?   @map("reviewer_id")
+  reviewedAt    DateTime? @map("reviewed_at")
+  /// 上架时间（approve 时写入，浏览列表按它倒序）
+  listedAt      DateTime? @map("listed_at")
+  delistedAt    DateTime? @map("delisted_at")
+  /// 复制次数（元数据卡片展示）
+  copyCount     Int       @default(0) @map("copy_count")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@index([status, listedAt], map: "idx_market_status_listed")
+  @@index([publisherId, sourceAppId, status], map: "idx_market_pub_app_status")
+  @@map("market_listing")
+}
