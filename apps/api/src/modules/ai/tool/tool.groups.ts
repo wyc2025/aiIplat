@@ -54,7 +54,10 @@ export const TOOL_GROUPS: Record<ToolGroupName, readonly string[]> = {
   siteLifecycle: ['create_site', 'update_site', 'delete_site'],
   /** 云盘（站点之外的云盘文件管理） */
   cloud: ['list_cloud_files', 'read_cloud_file', 'write_cloud_file', 'move_cloud_files', 'delete_cloud_files'],
-  /** 数据应用（P11 T105：应用/表/关系/功能页，属主自服务，全 write 走确认卡） */
+  /**
+   * 数据应用（P11 T105：应用/表/关系/功能页，属主自服务，全 write 走确认卡；
+   * P12-PATCH2 T116 增只读 list_data_apps——公开状态与 pubCode 查询）
+   */
   app: [
     'create_data_app',
     'add_table',
@@ -63,6 +66,7 @@ export const TOOL_GROUPS: Record<ToolGroupName, readonly string[]> = {
     'gen_admin_page',
     'adjust_page',
     'confirm_data_app',
+    'list_data_apps',
   ],
 }
 
@@ -91,8 +95,11 @@ export const KEYWORD_TO_GROUPS: Record<string, readonly ToolGroupName[]> = {
   '站点|建站|网站|个人网站|描述|简介|删站|删除站点|新建站点|开通站点': ['siteLifecycle', 'siteFile'],
   // 云盘：站点之外的云盘文件管理
   '云盘|文件|目录|文件夹|整理|移动|删除文件|上传|下载|笔记|文档|我的文件': ['cloud'],
-  // 数据应用（P11 R98）：建应用/建表/字段/关系/管理页面
-  '应用|数据应用|建应用|建表|数据表|表结构|字段|关系|管理页|功能页|后台|记账|书单|库存|相册': ['app'],
+  // 数据应用（P11 R98）：建应用/建表/字段/关系/管理页面；
+  // P12-PATCH2 T116/R114 补公开面词根——纪律：**只用复合词**（「发布」等泛词已被 siteCms 占用，不得抢命中）
+  '应用|数据应用|建应用|建表|数据表|表结构|字段|关系|管理页|功能页|后台|记账|书单|库存|相册|公开应用|应用公开|公开链接|公开凭证|公开访问|公开数据|对外展示|外部展示|展示页|发布应用|pubcode': [
+    'app',
+  ],
   // 系统管理：在线用户 / 用户 / 角色
   '在线|踢人|下线|用户|成员|角色|权限|账号': ['system'],
 }

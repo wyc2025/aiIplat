@@ -125,6 +125,26 @@ export class AppFacade {
     return { ok: true, changed: result.changed }
   }
 
+  /**
+   * R114（P12-PATCH2 T116）：AI 列应用与公开状态（工具 `list_data_apps`）——
+   * 返回 appCode / name / status / isPublic / pubCode / pubUrl / missing（发布缺项）。
+   * **只读**：发布与暴露开关的写工具按 D106 归 P13，本方法不代发布。
+   */
+  async listDataApps(userId: bigint): Promise<{
+    ok: true
+    apps: Array<{
+      appCode: string
+      name: string
+      status: string
+      isPublic: number
+      pubCode: string
+      pubUrl: string
+      missing: string[]
+    }>
+  }> {
+    return { ok: true, apps: await this.adminService.listWithPubState(userId) }
+  }
+
   /** R96：userinfo 菜单动态段（active 应用 ▸ 功能页），供 auth 域拼装菜单树 */
   async getAppMenuSegments(
     userId: bigint,

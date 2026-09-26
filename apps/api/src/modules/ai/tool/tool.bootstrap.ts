@@ -51,13 +51,16 @@ import { createSetRelationTool } from './tools/set-relation.tool'
 import { createGenAdminPageTool } from './tools/gen-admin-page.tool'
 import { createAdjustPageTool } from './tools/adjust-page.tool'
 import { createConfirmDataAppTool } from './tools/confirm-data-app.tool'
+// P12-PATCH2 T116：数据应用公开面只读一件套（R114/D106；写工具归 P13）
+import { createListDataAppsTool } from './tools/list-data-apps.tool'
 
 /**
- * 工具装配器：注入各域暴露的门面 Service，在模块启动时把注册表内全部工具（P11 起 37 个）注册到 ToolRegistry。
+ * 工具装配器：注入各域暴露的门面 Service，在模块启动时把注册表内全部工具（P12-PATCH2 起 38 个）注册到 ToolRegistry。
  * 新增工具 = tools/ 下加一个工厂 + 在此处 register + 在 tool.groups.ts 归组（R70）。
  * 域门面纪律（见 ARCHITECTURE §12.3）：handler 只注入域 exports 的 Service，零跨域 import 内部实现——
  * 站点系列（文件三件套 + create_site + CMS 七件套 + 评论三件套 + 生命周期两件套）只注入 SiteFacade；
- * 云盘五件套只注入 CloudFacade（P5 T72 起）；数据应用七件套只注入 AppFacade（P11 T105）。
+ * 云盘五件套只注入 CloudFacade（P5 T72 起）；
+ * 数据应用八件套只注入 AppFacade（P11 T105 七件套 + P12-PATCH2 T116 只读 list_data_apps）。
  */
 @Injectable()
 export class ToolBootstrap implements OnModuleInit {
@@ -120,6 +123,8 @@ export class ToolBootstrap implements OnModuleInit {
     this.registry.register(createGenAdminPageTool(this.appFacade))
     this.registry.register(createAdjustPageTool(this.appFacade))
     this.registry.register(createConfirmDataAppTool(this.appFacade))
+    // P12-PATCH2 T116：数据应用公开面只读一件套（零参数、零写副作用；不代发布）
+    this.registry.register(createListDataAppsTool(this.appFacade))
 
     // P6 T77：工具归组校验（R70）——孤儿工具会让组路由漏发工具，启动即告警
     this.assertToolGroups()

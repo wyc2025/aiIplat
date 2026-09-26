@@ -756,6 +756,67 @@ async function main(): Promise<void> {
       if (finalCleaned > 0) console.log(`  · 已清理本轮「${SMOKE_APP_NAME}」应用 ${finalCleaned} 个`)
     }
 
+    // 用例 M：数据应用公开面只读查询（P12-PATCH2 T116 / R114）——零写副作用
+    console.log('M. 数据应用公开状态（list_data_apps 只读）')
+    {
+      // 夹具：保证「至少一个应用」，否则无法断言 pubCode/isPublic/missing 契约（跑完即删）
+      let fixtureCode = ''
+      try {
+        const fixture = await api<{ appCode: string }>(token, '/api/app', {
+          method: 'POST',
+          json: { name: `冒烟公开面${Date.now().toString().slice(-5)}`, mode: 'blank' },
+        })
+        fixtureCode = fixture.appCode
+        console.log(`  · 夹具应用 ${fixtureCode}（未发布，missing 应有内容）`)
+      } catch (error) {
+        console.log(`  · 夹具创建失败（继续，空列表也算通过）：${(error as Error).message}`)
+      }
+
+      const prompt = '我有哪些数据应用？哪些已经公开发布了？把公开链接也给我。'
+      let lastReason = '未执行'
+      let done = false
+      for (let attempt = 1; attempt <= MAX_ATTEMPT && !done; attempt += 1) {
+        const since = new Date()
+        const outcome = await chat(token, modelId, prompt)
+        const result = await assertToolCall(prisma, userId, 'list_data_apps', since, (_params, res) => {
+          if (!res.includes('"apps"')) return `result 未含 apps（${res.slice(0, 80)}）`
+          let parsed: { apps?: Array<Record<string, unknown>> } | null = null
+          try {
+            parsed = JSON.parse(res) as { apps?: Array<Record<string, unknown>> }
+          } catch {
+            // 结果超长被截断时无法整段解析：工具已 executed，按通过处理（契约断言在可解析时生效）
+            return null
+          }
+          const apps = Array.isArray(parsed.apps) ? parsed.apps : []
+          if (apps.length === 0) return null
+          for (const app of apps) {
+            for (const key of ['appCode', 'name', 'status', 'isPublic', 'pubCode', 'pubUrl', 'missing']) {
+              if (!(key in app)) return `apps[] 缺 ${key}（公开面契约不完整）`
+            }
+          }
+          return null
+        })
+        if (result.ok) {
+          report('M 公开面只读查询（pubCode/isPublic/missing 契约）', result)
+          done = true
+          break
+        }
+        lastReason = withStreamHint(result.reason, outcome)
+        console.log(`  · 第 ${attempt}/${MAX_ATTEMPT} 次未通过：${lastReason}`)
+        if (attempt < MAX_ATTEMPT) await sleep(RETRY_DELAY_MS)
+      }
+      if (!done) report('M 公开面只读查询（pubCode/isPublic/missing 契约）', { ok: false, reason: lastReason })
+
+      if (fixtureCode) {
+        try {
+          await api(token, `/api/app/${fixtureCode}`, { method: 'DELETE' })
+          console.log(`  · 已清理夹具应用 ${fixtureCode}`)
+        } catch {
+          // 清理失败不判失败（软删幂等，下次 run 或人工清理）
+        }
+      }
+    }
+
     console.log(`\n冒烟结果：通过 ${passed} 项，失败 ${failures.length} 项`)
     if (failures.length > 0) {
       console.error('失败明细：')

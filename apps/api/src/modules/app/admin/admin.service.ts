@@ -488,6 +488,52 @@ export class AdminService {
     return { field: field.name, isExposed: flag }
   }
 
+  /**
+   * R114（P12-PATCH2 T116）：列当前用户未删应用（含公开态 + 公开凭证 + 发布缺项），
+   * 供 AI 只读工具 `list_data_apps` 经 AppFacade 消费。draft 也列出（status 标明）；
+   * `missing` 复用 collectPublishMissing（与 `GET /app/:code/pub-config` 同源逻辑）；
+   * 已发布的应用不再计算缺项（公开态下必为空，省一次全表扫描）。
+   * **只读**：不代发布、不改任何状态。
+   */
+  async listWithPubState(userId: bigint): Promise<
+    Array<{
+      appCode: string
+      name: string
+      status: string
+      isPublic: number
+      pubCode: string
+      pubUrl: string
+      missing: string[]
+    }>
+  > {
+    const apps = await this.prisma.appDef.findMany({
+      where: { ownerId: userId, deletedAt: null },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      select: { id: true, code: true, name: true, status: true, isPublic: true, pubCode: true },
+    })
+    const result: Array<{
+      appCode: string
+      name: string
+      status: string
+      isPublic: number
+      pubCode: string
+      pubUrl: string
+      missing: string[]
+    }> = []
+    for (const app of apps) {
+      result.push({
+        appCode: app.code,
+        name: app.name,
+        status: app.status,
+        isPublic: app.isPublic,
+        pubCode: app.pubCode,
+        pubUrl: this.pubUrl(app.pubCode),
+        missing: app.isPublic === 1 ? [] : await this.collectPublishMissing(app.id),
+      })
+    }
+    return result
+  }
+
   /** 软删过期草稿（R91：7 天未确认自动清理；cron 每日触发，可手动调用验证） */
   async cleanExpiredDrafts(): Promise<{ scanned: number; cleaned: number }> {
     const ttlDays = this.config.get<number>('app.draftTtlDays', 7)

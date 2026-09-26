@@ -145,6 +145,13 @@ export const CAPABILITY_MANIFEST: readonly CapabilityRow[] = [
       'confirm_data_app',
     ],
   },
+  {
+    // P12-PATCH2 T116（R114/R115）：公开面只读能力行——让模型知道「应用可公开发布」并能拿到 pubCode
+    key: 'app.pub',
+    perms: null,
+    text: '查数据应用公开状态：列应用、公开凭证 pubCode、公开链接与发布缺项（只读，不代发布）。',
+    tools: ['list_data_apps'],
+  },
 ]
 
 /** 权限判定函数（由 SystemPromptService 注入 PermissionService 实现） */

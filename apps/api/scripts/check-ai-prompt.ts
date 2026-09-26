@@ -164,6 +164,17 @@ function main(): void {
     `groups=${commentRoute.groups.join(',')}`,
   )
 
+  // P12-PATCH2 T116（R114）：数据应用公开面词根（精准复合词，不得抢 siteCms 的「发布」等泛词）
+  const appPubRoute = resolveToolGroups('我有哪些数据应用？哪个已经公开发布了？')
+  const appPubInjected = inject(permittedAll, appPubRoute.groups, appPubRoute.fallback)
+  check(
+    '「数据应用/公开发布」命中 app 组且含 list_data_apps',
+    !appPubRoute.fallback &&
+      appPubRoute.groups.includes('app') &&
+      appPubInjected.includes('list_data_apps'),
+    `groups=${appPubRoute.groups.join(',')} 下发 ${appPubInjected.length}/${names.length}`,
+  )
+
   const weatherRoute = resolveToolGroups('今天天气怎么样')
   check(
     '无命中 → 全量兜底',
