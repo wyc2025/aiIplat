@@ -2582,6 +2582,20 @@ AI 创建 agent 化 → P14；行级操作审计（data 外追加 diff 列）。
 - 段位起点 **50001**（50000 为通用内部错误）；端点侧同表见 API §18.3。
 - 本段**无 50011**（P11 封顶 50010）；P12 续用 50012（发布校验未过），见 §28。
 
+### 27.11 公开面 AI 闭环（P12-PATCH2 T116，D106 / R114~R116）
+
+> 来源：走查遗留 31（「站点读不到应用表 / 自定义表无对外接口」引发的 AI 侧缺口）+ `docs/P12/PRD-P12-PATCH2-AI公开面闭环.md`。
+
+- **根因**：P12 已交付公开接口，但 AI 侧三缺——能力清单只述管理侧、app 工具返回不含 `pubCode`、站点契约 README 无公开接口清单 → 模型遇「对外展示」只能改道站点并给出冲突答复。
+- **只读闭环（本期）**：新增工具 `list_data_apps`（**read / 零参数 / perms 留空**）→ `{ ok, apps: [{ appCode, name, status, isPublic, pubCode, pubUrl, missing[] }] }`；
+  - 取数经 **AppFacade.listDataApps → AdminService.listWithPubState**（铁律 6：AI 域不直读 app 表）；`missing` 复用 `collectPublishMissing`（与 `pub-config` 同源，已发布应用跳过计算）；
+  - **不代发布**：`missing` 非空时模型只做引导（去应用中心「公开」按缺项补齐）；**发布/暴露写工具按 D106 归 P13**（避免与市场状态机二次重构）；
+  - 分组：`TOOL_GROUPS.app` 增该工具；`KEYWORD_TO_GROUPS` 的 app 组补**复合词**（公开应用 / 公开链接 / 公开凭证 / 公开访问 / 公开数据 / 对外展示 / 外部展示 / 展示页 / 发布应用 / pubcode）——**不抢 siteCms 的泛词**；
+  - 能力清单新增 `app.pub` 行（≤50 字，工具总数 **37 → 38**，能力行 18 → 19）；通用版手册**一字未改**；
+  - 站点契约 README 三模板（default / card / portfolio）增「六、数据应用公开接口」节：前置条件（发布 ∧ 表·字段暴露 ∧ display 页公开，缺一 40400）、五端点清单、fetch 示例（`size` ≤50 / `expand` ≤1 层 / `filter=字段:eq|contains:值`）、错误口径（40400 / 40001 / 42900）、只读边界，并显式声明**该节是「相对路径纪律」的唯一例外**（公开面挂在平台根 `/api/pub/app/`，须用绝对路径）。
+- **验证**：`pnpm check:ai` **17/17**（新增「数据应用/公开发布 → app 组且含 list_data_apps」路由断言）；`pnpm smoke:ai` **6/6**（F/I/J/K/L 零回归 + **M 只读用例**通过，并清理夹具应用）；新建站点实测 README 已含该节（公开取回 4.7KB，含接口清单与例外说明）。
+- **接缝**：站点内嵌应用数据的服务端语义（模板标签 / 绑定 UI / 联动提示）仍为挂账（D99 不建 `app_binding`），随 P13+ 设计。
+
 ## 28. 数据应用 B 侧（公开与展示）（P12，增补并入）
 
 > 来源：`docs/P12/ARCHITECTURE-P12-增补.md`（并入本节）+ `docs/P12/PRD-P12-PATCH1-可视化页编辑器.md`（T115，前端零后端改动）。
