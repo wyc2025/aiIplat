@@ -1387,7 +1387,7 @@ system 动态追加（不计手册 2000 字帽，上限 20 条，R84）：
 | **50012**                                     | 发布校验未过（message 带缺项） | R103                                          |
 | 40400 / 40001 / 42900 / 50009 / 50001 / 50004 | 复用                           | 防探测 / 参数 / 限流 / 护栏 / 属主 / 页面校验 |
 
-50xxx 段用至 50012；30xxx（30021 封顶）、40xxx（40120 封顶）零新增。
+50xxx 段用至 50012（**P13 续用 50013~50015，见 §20.3**）；30xxx（30021 封顶）、40xxx（40120 封顶）零新增。
 
 ### 19.4 配置登记（§18.5 app 配置组追加）
 
@@ -1406,3 +1406,70 @@ system 动态追加（不计手册 2000 字帽，上限 20 条，R84）：
 | DB        | +0 表 +4 列            | ARCHITECTURE §28.2                                                                   |
 | AI 工具   | 0 新增（37 不变）      | `pnpm check:ai` 16/16 已复验；**P12-PATCH2 T116 后增只读 1 个 → 38**（§18.4 追加行） |
 | 前端依赖  | +0                     | PublicRenderer 复用 app-renderer 既有资产                                            |
+
+---
+
+## 20. P13：应用市场（快照式发布 / 审核 / 复制）
+
+> 来源：`docs/P13/API-P13-增补.md`（并入本节）。编号：D107~~D111 / R117~~R123 / T117~~T123。
+> 增量：**HTTP 端点 +7 / 错误码 +3（50013~~50015）/ AI 工具 38→41 / 零新依赖 / +1 表**。
+> 提交/浏览/复制 = 登录态（同云盘属主口径）；审核 = `market:review` 权限 + @OperationLog；**无匿名端点**（D111）。
+
+### 20.1 端点（+7）
+
+**用户侧（`/api/market`，登录态，无 @RequirePermission）**
+
+| 方法 | 路径                      | 说明                                                                                                                                                                               |
+| ---- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST | `/api/market/submissions` | body `{ appCode, withDemoData? }`；提交即物化结构快照（R117/R118）；重复活跃条目 **50013**；演示数据超限 **50015**；成功 `{ ok, listingCode, status: 'pending' }`                  |
+| GET  | `/api/market/mine`        | 我的提交（含 pending/approved/rejected/delisted 全状态，时间倒序；含 `appCode` 回填 + 快照摘要 + `reviewNote`）                                                                    |
+| GET  | `/api/market/list`        | 市场列表：approved 且未 delisted，分页（`page` / `pageSize` ≤50，默认 12），item `{ code, name, description, publisherName, tableCount, pageCount, hasDemo, copyCount, listedAt }` |
+| GET  | `/api/market/:code`       | 条目详情（元数据卡片 + 结构摘要 `tables[]`/`pages[]`）；不存在/未上架 → **50014**                                                                                                  |
+| POST | `/api/market/:code/copy`  | 复制：物化为接收方新应用（R119）；条目不可复制 **50014**；配额满 **50002**；成功 `{ appCode, tableCount, pageCount, rowCount, skippedRows }`                                       |
+
+**审核侧（`/api/market/review`，`market:review` + @OperationLog）**
+
+| 方法 | 路径                      | 说明                                                                                                                                                           |
+| ---- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET  | `/api/market/review/list` | 审核列表（含快照摘要：表/页清单）。`?status=pending`（默认，FIFO 待审）/ `approved`（在架，供下架）；item 含 `id`（审核动作用）                                |
+| POST | `/api/market/review/:id`  | body `{ action: 'approve'\|'reject'\|'delist', note? }`；reject 必填 note（缺 → 40001）；approve 写 `listed_at`；delist 写 `delisted_at`；状态不可执行 → 40001 |
+
+### 20.2 AI 工具（+3，write 级，工具总数 38 → 41）
+
+| 工具                | parameters                                                       | 成功返回要点                                                                                                               | risk  |
+| ------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ----- |
+| `publish_data_app`  | `{ appCode, isPublic }`                                          | `{ ok, isPublic, pubCode?, pubUrl?, missing? }`（开启未过 R103 → **ok:false + missing[]**，不抛错，供模型按缺项补 expose） | write |
+| `expose_data_app`   | `{ appCode, target: 'table'\|'field'\|'page', name, isExposed }` | `{ ok, target, name, isExposed }`（field 支持 `表.字段` 或应用内唯一字段名；page 非 display → 50004）                      | write |
+| `submit_market_app` | `{ appCode, withDemoData? }`                                     | `{ ok, listingCode, status: 'pending' }`（50013/50015）                                                                    | write |
+
+- 三工具 handler 全经 Facade（AppFacade / MarketFacade），perms 空（属主自服务），关键词 app 组**精准复合词**（应用市场/市场审核/提交市场/发布到市场/上架应用/市场条目/公开发布/暴露，不抢 siteCms）。
+- **模型闭环**：`list_data_apps`（读状态与缺项）→ `expose_data_app` 补齐 → `publish_data_app` → `submit_market_app`；`collectPublishMissing` 文案带可操作清单（表名 / 展示页 `名称(code)`）使闭环可自走通。
+- `check:ai` 断言 17→18 项（「应用市场」路由样例）；`smoke:ai` 新增 **N 用例**（expose → publish → submit 顺序断言 + `market_listing` 落 pending）。
+- 手册：能力清单 +3 行（`app.expose`/`app.publish`/`app.market`）；**合注按 R123 腾挪**（精简既有能力行与手册枚举后落地 1987/2000，通用版 982/1000、能力清单 954/1200）。
+
+### 20.3 错误码（+3）
+
+| 码    | 文案                     | 场景                                     |
+| ----- | ------------------------ | ---------------------------------------- |
+| 50013 | 该应用已有待审或在架条目 | 重复提交（message 带已有条目编号与状态） |
+| 50014 | 市场条目不存在或未上架   | 详情/复制防探测（未登录另行 401）        |
+| 50015 | 提交内容不合规           | 演示数据超 100 行/表、快照超限/结构非法  |
+
+复用：50001（属主）/ 50002（配额）/ 50004（页面校验）/ 50012（发布缺项）。50xxx 用至 50015；30xxx / 40xxx 零新增。
+
+### 20.4 配置登记（新增 market 组，`src/config/market.config.ts`，env 前缀 `MARKET_*`）
+
+`market.demoMaxRowsPerTable=100` / `market.snapshotMaxBytes=262144`
+
+### 20.5 编号登记
+
+| 系列      | 本期使用                | 说明                                                  |
+| --------- | ----------------------- | ----------------------------------------------------- |
+| 决策      | D107~D111               | PRD-P13 §2                                            |
+| 规则      | R117~R123               | PRD-P13 §3                                            |
+| 任务      | T117~T123               | 见 PROGRESS「P13 任务拆解」（含 T122 = P12 尾巴收尾） |
+| HTTP 端点 | +7                      | §20.1                                                 |
+| 错误码    | +3（50013~50015）       | §20.3                                                 |
+| DB        | +1 表（market_listing） | ARCHITECTURE §29.2                                    |
+| AI 工具   | +3（38→41）             | §20.2；`check:ai` 18/18 + smoke N 用例                |
+| 前端依赖  | +0                      | 复用卡片流/抽屉/表单既有资产                          |

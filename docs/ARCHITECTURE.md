@@ -373,7 +373,7 @@ apps/api/src/
 
 ---
 
-## 5. 数据库设计（sys_ 前缀为 P1 底座；P2a 新增 7 张 ai_ 表；P3 新增 3 张 cloud_ 表；P4a 新增 6 张 site_ 表；**P4e 新增 1 张 `site_quota` 表并解除 `site_site.user_id` 唯一索引**；**P11 新增 7 张 app\_ 表，见 §27.2**）
+## 5. 数据库设计（sys_ 前缀为 P1 底座；P2a 新增 7 张 ai_ 表；P3 新增 3 张 cloud_ 表；P4a 新增 6 张 site_ 表；**P4e 新增 1 张 `site_quota` 表并解除 `site_site.user_id` 唯一索引**；**P11 新增 7 张 app\_ 表，见 §27.2**；**P12 增 4 列，见 §28.2**；**P13 新增 1 张 `market_listing` 表（`market_` 前缀），见 §29.2**）
 
 > Prisma model 用 PascalCase + `@@map("sys_user")`，字段 camelCase + `@map("user_name")`。以下为数据库层结构。时间字段统一 `created_at / updated_at`，软删除用 `deleted_at`。
 >
@@ -688,8 +688,9 @@ apps/api/src/
 
 ## 6. 域边界纪律与微服务演进
 
-1. 表名域前缀：`sys_`（system）、`cloud_`、`site_`、`ai_`
-2. 禁止跨域 JOIN、禁止跨域 import 对方模块内部文件；域间协作只能通过对方暴露的 Service
+1. 表名域前缀：`sys_`（system）、`cloud_`、`site_`、`ai_`、`app_`、`market_`
+2. 禁止跨域 JOIN、禁止跨域 import 对方模块内部文件；**域间协作只许经对方域的「门面」（`apps/api/src/modules/<域>/facade/`，如 CloudFacade / SiteFacade / AppFacade / MarketFacade）**；
+   `gateway/`（`apps/api/src/gateway/`）**只放横切关注点**（认证/鉴权/统一响应/异常过滤/操作日志），不放业务门面（P11 走查 W1 修订，2026-09-26 用户拍板）
 3. 演进路径：`apps/api` 单体 → 某域需要独立部署时，整个域文件夹平移为 `apps/xxx` 服务，`gateway/` 层平移为 `apps/gateway`，共享逻辑下沉 `packages/`
 4. 第一期不建 apps/gateway，不做服务拆分
 
@@ -884,6 +885,12 @@ P11 增补（app 配置组，见 `apps/api/src/config/app.config.ts`，§27.8）
 | app-clean.core.ts | api/src/modules/app/admin | 应用生命周期清理纯函数核心（softDeleteApp / cleanExpiredDraftsCore / purgeDeletedAppsCore）；AdminService（cron）与手动脚本 `clean:app` 共用 | 已建（T101） |
 | AdminRenderer | web/src/components/app-renderer | 功能页渲染引擎（filterBar/table/form/detail 四型区块 + 数据源与动作接线 + ref 候选/展开）；配套 `FieldInput.vue` 按字段类型出控件 | 已建（T106） |
 | app 前端同源常量 | web/src/views/app/utils/schema.ts | 字段类型七类中文名 / 区块字段 DSL 解析（parseFieldSpec）/ 单元格展示（displayCell）/ 页面模板（pageSchemaTemplate）；与后端 `schema.constants.ts`、`page.builder.ts` 同源副本 | 已建（T106） |
+| AppFacade（P13 扩展） | api/src/modules/app/facade/app-facade.service.ts | 市场协同四件套 + 复制物化：`exportStructure`（结构导出）/ `readDemoRows`（演示数据读取，attachment 置 null）/ `setPublic`（未过 R103 回喂缺项而非抛错）/ `setExposure`（table·field·page 三档解析）/ `materializeListing`（拓扑建表 → 关系 → 页面 → 演示数据逐行独立事务 + 引用重映射 + 失败整体回滚；§29.3） | 已建（T118/T120） |
+| AdminService.createMaterialized / appCodesByIds | api/src/modules/app/admin/admin.service.ts | 复制建应用（active + source_app_id + 配额 50002）与 id→code 批量回填（市场「我的提交」用）；均为 P13 新增只读/写方法 | 已建（T118/T121） |
+| DataService.snapshotRows / createRowStandalone | api/src/modules/app/data/data.service.ts | 快照导出读取（多值 ref 回填 + attachment 置 null + 超限标记 truncated）与单行独立事务写入（复制演示数据用） | 已建（T118） |
+| MarketFacade | api/src/modules/market/facade | market 域门面（`submitMarketApp`）；ai 域工具唯一入口，market 域零跨域 import（§29.1） | 已建（T120） |
+| snapshot-marshal.core.ts | api/src/modules/market/snapshot | 市场快照/演示数据**手写结构校验与序列化**（入库·出库双向；非法 50015，不静默修补）；纯函数零 Nest 依赖 | 已建（T118） |
+| market 前端资产 | web/src/api/market、web/src/views/market | 市场 API 客户端 + 应用市场页（卡片流/详情抽屉/复制）+ 市场审核页（待审/在架双标签、拒绝必填理由） | 已建（T121） |
 
 ### Redis Key 增补约定（写入 RedisKey 常量）
 
@@ -2580,7 +2587,7 @@ AI 创建 agent 化 → P14；行级操作审计（data 外追加 diff 列）。
 | 50010 | 动作与页面定义不符（action 未在 schema 声明）     | AI 工具回喂；前端提示刷新页面 schema |
 
 - 段位起点 **50001**（50000 为通用内部错误）；端点侧同表见 API §18.3。
-- 本段**无 50011**（P11 封顶 50010）；P12 续用 50012（发布校验未过），见 §28。
+- 本段**无 50011**（P11 封顶 50010）；P12 续用 **50012**（发布校验未过，§28）；P13 续用 **50013~50015**（市场域，§29.7）。
 
 ### 27.11 公开面 AI 闭环（P12-PATCH2 T116，D106 / R114~R116）
 
@@ -2696,3 +2703,148 @@ cloud 域零改动；site 域零改动；不新建反向 Facade（AppRefModule �
 
 - `is_public` 只是「自助公开」开关；P13 市场发布 = 独立状态机（审核中/已上架/已下架）+ 快照投影（D103），**不复用 is_public 做审核态**。
 - `pub_code` / `source_app_id` P11 已就位；市场复制产生的副本 `is_public=0` 起步，复制不携带公开态。
+
+---
+
+## 29. P13：应用市场（快照式发布 / 审核 / 复制）
+
+> 来源：`docs/P13/PRD-P13-MARKETPLACE.md` / `ARCHITECTURE-P13-增补.md` / `API-P13-增补.md`（并入 §29 / API §20）。
+> 编号：D107~~D111 / R117~~R123 / T117~T123。**零新依赖；+1 域（market）+1 表；AI 工具 38→41**。
+> 一句话：提交即物化结构快照 → admin 人工审核 → 复制者一键物化为自有应用（副本全私有起步）。
+
+### 29.1 域结构（apps/api/src/modules/market/）
+
+| 子目录      | 职责                                                                 | 关键类                                                                                                                                                |
+| ----------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `listing/`  | 提交（快照物化）/ 我的提交 / 浏览列表 / 详情 / 复制编排              | `ListingService`、`MarketController`（`/market`，登录属主口径）                                                                                       |
+| `review/`   | admin 审核（待审/在架列表、通过、拒绝、下架）                        | `ReviewService`、`ReviewController`（`/market/review`，`market:review` + @OperationLog）                                                              |
+| `snapshot/` | 快照结构与演示数据的**纯函数**物化 ⇄ 序列化 + 手写结构校验（零依赖） | `snapshot.ts`（类型 + `buildSnapshot`）、`snapshot-marshal.core.ts`（`parseSnapshot` / `serializeSnapshot` / `assertSnapshotSize` / `parseDemoData`） |
+| `facade/`   | MarketFacade（ai 域工具用）                                          | `MarketFacade` / `MarketFacadeModule`                                                                                                                 |
+
+- **market 域零跨域 import**：结构导出 / 演示数据读取 / 复制物化全部经 `AppFacade`（新增写方法）；审核与浏览只读 market 自有表，无跨域 JOIN。
+- 装配：`MarketDomainModule`（imports Listing/Review/MarketFacade，exports 门面）注册进 `app.module.ts`；`ListingModule` → `AppFacadeModule` + `UserModule`（发布者昵称快照）；`ToolModule` → `MarketFacadeModule`。
+- 分层纪律：`market → app` 单向（经门面），`ai → market` 单向（经门面），无环。
+
+### 29.2 数据模型（`market_listing`，迁移 `20260927100000_add_market_domain`）
+
+| 列                                            | 说明                                                         |
+| --------------------------------------------- | ------------------------------------------------------------ |
+| `id` / `code`                                 | 条目编号（对外展示用：slug + 4 位随机 base36，全局唯一）     |
+| `publisher_id` / `publisher_name`             | 发布者（昵称在**提交时冗余**，防改名影响在架卡片）           |
+| `source_app_id`                               | 谱系：来源应用 id（副本的 `app_def.source_app_id` 同样记它） |
+| `name` / `description`                        | 提交时冗余（与源应用解耦）                                   |
+| `snapshot` JSON                               | 结构快照（R117）                                             |
+| `demo_data` JSON NULL / `has_demo`            | 演示数据（R118）+ 冗余标记（列表卡片免解析 JSON）            |
+| `status`                                      | `pending` / `approved` / `rejected` / `delisted`             |
+| `review_note` / `reviewer_id` / `reviewed_at` | 审核三件套（拒绝必填 note）                                  |
+| `listed_at` / `delisted_at`                   | 上架 / 下架时间（浏览按 `listed_at` 倒序）                   |
+| `copy_count`                                  | 复制次数（元数据卡片）                                       |
+| `created_at` / `updated_at`                   | —                                                            |
+
+索引：`uk(code)`、`idx_market_status_listed (status, listed_at)`（浏览）、`idx_market_pub_app_status (publisher_id, source_app_id, status)`（50013 校验）。
+「每应用 1 个活跃条目」为**应用层校验**（MySQL 无部分唯一索引，D108）。
+
+**快照结构（`snapshot`，R117）**：
+
+```json
+{
+  "version": 1,
+  "tables": [
+    {
+      "name": "book",
+      "label": "书",
+      "fields": [
+        {
+          "name": "title",
+          "label": "书名",
+          "type": "text",
+          "required": true,
+          "default": null,
+          "enumOptions": null,
+          "refTable": null,
+          "refMultiple": false
+        }
+      ]
+    }
+  ],
+  "rels": [{ "fromTable": "book", "fromField": "tag_ids", "toTable": "tag" }],
+  "pages": [
+    {
+      "name": "书展示",
+      "route": "book-display",
+      "kind": "display",
+      "genBy": "manual",
+      "sort": 0,
+      "schema": {}
+    }
+  ]
+}
+```
+
+- **不含**暴露三开关（`is_exposed` / `is_public` 不随快照走）、**不含**数据（演示数据另存 `demo_data`）；
+- n:n 中间表（`is_system=1`）不入快照，由物化方按 `rels` 重建（R117）；
+- 演示数据（`demo_data`）为 `{ 表名: [{ rowId, data }] }`——`rowId` 是**源行标识**，复制时用于引用重映射（见 §29.3）；`attachment` 字段值已置 null（R118）。
+
+### 29.3 复制物化流程（`AppFacade.materializeListing`，红线全走 DataService）
+
+```
+POST /market/:code/copy（接收方登录态）
+  ├─ market：条目 approved 且未 delisted（否则 50014）+ 快照/演示数据出库过 snapshot-marshal 校验
+  ├─ app：AdminService.createMaterialized（active，占接收方配额 50002；code 冲突 "(1)"；记 source_app_id）
+  ├─ 结构重建（失败 → 软删刚建应用整体回滚）：
+  │    表按**依赖拓扑序**重建（ref 目标表 / n:n 的 toTable 先建；环时按快照序兜底）
+  │    → 字段逐名重建（多值 ref 字段跳过，由关系重建）
+  │    → n:n 关系经 SchemaService.createRelation 重建（中间表 + REL_FROM/TO_FIELD + 源表 refMultiple）
+  │    → 功能页逐页 PageService.create（schema 原样、kind 由 schema 推导、**is_public=0 全私有**）
+  └─ 演示数据逐行**独立事务** DataService.create（错误行跳过并计数；引用按旧→新 rowId 重映射）
+```
+
+- 物化在 **app 域内完成**（AppFacade 实现，复用 AdminService/SchemaService/PageService/DataService）——数据写入红线不破。
+- **引用重映射（实际设计点）**：演示数据的 ref / 多值 ref 值在源应用内是**旧 rowId**，跨应用无效；复制时按已落库行的 `旧 rowId → 新 rowId` 映射改写；目标尚未落库（拓扑序之外）的引用置空，若该字段必填则该行按「错误行」跳过并计数（R119）。
+- 快照结构非法（版本不符 / 缺表缺字段 / 多值字段无关系定义）→ **50015 语义拒绝**，不静默修补。
+- 复制成功 `copy_count + 1`（独立于物化事务）。
+
+### 29.4 AI 工具链路（ai 域，全经 Facade）
+
+| 工具                | 参数                                   | 成功返回                                         | 关键路径                                                                                                      |
+| ------------------- | -------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `publish_data_app`  | `{ appCode, isPublic }`                | `{ ok, isPublic, pubCode?, pubUrl? , missing? }` | `AppFacade.setPublic` → `AdminService.publish`（R103 未过 **不抛错**，回喂 `ok:false + missing[]`）           |
+| `expose_data_app`   | `{ appCode, target, name, isExposed }` | `{ ok, target, name, isExposed }`                | `AppFacade.setExposure`（table 按表名；field 支持 `表.字段` 或应用内唯一字段名；page 仅 display，否则 50004） |
+| `submit_market_app` | `{ appCode, withDemoData? }`           | `{ ok, listingCode, status: 'pending' }`         | `MarketFacade.submitMarketApp` → `ListingService.submit`（50013/50015）                                       |
+
+- 三工具 **write 级确认卡**（确认文案含后果：「开启后匿名可访问」/「提交即冻结快照、进入人工审核、通过后可被复制」）；perms 留空（属主自服务）；关键词 app 组**复合词**（应用市场/市场审核/提交市场/发布到市场/上架应用/市场条目/公开发布/暴露），不抢 siteCms 的「发布/审核/通过」等泛词。
+- **模型闭环流**：`list_data_apps`（读状态与 `missing`）→ `expose_data_app` 逐项补齐 → `publish_data_app` 开公开 → `submit_market_app` 提交市场。
+- **缺项可操作化（R122 落地）**：`collectPublishMissing` 的两条「至少需要…」文案带**清单**（本应用表名 / 可用 display 页 `名称(code)`），模型据此可直接选取 expose 目标，无需再问用户。
+- 能力清单新增 3 行（`app.expose` / `app.publish` / `app.market`，工具总数 41）；**合注预算按 R123 腾挪**（精简既有能力行与手册枚举，落地值见 PROGRESS）。
+
+### 29.5 前端（apps/web）
+
+- **应用中心菜单（seed，所有登录用户可见）**：`应用市场`（`app-center/market` → `views/market/index.vue`）、`市场审核`（`app-center/market-review` → `views/market/review/index.vue`，`perms: market:review`，**seed 的 common 角色子树授予中显式排除**——菜单级 perms 会计入权限集合）。
+- `views/market/index.vue`：卡片流（名称/描述/发布者/表·页/含演示标记/复制次数/上架时间）+ 详情抽屉（元数据 + 表·页摘要）+ 「复制此应用」（成功后提示并跳新应用结构页）+ 分页；加载中/空/失败三态。
+- `views/market/review/index.vue`：双标签「待审 / 在架」（`GET /market/review/list?status=pending|approved`），待审行显示快照摘要（表/页清单），操作为 通过 / 拒绝（`ElMessageBox.prompt` 必填理由）/ 下架。
+- 我的应用卡片：`发布到市场`（仅 active 应用且无活跃条目显示主按钮，已有 pending/approved 置灰提示）+ 弹窗（`withDemoData` 勾选 + **逐表行数预览**：`GET /app/:code/schema` 取表 + `POST /app/data/query` op=count 取行数；前后端同 100 行阈值常量，超限红字并禁用提交——服务端仍为唯一权威，超限提交 50015）。
+- `api/market/index.ts`：市场 API 客户端（列表/详情/复制/提交/我的提交/审核列表/审核动作）。
+
+### 29.6 安全 / 配置 / 接缝
+
+- 安全：快照 JSON **入出库均过 `snapshot-marshal.core` 校验**（防手改库致物化炸）；复制物化全参数绑定；市场接口全登录态（v1 无匿名浏览）；详情/复制对非在架条目统一 **50014**（防探测）；审核动作全挂 `@OperationLog`。
+- 配置（`src/config/market.config.ts`，env 前缀 `MARKET_*`，均可不配）：`market.demoMaxRowsPerTable=100` / `market.snapshotMaxBytes=262144`（256KB）。
+- 演示数据**不做附件迁移**（R118 置 null）；跨表引用无法映射的行跳过并计数（边界见 §29.8）。
+- 与 P14 接缝：市场版本更新/条目编辑 → 挂账（D111）；市场搜索/分类/评分/评论 → 有真实用户量再立；AI 代审核 → **永不做**（审核是人的事）。
+
+### 29.7 错误码（50013~50015）
+
+| 码    | 含义                                                 | 处理                                                     |
+| ----- | ---------------------------------------------------- | -------------------------------------------------------- |
+| 50013 | 该应用已有待审或在架条目                             | 提示已有条目编号与状态，引导先下架或等待审核             |
+| 50014 | 市场条目不存在或未上架                               | 前端刷新市场列表（防探测，不区分「不存在」与「未上架」） |
+| 50015 | 提交内容不合规（演示数据超限 / 快照超限 / 结构非法） | 按 message 带的原因处理（表名/来源）                     |
+
+复用：50001（属主）/ 50002（配额）/ 50004（页面校验）/ 50012（发布缺项）。30xxx / 40xxx 零新增。
+
+### 29.8 已知边界（本期登记）
+
+- **附件不随复制迁移**：演示数据中 attachment 字段值置 null（R118）——副本附件列为空，需复制者自行上传。
+- **跨表引用映射失败的行会跳过**：拓扑序外的引用（如环状引用、目标行已被跳过）置空；若该字段必填，则该行按错误行跳过并计数（复制返回值 `skippedRows` 如实给出）。
+- **待审/在架条目无发布者自助撤回**：仅 admin 可下架；重复提交在活跃期内被 50013 拦截（D108/D111：下架后重新提交 = 新条目）。
+- 市场无匿名浏览、无搜索/分类/版本更新（D111）。
