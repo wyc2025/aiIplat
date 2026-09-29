@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getSchema, queryData, runPageAction } from '@/api/app'
 import { confirmDialog } from '@/utils/confirm'
@@ -85,6 +85,8 @@ async function loadDs(name: string): Promise<void> {
 
 async function loadAll(): Promise<void> {
   loadError.value = false
+  // 切页（同路由换参数、实例复用）先清掉上一页残留的数据源/筛选/表单状态
+  resetPageState()
   // 表单值容器必须**先于任何渲染**初始化（2026-09-29 修复）：
   // `tables` 在 getSchema 返回后立即就绪（`fieldOf` 有值 → 模板开始渲染表单字段控件），
   // 而 `formValues[bind]` 若等到数据源加载完才初始化，这中间那次渲染会读 undefined 的键，
@@ -113,7 +115,40 @@ function initForms(): void {
   }
 }
 
+/** 清空当前页状态（数据源 / 筛选 / 表单）；切页复用同一实例时必须重置 */
+function resetPageState(): void {
+  for (const key of Object.keys(dsState)) delete dsState[key]
+  for (const key of Object.keys(filterValues)) delete filterValues[key]
+  for (const key of Object.keys(formValues)) delete formValues[key]
+}
+
+/** 表单值容器（惰性初始化兜底：万一渲染早于 loadAll，也不会读到 undefined 的键） */
+function formOf(bind: string): Record<string, unknown> {
+  if (!formValues[bind]) formValues[bind] = {}
+  return formValues[bind]
+}
+
+/** 清空表单（table 块「清空表单」与 form 块「重置」共用） */
+function resetForm(bind: string): void {
+  formValues[bind] = {}
+}
+
 onMounted(loadAll)
+
+/**
+ * 切页重新加载（2026-09-29 修复「功能页之间互跳后再点菜单没反应」）：
+ * 功能页之间跳转时**路由相同、只有参数变化**（`/app-center/app/:appCode/p/:pageCode`），
+ * Vue 会**复用本组件实例**（不会重新 mounted）——必须监听 page.code 主动重跑 loadAll，
+ * 否则新页面的表单容器未初始化，模板读 `formValues[新bind][字段名]` 抛
+ * "Cannot read properties of undefined (reading '字段名')"，渲染期中断留下"无实例组件 vnode"，
+ * 之后离开该页时卸载崩、点任何菜单都无反应。
+ */
+watch(
+  () => props.page?.code,
+  () => {
+    void loadAll()
+  },
+)
 
 function fieldOf(name: string) {
   return findField(tables.value, name)
@@ -370,7 +405,7 @@ function detailRows(bind: string): DataRowView[] {
               v-if="actionExists(`create_${actionTable(block.bind)}`)"
               type="primary"
               size="small"
-              @click="formValues[`create_${actionTable(block.bind)}`] = {}"
+              @click="resetForm(`create_${actionTable(block.bind)}`)"
             >
               清空表单
             </el-button>
@@ -461,7 +496,7 @@ function detailRows(bind: string): DataRowView[] {
             >
               <FieldInput
                 v-if="fieldOf(parseFieldSpec(spec).name)"
-                v-model="formValues[block.bind][parseFieldSpec(spec).name]"
+                v-model="formOf(block.bind)[parseFieldSpec(spec).name]"
                 :app-code="appCode"
                 :field="fieldOf(parseFieldSpec(spec).name)!"
                 :options="refOptions(parseFieldSpec(spec).name)"
@@ -475,7 +510,7 @@ function detailRows(bind: string): DataRowView[] {
               >
                 提交
               </el-button>
-              <el-button @click="formValues[block.bind] = {}">
+              <el-button @click="resetForm(block.bind)">
                 重置
               </el-button>
             </el-form-item>
