@@ -332,7 +332,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { confirmDialog } from '@/utils/confirm'
@@ -451,6 +451,20 @@ const canSend = computed(
 // ========== 初始化 ==========
 onMounted(async () => {
   await Promise.all([checkPlan(), loadModels(), loadConversations()])
+})
+
+/**
+ * 离开对话页即中断进行中的生成（2026-09-29 修复）。
+ * 背景：`<script setup>` 里的 `currentSession` 属于**组件实例作用域**，组件卸载后引用即丢失，
+ * 再也没人能调 `stop()`；而后端 `/ai/chat`（与 `/ai/tool/confirm`）持有**单用户并发流锁**
+ * （Redis `ai:chatting:{userId}`，20007），只在流真正结束时才删除 ——
+ * 于是「生成中切页面 → 回到对话页」后每次发送都被拒：
+ * 「上一段对话仍在生成中，请稍候」（要等旧流跑完或 5 分钟 TTL 兜底过期）。
+ * 这里在卸载钩子里显式中断：fetch 断开 → 后端 `res.on('close')` 中断上游 → 锁随即释放。
+ */
+onBeforeUnmount(() => {
+  if (streaming.value) currentSession?.stop()
+  currentSession = null
 })
 
 async function checkPlan() {
@@ -780,7 +794,8 @@ function handleToolConfirm(tc: LocalToolCall, approved: boolean) {
   scrollToBottom()
   streaming.value = true
 
-  confirmToolCall({ toolCallId: Number(tc.toolCallId), approved }, {
+  // 保存句柄：确认链路的流此前未记录，导致「停止生成」与「离开页面」都中断不了它（锁会一直占着）
+  currentSession = confirmToolCall({ toolCallId: Number(tc.toolCallId), approved }, {
     onEvent: (event) => {
       const assistantMsg = messages.value[newIndex]
       if (!assistantMsg) return
