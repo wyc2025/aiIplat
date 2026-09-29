@@ -5,12 +5,12 @@
   >
     <el-tag
       v-for="tab in tabsStore.tabs"
-      :key="tab.path"
-      :closable="tab.path !== '/dashboard'"
-      :effect="tab.path === route.path ? 'dark' : 'plain'"
+      :key="tab.fullPath"
+      :closable="tab.fullPath !== '/dashboard'"
+      :effect="tab.fullPath === route.fullPath ? 'dark' : 'plain'"
       class="v-tab"
-      @click="router.push(tab.path)"
-      @close="closeTab(tab.path)"
+      @click="router.push(tab.fullPath)"
+      @close="closeTab(tab.fullPath)"
       @contextmenu="onContextMenu($event, tab)"
     >
       {{ tab.title }}
@@ -25,7 +25,7 @@
         @contextmenu.prevent
       >
         <div
-          v-if="ctxMenu.tab.path !== '/dashboard'"
+          v-if="ctxMenu.tab.fullPath !== '/dashboard'"
           class="v-tab-ctx-item"
           @click="onCloseCurrent"
         >
@@ -53,17 +53,17 @@ const router = useRouter()
 const tabsStore = useTabsStore()
 const settingsStore = useSettingsStore()
 
-// 路由变化即记录页签
+// 路由变化即记录页签（用 fullPath：同 path 不同 query 的页面各自成页签，如两个应用的结构编辑器）
 watch(
-  () => route.path,
+  () => route.fullPath,
   () => tabsStore.addTab(route),
   { immediate: true },
 )
 
-function closeTab(path: string) {
-  const next = tabsStore.removeTab(path)
+function closeTab(fullPath: string) {
+  const next = tabsStore.removeTab(fullPath)
   // 关闭的是当前页 → 跳到相邻页签；无页签则回首页
-  if (path === route.path) {
+  if (fullPath === route.fullPath) {
     router.push(next ?? '/dashboard')
   }
 }
@@ -80,15 +80,15 @@ function closeMenu() {
 }
 function onCloseCurrent() {
   if (!ctxMenu.value) return
-  closeTab(ctxMenu.value.tab.path)
+  closeTab(ctxMenu.value.tab.fullPath)
   closeMenu()
 }
 function onCloseOthers() {
   if (!ctxMenu.value) return
-  const keep = ctxMenu.value.tab.path
+  const keep = ctxMenu.value.tab.fullPath
   tabsStore.removeOthers(keep)
   // 当前页被关闭 → 跳到保留的页签
-  if (route.path !== keep) router.push(keep)
+  if (route.fullPath !== keep) router.push(keep)
   closeMenu()
 }
 onMounted(() => document.addEventListener('click', closeMenu))

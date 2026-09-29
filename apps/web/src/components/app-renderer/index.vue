@@ -85,6 +85,12 @@ async function loadDs(name: string): Promise<void> {
 
 async function loadAll(): Promise<void> {
   loadError.value = false
+  // 表单值容器必须**先于任何渲染**初始化（2026-09-29 修复）：
+  // `tables` 在 getSchema 返回后立即就绪（`fieldOf` 有值 → 模板开始渲染表单字段控件），
+  // 而 `formValues[bind]` 若等到数据源加载完才初始化，这中间那次渲染会读 undefined 的键，
+  // 抛 "Cannot read properties of undefined (reading '字段名')" → 渲染中断留下"无实例组件 vnode"
+  // → 之后离开该页时卸载崩（页面卡住不跳转）。
+  initForms()
   try {
     const bundle = await getSchema(props.appCode)
     tables.value = bundle.tables
@@ -98,7 +104,6 @@ async function loadAll(): Promise<void> {
       await loadDs(name)
     }
   }
-  initForms()
 }
 
 function initForms(): void {
