@@ -49,6 +49,16 @@ function findMenuName(nodes: MenuTreeNode[], path: string): string | null {
   return null
 }
 
+/**
+ * 由 `?appCode=` 反查应用名（菜单中应用节点 path = `/app-center/app/{appCode}`）。
+ * 用途：结构编辑器 / 功能页编辑器是"同 page 不同 appCode"，页签标题需带上应用名以区分
+ * （如「结构编辑 · 书法阁」）。纯前端反查，零网络请求。
+ */
+function appNameOf(appCode: unknown): string | null {
+  if (typeof appCode !== 'string' || !appCode) return null
+  return findMenuName(usePermissionStore().menus, `/app-center/app/${appCode}`) ?? null
+}
+
 /** 页签状态（TabsBar），持久化到 localStorage（关闭浏览器重开可恢复） */
 export const useTabsStore = defineStore('tabs', () => {
   const tabs = ref<TabItem[]>(load())
@@ -66,13 +76,16 @@ export const useTabsStore = defineStore('tabs', () => {
    * 记录页签（2026-09-29 口径修正）：**访问即记录**，不再沿用 `meta.hidden` 拦截——
    * `hidden` 只表示"不进侧边菜单"，此前被复用成"不记页签"，导致应用功能页 / 结构编辑器 /
    * 功能页编辑器 / 个人中心从菜单（或卡片、顶栏）进入却没有页签。
-   * 标题优先级：菜单名 → `meta.title` → 路由名 → 完整路径。
+   * 标题优先级：菜单名 → `meta.title` → 路由名 → 完整路径；
+   * 非菜单页（编辑器）且带 `?appCode=` 时追加应用名以区分多条同类页签（如「结构编辑 · 书法阁」）。
    */
   function addTab(route: RouteLocationNormalized) {
     const fullPath = route.fullPath
     if (tabs.value.some((tab) => tab.fullPath === fullPath)) return
     const menuName = findMenuName(usePermissionStore().menus, route.path)
-    const title = menuName ?? (route.meta?.title as string) ?? route.name?.toString() ?? fullPath
+    const base = menuName ?? (route.meta?.title as string) ?? route.name?.toString() ?? fullPath
+    const appName = menuName ? null : appNameOf(route.query?.appCode)
+    const title = appName ? `${base} · ${appName}` : base
     tabs.value.push({ fullPath, title })
   }
 
