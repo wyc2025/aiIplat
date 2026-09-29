@@ -1120,15 +1120,31 @@ export class ChatService {
    * listed 附件不重读（清单已随 system 注入，模型按需自读）。
    * 容器纪律：**先按元信息判定预算、再决定是否读盘**——装不下的消息零文件读取。
    * 源文件被删/无权/超限 → 占位「（附件已失效）」降级（不报错、不阻断对话）。
+   *
+   * 2026-09-29 修复（思考模式多轮工具调用 400，PROGRESS 遗留 30 定案）：
+   * ① **折叠相邻 assistant**——一次提问内多次工具/确认各自落一条 assistant 消息，历史里形成"AI 连着说"，
+   *    上游（DeepSeek thinking 模式）会以 400 拒绝（文案 `The reasoning_content in the thinking mode
+   *    must be passed back to the API` **误导**指向 reasoning，实为消息形态）→ 相邻 assistant 合并为一条（旧内容在前）；
+   * ② **回传 `reasoning_content`**——DB 早已持久化该列，此前装配时被丢弃，一并带上；
+   * ③ **跳过空正文 assistant**（失败残留 / 纯工具轮中间态），既是噪音也是非法形态来源。
+   * 受控实验（会话 #148 真实数据直调）：折叠 → 200、补 reasoning → 200、仅丢空 → 仍 400 → 故 ①② 为充分修法，③ 作冗余加固。
    */
   private async pickHistoryWithAttachments(
     userId: bigint,
-    historyNewestFirst: Array<{ role: string; content: string; attachments: unknown }>,
+    historyNewestFirst: Array<{
+      role: string
+      content: string
+      attachments: unknown
+      reasoningContent?: string | null
+    }>,
     budget: number,
   ): Promise<EngineChatMessage[]> {
     const picked: EngineChatMessage[] = []
     let used = 0
     for (const message of historyNewestFirst) {
+      // ③ 空正文 assistant（失败残留/工具轮中间态）：跳过，不计入预算
+      if (message.role === 'assistant' && !message.content.trim()) continue
+
       const injectMetas = parseStoredAttachments(message.attachments).filter((meta) => meta.mode === 'inject')
       const attachmentCost = injectMetas.reduce((sum, meta) => sum + estimateInjectedChars(meta), 0)
       if (used + message.content.length + attachmentCost > budget) break
@@ -1139,7 +1155,24 @@ export class ChatService {
         blocks.push(text === null ? buildInvalidBlock(meta.name) : buildInjectedBlock(meta.name, text))
       }
       const content = blocks.length > 0 ? `${blocks.join('\n\n')}\n\n${message.content}` : message.content
-      picked.push({ role: message.role as 'user' | 'assistant', content })
+
+      // ① 相邻 assistant 折叠（倒序遍历：picked 末尾是更"新"的那条，旧内容拼在其前，保持时间顺序）
+      const prev = picked[picked.length - 1]
+      if (message.role === 'assistant' && prev?.role === 'assistant') {
+        prev.content = [content, prev.content].filter((text) => text && text.length > 0).join('\n\n')
+        if (!prev.reasoning_content && message.reasoningContent) prev.reasoning_content = message.reasoningContent
+        used += content.length
+        continue
+      }
+
+      picked.push({
+        role: message.role as 'user' | 'assistant',
+        content,
+        // ② 思考模式：assistant 历史消息的 reasoning_content 需原样回传
+        ...(message.role === 'assistant' && message.reasoningContent
+          ? { reasoning_content: message.reasoningContent }
+          : {}),
+      })
       used += content.length
     }
     picked.reverse()
