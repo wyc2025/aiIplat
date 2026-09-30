@@ -7,21 +7,24 @@ import { BusinessException } from '../../../common/exceptions/business.exception
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { RedisService } from '../../../infra/redis/redis.service'
 import { CloudFacade, type AppAttachmentStream } from '../../cloud/facade/cloud-facade.service'
-import { PAGE_KIND_DISPLAY } from '../admin/admin.service'
 import { DataService, type DataRowView } from '../data/data.service'
 import type { QueryExpandDto, QueryFilterDto, QuerySortDto } from '../data/dto/data.dto'
 import { SchemaService } from '../schema/schema.service'
 import type { ResolvedTable } from '../schema/schema.types'
 
 /**
- * 公开数据服务（P12 T110，R101~R106 / ARCHITECTURE §28.3）。
+ * 授权取数数据服务（P12 T110 建 → P14 D115 改造：匿名公开面退役，改为「授权取数面」）。
  *
- * 分工：本服务只做**公开面语义**——pub_code 定位 + 暴露校验 + R104 参数白名单 +
- * R101 投影白名单 + 缓存与限流；真正的取数复用 A 侧执行器（`DataService.queryForPublic`，
- * 铁律 5），因此双路径（r_cN 下推 / 内存 1 万行护栏）与 2s 超时（50009）与 A 侧完全一致。
+ * 定位口径：调用方（site 域开放层）已解析站点并经 `DisplayFacade.assertCanRead` 校验授权，
+ * 本服务再按 **属主 + 应用 code** 定位（同名 code 属不同用户互不串台；P12 的 pub_code 全局
+ * 唯一定位不再需要），`is_public=1` 为「可被授权读取的总开关」（D115 语义切换）。
  *
- * 防探测（D100）：资源类失败（pub_code 不存在 / 应用未公开 / 表未暴露 / 行不存在 / 文件无引用）
- * 一律 **40400**，与「不存在」不可区分；参数越界 **40001**、限流 **42900** 为例外。
+ * 分工：本服务只做**取数面语义**——应用定位与 is_public 闸门 + 暴露校验 + R104 参数白名单 +
+ * R101 投影白名单 + 缓存；真正的取数复用 A 侧执行器（`DataService.queryForPublic`，铁律 5），
+ * 因此双路径（r_cN 下推 / 内存 1 万行护栏）与 2s 超时（50009）与 A 侧完全一致。
+ *
+ * 防探测（D100 口径沿用）：资源类失败（应用不存在 / 未公开 / 表未暴露 / 行不存在 / 文件无引用）
+ * 一律 **40400**，与「不存在」不可区分；参数越界 **40001** 为例外。
  */
 
 /** R101 内置三件套：永远输出（不受字段暴露影响；内部列永不输出） */
@@ -61,12 +64,30 @@ interface PublicPlan {
   cacheKey: string
 }
 
-/** 公开列表响应 */
+/** 取数面列表响应 */
 export interface PublicListPayload {
   list: Array<Record<string, unknown>>
   total: number
   pageNo: number
   pageSize: number
+}
+
+/** 取数面暴露表结构响应（P14 `/schema` 端点；含枚举选项与 ref 目标表名，供展示页渲染与拼参） */
+export interface PublicSchemaPayload {
+  app: { name: string; description: string | null }
+  tables: Array<{
+    name: string
+    label: string
+    fields: Array<{
+      name: string
+      label: string
+      type: string
+      required: boolean
+      options?: unknown
+      refTable?: string | null
+      multiple?: boolean
+    }>
+  }>
 }
 
 @Injectable()
@@ -100,12 +121,15 @@ export class PubDataService {
     }
   }
 
-  // ==================== pub_code 定位（D100） ====================
+  // ==================== 应用定位（D115：属主 + code + is_public 总开关） ====================
 
-  /** pubCode → 已公开应用：不存在 / 未公开 / 已软删 一律 40400（不可区分） */
-  async resolvePublicApp(pubCode: string): Promise<AppDef> {
+  /**
+   * 属主 + 应用 code → 可被授权读取的应用：不存在 / 未公开 / 已软删 一律 40400（不可区分）。
+   * D115 语义切换：is_public 由「公开发布开关」变为「可被授权读取的总开关」（授权命中后仍须为 1）。
+   */
+  async resolvePublicApp(ownerId: bigint, appCode: string): Promise<AppDef> {
     const app = await this.prisma.appDef.findFirst({
-      where: { pubCode, isPublic: 1, deletedAt: null },
+      where: { ownerId, code: appCode, isPublic: 1, deletedAt: null },
     })
     if (!app) {
       throw new BusinessException(ErrorCode.NotFound, '资源不存在')
@@ -113,59 +137,75 @@ export class PubDataService {
     return app
   }
 
-  // ==================== manifest / 页 schema（R105：TTL 600s） ====================
+  // ==================== 暴露表结构（R105：TTL 600s） ====================
 
-  /** 公开 manifest：仅公开 display 页，按 sort（缓存 600s） */
-  async manifest(pubCode: string) {
-    const app = await this.resolvePublicApp(pubCode)
-    const key = RedisKey.appPubManifest(app.id.toString())
-    const cached = await this.readCache<Record<string, unknown>>(key)
+  /**
+   * 暴露表结构（P14 取数面 `/schema` 端点）：仅暴露表 + 暴露字段（含枚举选项与 ref 目标表名）。
+   * 缓存 600s（授权增删 / 暴露变更 / 结构变更即 DEL）；无暴露表时 tables 为空数组（不是错误）。
+   */
+  async schema(ownerId: bigint, appCode: string): Promise<PublicSchemaPayload> {
+    const app = await this.resolvePublicApp(ownerId, appCode)
+    const key = RedisKey.appPubSchema(app.id.toString())
+    const cached = await this.readCache<PublicSchemaPayload>(key)
     if (cached) return cached
 
-    const pages = await this.prisma.appPage.findMany({
-      where: { appId: app.id, deletedAt: null, kind: PAGE_KIND_DISPLAY, isPublic: 1 },
-      orderBy: [{ sort: 'asc' }, { id: 'asc' }],
-      select: { code: true, name: true },
+    const tables = await this.prisma.appTable.findMany({
+      where: { appId: app.id, deletedAt: null, isSystem: 0, isExposed: 1 },
+      orderBy: { id: 'asc' },
+      select: { id: true, name: true, label: true },
     })
-    const payload = {
-      name: app.name,
-      description: app.description,
-      pages: pages.map((page) => ({ code: page.code, name: page.name })),
-    }
-    await this.writeCache(key, payload, 'app.pubManifestCacheTtlSeconds', 600)
-    return payload
-  }
+    const fields = tables.length
+      ? await this.prisma.appField.findMany({
+          where: { tableId: { in: tables.map((table) => table.id) }, isDeleted: 0, isExposed: 1 },
+          orderBy: [{ sort: 'asc' }, { id: 'asc' }],
+          select: {
+            tableId: true,
+            name: true,
+            label: true,
+            type: true,
+            required: true,
+            enumOptions: true,
+            refTableId: true,
+            refMultiple: true,
+          },
+        })
+      : []
+    const refNames = await this.refTableNames(fields)
 
-  /** 公开页 schema：发布时已过 R103，原样输出（缓存 600s；页不存在/未公开 → 40400） */
-  async pageSchema(pubCode: string, pageCode: string) {
-    const app = await this.resolvePublicApp(pubCode)
-    const key = RedisKey.appPubPageSchema(app.id.toString(), pageCode)
-    const cached = await this.readCache<Record<string, unknown>>(key)
-    if (cached) return cached
-
-    const page = await this.prisma.appPage.findFirst({
-      where: {
-        appId: app.id,
-        code: pageCode,
-        deletedAt: null,
-        kind: PAGE_KIND_DISPLAY,
-        isPublic: 1,
-      },
-      select: { schema: true },
-    })
-    if (!page) {
-      throw new BusinessException(ErrorCode.NotFound, '资源不存在')
+    const payload: PublicSchemaPayload = {
+      app: { name: app.name, description: app.description },
+      tables: tables.map((table) => ({
+        name: table.name,
+        label: table.label,
+        fields: fields
+          .filter((field) => field.tableId === table.id)
+          .map((field) => ({
+            name: field.name,
+            label: field.label,
+            type: field.type,
+            required: field.required === 1,
+            ...(field.enumOptions ? { options: field.enumOptions } : {}),
+            ...(field.refTableId
+              ? { refTable: refNames.get(field.refTableId.toString()) ?? null }
+              : {}),
+            ...(field.refMultiple === 1 ? { multiple: true } : {}),
+          })),
+      })),
     }
-    const payload = page.schema as Record<string, unknown>
     await this.writeCache(key, payload, 'app.pubManifestCacheTtlSeconds', 600)
     return payload
   }
 
   // ==================== 公开列表 / 详情（R101 + R104 + R105） ====================
 
-  /** 公开列表：R104 参数白名单 → 复用执行器 → R101 投影 → 60s 缓存 */
-  async listRows(pubCode: string, tableName: string, query: Record<string, unknown>): Promise<PublicListPayload> {
-    const app = await this.resolvePublicApp(pubCode)
+  /** 取数面列表：R104 参数白名单 → 复用执行器 → R101 投影 → 60s 缓存 */
+  async listRows(
+    ownerId: bigint,
+    appCode: string,
+    tableName: string,
+    query: Record<string, unknown>,
+  ): Promise<PublicListPayload> {
+    const app = await this.resolvePublicApp(ownerId, appCode)
     const { table, tableId } = await this.resolveExposedTable(app.id, tableName)
     const exposure = await this.computeExposure(app.id, table, tableId)
     const plan = this.parseListParams(query, table, exposure)
@@ -193,9 +233,15 @@ export class PubDataService {
     return payload
   }
 
-  /** 公开单行（行不存在 → 40400；支持 expand） */
-  async getRow(pubCode: string, tableName: string, rowId: string, query: Record<string, unknown>) {
-    const app = await this.resolvePublicApp(pubCode)
+  /** 取数面单行（行不存在 → 40400；支持 expand） */
+  async getRow(
+    ownerId: bigint,
+    appCode: string,
+    tableName: string,
+    rowId: string,
+    query: Record<string, unknown>,
+  ) {
+    const app = await this.resolvePublicApp(ownerId, appCode)
     const { table, tableId } = await this.resolveExposedTable(app.id, tableName)
     const exposure = await this.computeExposure(app.id, table, tableId)
     const { expand, expandFields } = this.parseExpand(
@@ -229,11 +275,12 @@ export class PubDataService {
    * ③ MIME 口径由控制器按 R26 输出。任一失败 → 40400（防探测）。
    */
   async attachmentStream(
-    pubCode: string,
+    ownerId: bigint,
+    appCode: string,
     fileId: string,
     range?: { start: number; end: number },
   ): Promise<AppAttachmentStream> {
-    const app = await this.resolvePublicApp(pubCode)
+    const app = await this.resolvePublicApp(ownerId, appCode)
     let id: bigint
     try {
       id = BigInt(fileId)
@@ -503,6 +550,21 @@ export class PubDataService {
       expandFields.set(field, requested)
     }
     return { expand, expandFields }
+  }
+
+  /** ref 目标表 id → 表名（暴露表结构输出用；目标表未暴露照实给表名，取数时另有暴露闸门） */
+  private async refTableNames(
+    fields: Array<{ refTableId: bigint | null }>,
+  ): Promise<Map<string, string>> {
+    const ids = [
+      ...new Set(fields.map((field) => field.refTableId).filter((id): id is bigint => id !== null)),
+    ]
+    if (ids.length === 0) return new Map()
+    const rows = await this.prisma.appTable.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true },
+    })
+    return new Map(rows.map((row) => [row.id.toString(), row.name]))
   }
 
   private assertPublicField(

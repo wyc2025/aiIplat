@@ -10,12 +10,21 @@ import { ListingService } from '../listing/listing.service'
 export class MarketFacade {
   constructor(private readonly listingService: ListingService) {}
 
-  /** AI 工具 submit_market_app：提交应用上架审核（50013 重复活跃条目 / 50015 内容不合规） */
+  /**
+   * AI 工具 submit_market_app：提交应用上架审核（50013 重复活跃条目 / 50015 内容不合规）。
+   * P14 D117：提交即打包展示应用 bundle（出边授权闭包），返回值带 `displays` 供确认卡逐条列明。
+   */
   async submitMarketApp(
     userId: bigint,
     appCode: string,
     withDemoData?: boolean,
-  ): Promise<{ ok: true; listingCode: string; status: string }> {
+  ): Promise<{
+    ok: true
+    listingCode: string
+    status: string
+    displays: Array<{ name: string; fileCount: number }>
+    skippedDisplays: string[]
+  }> {
     return this.listingService.submit(userId, { appCode, withDemoData })
   }
 }

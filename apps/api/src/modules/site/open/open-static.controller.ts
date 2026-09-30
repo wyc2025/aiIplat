@@ -8,6 +8,7 @@ import { RedisService } from '../../../infra/redis/redis.service'
 import { Public } from '../../../gateway/decorators/public.decorator'
 import { SkipTransform } from '../../../gateway/decorators/skip-transform.decorator'
 import { CloudFacade } from '../../cloud/facade/cloud-facade.service'
+import { DisplayFacade } from '../../display/facade/display-facade.service'
 import { SiteResolveService, type ResolvedPath } from './site-resolve.service'
 import { assertRateLimit, extractIp } from './rate-limit.util'
 import { CSP_SANDBOX, resolveMime } from './mime'
@@ -33,6 +34,7 @@ export class OpenStaticController {
     private readonly cloudFacade: CloudFacade,
     private readonly redis: RedisService,
     private readonly config: ConfigService,
+    private readonly displayFacade: DisplayFacade,
   ) {}
 
   /** 站点入口（= 根目录 index.html） */
@@ -44,7 +46,68 @@ export class OpenStaticController {
     await this.serve(slug, '', req, res)
   }
 
-  /** 静态文件（nginx 语义，路径即 URL） */
+  /**
+   * 展示应用入口（P14 §30.3）：`/api/open/:slug/disp/:id` = 该展示应用目录的 index.html。
+   * 无尾斜杠 → 301 补斜杠（修正相对引用基址，照站点根语义）。
+   *
+   * **声明顺序**（控制器内声明顺序 = 路由注册顺序，同 §14.4 铁律）：本方法须在
+   * `:slug/*path`（站点静态通配）**之前**，否则 `/disp/:id/` 会被通配吞掉、再被 SPA/美化回退
+   * 兜成站点首页（P14 端到端实测发现：返回 200 站点首页而非 40400）。
+   */
+  @Public()
+  @SkipTransform()
+  @Get(':slug/disp/:id')
+  @ApiOperation({ summary: '展示应用入口（挂靠校验；未挂靠/挂他站/已删 → 40400）' })
+  async displayIndex(
+    @Param('slug') slug: string,
+    @Param('id') id: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ): Promise<void> {
+    const prefix = await this.resolveDisplayPrefix(slug, id)
+    if (!req.path.endsWith('/')) {
+      res.status(301).set('Location', `/api/open/${slug}/${prefix}/`).end()
+      return
+    }
+    await this.serve(slug, `${prefix}/index.html`, req, res)
+  }
+
+  /**
+   * 展示应用静态文件（P14 §30.3）：站点目录内 `disp/{id}/**` 子树，其余语义（MIME/CSP/ETag/Range/
+   * 路径美化/SPA 回退）与站点静态完全一致（同一 `serve` 流程）。同样须先于 `:slug/*path` 声明。
+   */
+  @Public()
+  @SkipTransform()
+  @Get(':slug/disp/:id/*path')
+  @ApiOperation({ summary: '展示应用静态文件（相对路径资源；挂靠校验后走站点目录子树）' })
+  async displayStatic(
+    @Param('slug') slug: string,
+    @Param('id') id: string,
+    @Param('path') path: string[],
+    @Req() req: Request,
+    @Res() res: Response,
+  ): Promise<void> {
+    const prefix = await this.resolveDisplayPrefix(slug, id)
+    await this.serve(slug, `${prefix}/${path.join('/')}`, req, res)
+  }
+
+  /**
+   * 展示应用挂靠校验（P14 R125 前置 / §30.3）：站点存在 → 展示应用存在、未软删且 `site_id` = 本站点；
+   * 任一不满足一律 40400（不暴露存在性；未挂靠的暂存区目录不对外服务，§30.8 ④）。
+   */
+  private async resolveDisplayPrefix(slug: string, rawId: string): Promise<string> {
+    const site = await this.resolveService.resolveSite(slug)
+    if (!site) {
+      throw new BusinessException(ErrorCode.NotFound, '资源不存在')
+    }
+    if (!/^\d{1,20}$/.test(rawId)) {
+      throw new BusinessException(ErrorCode.NotFound, '资源不存在')
+    }
+    const meta = await this.displayFacade.resolveForOpen(BigInt(site.siteId), BigInt(rawId))
+    return meta.relPath
+  }
+
+  /** 静态文件（nginx 语义，路径即 URL）——须在展示应用路由**之后**声明（通配优先级语义，见上） */
   @Public()
   @SkipTransform()
   @Get(':slug/*path')

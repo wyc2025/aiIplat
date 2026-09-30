@@ -2,7 +2,7 @@ import { ErrorCode } from '../../../common/constants/error-code'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 
 /**
- * 功能页模式校验（P11 T104，R94 / ARCHITECTURE-P11 §5；P12 T111 扩展 display，R102 / ARCHITECTURE §28.4）。
+ * 功能页模式校验（P11 T104，R94 / ARCHITECTURE-P11 §5）。
  *
  * 校验双道中的后端一道：AI 生成或人工提交的 schema 落库前必须过校验，不过即 50004
  * （message 带路径），绝不静默丢弃。
@@ -11,29 +11,23 @@ import { BusinessException } from '../../../common/exceptions/business.exception
  * 铁律 7 禁止新增依赖 → 这里用**手写结构校验**（纯函数、零依赖），能力等价：
  * 类型/必填/枚举/引用存在性 + 路径化错误信息。
  *
- * P12 增量（display kind，R102）：
- * - 区块仅 filterBar / table / detail（禁 form）；table 禁 rowActions；detail 必须绑 op=get；
- * - dataSources op 仅 list / get（禁 count）；actions 一律禁；
- * - 字段 DSL（`字段[:修饰符…]`）语法白名单 + 基础字段存在 + expand/ref 目标表存在；
- * - rowLink.page 必须指向同应用内**已存在**的页 code（ctx.pages）。
- * admin kind 行为与 P11 完全一致（零回归）。
+ * P14 R126：`kind` 收缩为仅 `admin`——P12 的 display 只读子集规则（禁 form / 禁 actions /
+ * op 仅 list·get / rowLink 等）随展示页整体废弃一并移除（展示改由展示应用 + 站点静态页承担）。
+ *
+ * 共性规则：字段 DSL（`字段[:修饰符…]`）语法白名单 + 基础字段存在 + expand/ref 目标表存在；
+ * rowLink.page 必须指向同应用内**已存在**的页 code（ctx.pages）。
  */
 
 /** 区块四型 */
 export const PAGE_BLOCK_TYPES = ['filterBar', 'table', 'form', 'detail'] as const
 export type PageBlockType = (typeof PAGE_BLOCK_TYPES)[number]
 
-/** 区块三型（display 只读子集：禁 form，R102） */
-export const DISPLAY_BLOCK_TYPES = ['filterBar', 'table', 'detail'] as const
-
-/** 页类型（P12 起支持 display） */
-export const PAGE_KINDS = ['admin', 'display'] as const
+/** 页类型（P14 R126：`display` 展示页整体废弃，kind 收缩为仅 admin） */
+export const PAGE_KINDS = ['admin'] as const
 export type PageKind = (typeof PAGE_KINDS)[number]
 
 /** 数据源 op 白名单 */
 export const PAGE_DATA_OPS = ['list', 'get', 'count'] as const
-/** display 页数据源 op（R102：禁 count） */
-export const DISPLAY_DATA_OPS = ['list', 'get'] as const
 /** 动作步骤 op 白名单 */
 export const PAGE_STEP_OPS = ['create', 'update', 'delete'] as const
 /** filter op 白名单（与 DataService 一致） */
@@ -151,11 +145,10 @@ function blockFieldLists(
 export function validatePageSchema(schema: unknown, ctx: PageSchemaContext): Record<string, unknown> {
   if (!isRecord(schema)) fail('schema', '必须是对象')
   const kind = schema.kind
-  if (kind !== 'admin' && kind !== 'display') {
+  // P14 R126：kind 收缩为仅 admin（display 展示页已废弃，历史页由迁移清理）
+  if (kind !== 'admin') {
     fail('schema.kind', `kind 仅允许 ${PAGE_KINDS.join(' / ')}`)
   }
-  const isDisplay = kind === 'display'
-  const dataOps: readonly string[] = isDisplay ? DISPLAY_DATA_OPS : PAGE_DATA_OPS
 
   const dataSources = schema.dataSources
   if (!isRecord(dataSources)) fail('dataSources', '必须是对象')
@@ -168,11 +161,8 @@ export function validatePageSchema(schema: unknown, ctx: PageSchemaContext): Rec
     const ds = dataSources[name]
     if (!isRecord(ds)) fail(path, '必须是对象')
     const op = ds.op
-    if (typeof op !== 'string' || !dataOps.includes(op)) {
-      fail(
-        `${path}.op`,
-        `op 仅允许 ${dataOps.join('/')}${isDisplay ? '（display 页禁 count，R102）' : ''}`,
-      )
+    if (typeof op !== 'string' || !(PAGE_DATA_OPS as readonly string[]).includes(op)) {
+      fail(`${path}.op`, `op 仅允许 ${PAGE_DATA_OPS.join('/')}`)
     }
     const table = ds.table
     if (typeof table !== 'string' || !ctx.tables.has(table)) {
@@ -232,7 +222,6 @@ export function validatePageSchema(schema: unknown, ctx: PageSchemaContext): Rec
   const actions = schema.actions ?? {}
   if (!isRecord(actions)) fail('actions', '必须是对象')
   const actionNames = Object.keys(actions)
-  if (isDisplay && actionNames.length > 0) fail('actions', 'display 页不允许定义动作（R102）')
   if (actionNames.length > MAX_ACTIONS) fail('actions', `动作不能超过 ${MAX_ACTIONS} 个`)
   for (const name of actionNames) {
     const path = `actions.${name}`
@@ -264,9 +253,6 @@ export function validatePageSchema(schema: unknown, ctx: PageSchemaContext): Rec
     if (typeof block.type !== 'string' || !(PAGE_BLOCK_TYPES as readonly string[]).includes(block.type)) {
       fail(`${path}.type`, `区块类型仅允许 ${PAGE_BLOCK_TYPES.join('/')}`)
     }
-    if (isDisplay && !(DISPLAY_BLOCK_TYPES as readonly string[]).includes(block.type)) {
-      fail(`${path}.type`, `display 页区块类型仅允许 ${DISPLAY_BLOCK_TYPES.join('/')}（禁 form，R102）`)
-    }
     if (typeof block.bind !== 'string' || block.bind.length === 0) {
       fail(`${path}.bind`, 'bind 必须是非空字符串')
     }
@@ -283,13 +269,10 @@ export function validatePageSchema(schema: unknown, ctx: PageSchemaContext): Rec
       fail(`${path}.bind`, `数据源不存在：${block.bind}`)
     }
 
-    if (!isDisplay) continue
-
-    // ===== display 专属（R102）=====
     const boundDs = dataSources[block.bind]
     const boundTable = isRecord(boundDs) && typeof boundDs.table === 'string' ? boundDs.table : null
     if (block.type === 'table') {
-      if (block.rowActions !== undefined) fail(`${path}.rowActions`, 'display 页表格不允许行内动作（R102）')
+      // P14 R126：rowActions 禁令随 display 页废弃解除（管理页允许行内动作）；rowLink 结构校验保留
       if (block.rowLink !== undefined) {
         if (!isRecord(block.rowLink)) fail(`${path}.rowLink`, '必须是对象')
         const target = block.rowLink.page

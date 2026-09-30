@@ -64,12 +64,33 @@ export interface SnapshotPage {
   schema: Record<string, unknown>
 }
 
+/**
+ * 快照内展示应用（P14 D117 bundle 化）：名称 + 文本文件清单（path 为展示应用目录内相对路径）。
+ * 仅文本（HTML/CSS/JS/JSON 等）；二进制素材不随复制（R128：断链自担）。
+ */
+export interface SnapshotDisplay {
+  name: string
+  files: Array<{ path: string; content: string }>
+}
+
+/**
+ * 快照内授权边（P14 D117）：数据应用即本快照所属应用，故只需 `displayName` 指向 `displays[]`；
+ * 复制时在**副本之间**重建（授权双方均为接收方实体），且只带出边闭包（不反向）。
+ */
+export interface SnapshotGrant {
+  displayName: string
+}
+
 /** 结构快照（market_listing.snapshot 的列结构） */
 export interface AppSnapshot {
   version: number
   tables: SnapshotTable[]
   rels: SnapshotRel[]
   pages: SnapshotPage[]
+  /** P14 D117：随包展示应用（旧快照无此字段 → 解析时归一为空数组，向后兼容） */
+  displays: SnapshotDisplay[]
+  /** P14 D117：随包授权边（同上兼容） */
+  grants: SnapshotGrant[]
 }
 
 /** 装配快照的结构源（= AppFacade.exportStructure 的返回体，域边界经门面） */
@@ -97,9 +118,13 @@ export interface SnapshotSource {
     sort: number
     schema: Record<string, unknown>
   }>
+  /** P14 D117：随包展示应用（market 域经 DisplayFacade 取出边闭包后传入；缺省 = 无 bundle） */
+  displays?: Array<{ name: string; files: Array<{ path: string; content: string }> }>
+  /** P14 D117：随包授权边（displayName 指向 displays[]） */
+  grants?: Array<{ displayName: string }>
 }
 
-/** 结构源 → 快照（物化；不含暴露开关与数据，R117） */
+/** 结构源 → 快照（物化；不含暴露开关与数据，R117；P14 D117 起含展示应用 bundle） */
 export function buildSnapshot(source: SnapshotSource): AppSnapshot {
   return {
     version: SNAPSHOT_VERSION,
@@ -130,5 +155,10 @@ export function buildSnapshot(source: SnapshotSource): AppSnapshot {
       sort: page.sort,
       schema: page.schema,
     })),
+    displays: (source.displays ?? []).map((display) => ({
+      name: display.name,
+      files: display.files.map((file) => ({ path: file.path, content: file.content })),
+    })),
+    grants: (source.grants ?? []).map((grant) => ({ displayName: grant.displayName })),
   }
 }

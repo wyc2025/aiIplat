@@ -14,6 +14,14 @@ export class SubmitListingDto {
   @IsOptional()
   @IsBoolean({ message: 'withDemoData 仅允许布尔值' })
   withDemoData?: boolean
+
+  @ApiPropertyOptional({
+    description:
+      'P14 D117：是否随包展示应用 bundle（该应用授权的展示应用 + 文本文件 + 授权边）；缺省 true',
+  })
+  @IsOptional()
+  @IsBoolean({ message: 'withDisplayApps 仅允许布尔值' })
+  withDisplayApps?: boolean
 }
 
 /** 市场浏览列表查询（GET /api/market/list） */

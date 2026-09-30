@@ -126,19 +126,4 @@ export function pageSchemaTemplate(table: string, label: string): Record<string,
   }
 }
 
-/**
- * 公开展示页 schema 模板（P12 T113 / R102）：只读三区块（filterBar + table，可自行加 detail），
- * 无动作、无 form、dataSources 仅 list/get —— 与后端 display 校验规则一致，可直接保存。
- * 详情页与 rowLink 可在编辑器里补：detail 区块须绑 op=get 数据源，rowLink.page 指向同应用页 code。
- */
-export function displayPageSchemaTemplate(table: string): Record<string, unknown> {
-  return {
-    kind: 'display',
-    dataSources: { mainList: { op: 'list', table, size: 20 } },
-    actions: {},
-    layout: [
-      { type: 'filterBar', bind: 'mainList', fields: [] },
-      { type: 'table', bind: 'mainList', columns: [] },
-    ],
-  }
-}
+// P14 D113/T127：`displayPageSchemaTemplate`（公开展示页模板）随 display 展示页整体废弃移除。

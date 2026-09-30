@@ -59,7 +59,7 @@ async function loadPubInfo(): Promise<void> {
 async function toggleTableExpose(tableId: string, value: number): Promise<void> {
   try {
     await exposeTable(appCode.value, tableId, value)
-    ElMessage.success(value === 1 ? '该表已加入公开面' : '该表已移出公开面')
+    ElMessage.success(value === 1 ? '该表已加入可读取范围' : '该表已移出可读取范围')
     await loadPubInfo()
   } catch {
     await loadPubInfo()

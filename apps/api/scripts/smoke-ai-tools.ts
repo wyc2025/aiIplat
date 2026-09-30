@@ -444,16 +444,11 @@ const MARKET_WRITE_TOOLS = new Set(['expose_data_app', 'publish_data_app', 'subm
  * 需要像真实用户一样续接同一会话继续推进（50012 缺项引导路径靠它走完）。
  */
 const MARKET_FLOW_FOLLOW_UPS = [
-  '继续：按发布缺项补齐暴露（表与展示页），然后开启公开发布（publish_data_app）。',
+  '继续：按缺项补齐表暴露，然后发布该应用（publish_data_app）。',
   '继续：把这个应用提交到应用市场审核（submit_market_app）。',
 ]
 
-/** N 用例展示页夹具（最小合法 display schema，R102：仅 table 区块、无动作） */
-const DISPLAY_PAGE_FIXTURE = {
-  kind: 'display',
-  dataSources: { books: { op: 'list', table: 'book', fields: ['title'] } },
-  layout: [{ type: 'table', bind: 'books', columns: ['title'] }],
-}
+// P14 T130：N 用例夹具不再建 display 展示页（D113 展示页整体废弃；发布校验只剩「≥1 张已暴露表」）
 
 /**
  * 跑一遍「公开并提交市场」链：首发消息 → 逐张确认卡自动批准 → 按需追加推进消息，
@@ -856,7 +851,7 @@ async function main(): Promise<void> {
         console.log(`  · 夹具创建失败（继续，空列表也算通过）：${(error as Error).message}`)
       }
 
-      const prompt = '我有哪些数据应用？哪些已经公开发布了？把公开链接也给我。'
+      const prompt = '我有哪些数据应用和展示应用？哪些已经发布、授权给谁了？'
       let lastReason = '未执行'
       let done = false
       for (let attempt = 1; attempt <= MAX_ATTEMPT && !done; attempt += 1) {
@@ -874,14 +869,15 @@ async function main(): Promise<void> {
           const apps = Array.isArray(parsed.apps) ? parsed.apps : []
           if (apps.length === 0) return null
           for (const app of apps) {
-            for (const key of ['appCode', 'name', 'status', 'isPublic', 'pubCode', 'pubUrl', 'missing']) {
-              if (!(key in app)) return `apps[] 缺 ${key}（公开面契约不完整）`
+            // P14 T130：契约去掉 pubCode/pubUrl（匿名公开面退役），改断 grantedDisplays（授权口径）
+            for (const key of ['appCode', 'name', 'status', 'isPublic', 'missing', 'grantedDisplays']) {
+              if (!(key in app)) return `apps[] 缺 ${key}（授权取数契约不完整）`
             }
           }
           return null
         })
         if (result.ok) {
-          report('M 公开面只读查询（pubCode/isPublic/missing 契约）', result)
+          report('M 授权取数只读查询（isPublic/grantedDisplays/missing 契约）', result)
           done = true
           break
         }
@@ -889,7 +885,11 @@ async function main(): Promise<void> {
         console.log(`  · 第 ${attempt}/${MAX_ATTEMPT} 次未通过：${lastReason}`)
         if (attempt < MAX_ATTEMPT) await sleep(RETRY_DELAY_MS)
       }
-      if (!done) report('M 公开面只读查询（pubCode/isPublic/missing 契约）', { ok: false, reason: lastReason })
+      if (!done)
+        report('M 授权取数只读查询（isPublic/grantedDisplays/missing 契约）', {
+          ok: false,
+          reason: lastReason,
+        })
 
       if (fixtureCode) {
         try {
@@ -919,11 +919,7 @@ async function main(): Promise<void> {
           method: 'POST',
           json: { name: 'book', label: '书', fields: [{ name: 'title', label: '书名', type: 'text' }] },
         })
-        await api(token, `/api/app/${fixtureCode}/pages`, {
-          method: 'POST',
-          json: { name: '书展示', route: 'book-display', genBy: 'manual', schema: DISPLAY_PAGE_FIXTURE },
-        })
-        console.log(`  · 夹具应用 ${fixtureCode}（1 表 + 1 展示页，均未暴露未发布 → 发布缺项非空）`)
+        console.log(`  · 夹具应用 ${fixtureCode}（1 表，未暴露未发布 → 发布缺项非空）`)
       } catch (error) {
         console.log(`  · 夹具准备失败：${(error as Error).message}`)
       }
@@ -1002,6 +998,117 @@ async function main(): Promise<void> {
           console.log(`  · 已清理夹具应用 ${fixtureCode}`)
         } catch {
           // 同上
+        }
+      }
+    }
+
+    // 用例 O：市场 bundle 复制全链（P14 T129 / D117）——API 直调
+    // 不走模型对话：审核与复制是后管端点（无对应 AI 工具），本用例验证「bundle 打包 → 审核 → 三副本 + 授权重建」
+    console.log('O. 市场 bundle 复制（含授权展示应用 → 审核通过 → 复制三副本）')
+    {
+      const caseLabel = 'O 市场 bundle 复制（应用/展示应用/授权三副本）'
+      const stamp = Date.now().toString().slice(-5)
+      const appName = `冒烟bundle${stamp}`
+      const displayName = `展示页${stamp}`
+      let appCode = ''
+      let newAppCode = ''
+      const displayIds: bigint[] = []
+      try {
+        // ① 数据应用：建应用 + 建表 + 暴露表 + 发布（is_public=1 = 可被授权读取）
+        const app = await api<{ appCode: string }>(token, '/api/app', {
+          method: 'POST',
+          json: { name: appName, mode: 'blank' },
+        })
+        appCode = app.appCode
+        await api(token, `/api/app/${appCode}/tables`, {
+          method: 'POST',
+          json: { name: 'book', label: '书', fields: [{ name: 'title', label: '书名', type: 'text' }] },
+        })
+        const owner = await prisma.appDef.findFirstOrThrow({
+          where: { ownerId: userId, code: appCode },
+          select: { id: true },
+        })
+        const table = await prisma.appTable.findFirstOrThrow({
+          where: { appId: owner.id, name: 'book', deletedAt: null },
+          select: { id: true },
+        })
+        await api(token, `/api/app/${appCode}/tables/${table.id.toString()}/expose`, {
+          method: 'PUT',
+          json: { isExposed: 1 },
+        })
+        await api(token, `/api/app/${appCode}/publish`, { method: 'PUT', json: { isPublic: 1 } })
+
+        // ② 展示应用（不挂靠 → 云盘暂存区）+ 授权该数据应用
+        const display = await api<{ id: string }>(token, '/api/display', {
+          method: 'POST',
+          json: { name: displayName },
+        })
+        displayIds.push(BigInt(display.id))
+        await api(token, `/api/display/${display.id}/grants`, {
+          method: 'POST',
+          json: { appCode },
+        })
+
+        // ③ 提交市场：快照应连「展示应用 bundle」一起打包（提交响应 displays[] 逐条列明）
+        const submit = await api<{ listingCode: string; displays?: Array<{ name: string }> }>(
+          token,
+          '/api/market/submissions',
+          { method: 'POST', json: { appCode, withDisplayApps: true } },
+        )
+        const bundled = (submit.displays ?? []).map((item) => item.name)
+        if (!bundled.includes(displayName)) {
+          throw new Error(`提交返回未列明随包展示应用（得到：${bundled.join('、') || '空'}）`)
+        }
+
+        // ④ 审核通过（admin 账号自带 market:review 权限）
+        const listing = await prisma.marketListing.findFirstOrThrow({
+          where: { code: submit.listingCode },
+          select: { id: true },
+        })
+        await api(token, `/api/market/review/${listing.id.toString()}`, {
+          method: 'POST',
+          json: { action: 'approve' },
+        })
+
+        // ⑤ 复制：数据应用副本 + 展示应用副本（暂存区）+ 授权边在副本之间重建
+        const copy = await api<{
+          appCode: string
+          displays?: Array<{ id: string; name: string; siteId: string | null }>
+        }>(token, `/api/market/${submit.listingCode}/copy`, { method: 'POST', json: {} })
+        newAppCode = copy.appCode
+        const newDisplay = (copy.displays ?? [])[0]
+        if (!newDisplay) throw new Error('复制响应未含 displays[]（bundle 未物化）')
+        if (newDisplay.siteId !== null) {
+          throw new Error(`展示应用副本应落未挂靠暂存区（siteId=${newDisplay.siteId}）`)
+        }
+        displayIds.push(BigInt(newDisplay.id))
+        const newApp = await prisma.appDef.findFirstOrThrow({
+          where: { ownerId: userId, code: newAppCode },
+          select: { id: true },
+        })
+        const rebuilt = await prisma.dispGrant.findFirst({
+          where: { appId: newApp.id, displayId: BigInt(newDisplay.id) },
+          select: { id: true },
+        })
+        if (!rebuilt) throw new Error('授权边未在副本之间重建')
+
+        report(caseLabel, {
+          ok: true,
+          reason: `app=${appCode}→${newAppCode} display=${displayName}→${newDisplay.name}（暂存区，授权已重建）`,
+        })
+      } catch (error) {
+        report(caseLabel, { ok: false, reason: (error as Error).message })
+      } finally {
+        // 清理：市场条目物理删；源/副本应用与展示应用软删（目录保留云盘由用户处置）
+        try {
+          await prisma.marketListing.deleteMany({ where: { publisherId: userId, name: appName } })
+        } catch {
+          // 清理失败不判失败
+        }
+        if (appCode) await api(token, `/api/app/${appCode}`, { method: 'DELETE' }).catch(() => undefined)
+        if (newAppCode) await api(token, `/api/app/${newAppCode}`, { method: 'DELETE' }).catch(() => undefined)
+        for (const id of displayIds) {
+          await api(token, `/api/display/${id.toString()}`, { method: 'DELETE' }).catch(() => undefined)
         }
       }
     }

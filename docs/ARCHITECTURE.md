@@ -373,7 +373,7 @@ apps/api/src/
 
 ---
 
-## 5. 数据库设计（sys_ 前缀为 P1 底座；P2a 新增 7 张 ai_ 表；P3 新增 3 张 cloud_ 表；P4a 新增 6 张 site_ 表；**P4e 新增 1 张 `site_quota` 表并解除 `site_site.user_id` 唯一索引**；**P11 新增 7 张 app\_ 表，见 §27.2**；**P12 增 4 列，见 §28.2**；**P13 新增 1 张 `market_listing` 表（`market_` 前缀），见 §29.2**）
+## 5. 数据库设计（sys_ 前缀为 P1 底座；P2a 新增 7 张 ai_ 表；P3 新增 3 张 cloud_ 表；P4a 新增 6 张 site_ 表；**P4e 新增 1 张 `site_quota` 表并解除 `site_site.user_id` 唯一索引**；**P11 新增 7 张 app\_ 表，见 §27.2**；**P12 增 4 列，见 §28.2**；**P13 新增 1 张 `market_listing` 表（`market_` 前缀），见 §29.2**；**P14 新增 2 张 `disp_display` / `disp_grant` 表（`disp_` 前缀）并收缩 `app_page.kind` 为仅 admin，见 §30.2**）
 
 > Prisma model 用 PascalCase + `@@map("sys_user")`，字段 camelCase + `@map("user_name")`。以下为数据库层结构。时间字段统一 `created_at / updated_at`，软删除用 `deleted_at`。
 >
@@ -2849,3 +2849,96 @@ POST /market/:code/copy（接收方登录态）
 - **跨表引用映射失败的行会跳过**：拓扑序外的引用（如环状引用、目标行已被跳过）置空；若该字段必填，则该行按错误行跳过并计数（复制返回值 `skippedRows` 如实给出）。
 - **待审/在架条目无发布者自助撤回**：仅 admin 可下架；重复提交在活跃期内被 50013 拦截（D108/D111：下架后重新提交 = 新条目）。
 - 市场无匿名浏览、无搜索/分类/版本更新（D111）。
+
+---
+
+## 30. P14：展示应用与数据授权（模型修订期）
+
+> 来源：`docs/P14/PRD-P14-展示应用与数据授权.md` / `ARCHITECTURE-P14-增补.md` / `API-P14-增补.md`（并入 §30 / API §21）。
+> 本期为**模型修订期**：+1 域（display）、+2 表，退役 P12 公开面五端点与 `PublicRenderer`，市场快照 bundle 化。
+
+### 30.1 新域 display
+
+`apps/api/src/modules/display/`：**独立 Nest 模块**，两表，**零跨域 import**（铁律 6）；对外只经 `DisplayFacade`（铁律 3）。消费方：
+
+- site 域开放层控制器：静态文件服务 + 数据端点的 R125 校验链，调 `DisplayFacade.assertCanRead(appId, siteId)`；
+- app 域（授权管理挂在展示应用视角）与 ai 域工具：经 `DisplayFacade` 创建/挂靠/授权/撤权；
+- market 域复制物化：`MarketFacade` → `AppFacade.materializeListing` 扩展后，经 `DisplayFacade.materializeBundle` 落展示应用副本与授权重建（红线：仍全量经 DataService 写数据侧）。
+
+跨域依赖（全部经门面，无模块环）：`CloudFacadeModule`（目录机械移动/存在性）、`SiteFacadeModule`（站点解析与属主校验）、`AppFacadeModule`（属主校验、appId 解析、取数面缓存失效）。
+
+### 30.2 表结构（迁移 `20260930100000_add_display_domain`）
+
+```sql
+disp_display (
+  id            BIGINT UNSIGNED PK AI,
+  owner_id      BIGINT UNSIGNED NOT NULL,        -- 属主（同 app_def.owner_id 口径）
+  name          VARCHAR(64)  NOT NULL,            -- 展示应用名（属主内唯一；软删改名释放唯一槽）
+  site_id       BIGINT UNSIGNED NULL,             -- 挂靠站点，NULL = 暂存区（未挂靠）
+  folder_path   VARCHAR(512) NOT NULL,            -- 挂靠 = 站点内相对路径 `disp/{id}`；暂存 = 云盘暂存区路径
+  status        TINYINT NOT NULL DEFAULT 1,       -- 1 正常 0 删除（软删）
+  deleted_at / created_at / updated_at,
+  UNIQUE KEY uk_disp_owner_name (owner_id, name)
+);
+
+disp_grant (
+  id          BIGINT UNSIGNED PK AI,
+  app_id      BIGINT UNSIGNED NOT NULL,      -- app_def.id
+  display_id  BIGINT UNSIGNED NOT NULL,      -- disp_display.id
+  granted_by  BIGINT UNSIGNED NOT NULL,
+  created_at,
+  UNIQUE KEY uk_grant_app_display (app_id, display_id),
+  KEY idx_grant_display (display_id)
+);
+```
+
+`app_def.pub_code` 列保留不删（历史数据无害），停止签发与消费（D115）；`app_def.is_public` 语义转为「**可被授权读取的总开关**」。
+`app_page.kind` 收缩为仅 `admin`——存量 display 页由迁移登记（清单见迁移目录 `display-pages-removed.md`：14 行，全为 P12/E2E/冒烟夹具且已软删）后删除（R126）。
+错误码新增 **50016**（展示应用不存在/已删除）、**50017**（授权关系已存在/不存在）、**50018**（展示应用名冲突）。
+
+### 30.3 文件与托管模型
+
+- **挂靠即移动**（D116/R127）：展示应用目录物理位于所挂靠站点目录（`site_site.root_folder_id` 树）内，路径 `{站点目录}/disp/{displayId}/`；换挂靠 = 物理移动 + `site_id` 更新（库更新失败即反向移动补偿 = 全回滚）。未挂靠 = 目录在属主云盘暂存区（`{display.stagingPath}/{ownerId}/{displayId}/`）。
+- **开放层静态服务**：`GET /api/open/:slug/disp/:id/**`——校验该展示应用存在、未软删、且 `site_id` = 该 slug 站点（`DisplayFacade.resolveForOpen`）；从站点目录子树流式返回，`R26` MIME 判定与 index 回退/SPA 回退**复用站点静态同一流程**。暂存区不对外服务，未挂靠即 40400（§30.8 ④）。
+  **路由声明顺序**：展示应用路由必须声明在站点静态通配 `:slug/*path` **之前**（控制器内声明顺序 = 注册顺序）；否则 `/disp/:id/` 会被通配吞掉、再经 SPA/美化回退兜成站点首页 200（P14 端到端实测发现并修复）。
+- **生成规范**（R124）：AI 生成时提示词强制相对路径 + 同源 `/api/open/<slug>/api/app/<appCode>/...` 取数；`index.html` 为入口。
+- **写文件路径**：`DisplayView.writePath`（挂靠 = `{slug}/disp/{id}`，未挂靠 = 暂存区路径，均相对用户云盘根），AI 用云盘写文件工具直接可用。
+
+### 30.4 开放层数据端点（匿名端点的授权化替代）
+
+`GET /api/open/:slug/api/app/:appCode/` 下四端点（取代退役的 `/api/pub/app/:pubCode/*`，参数与 R104 固定口径不变）：
+
+| 端点                            | 说明                                                         |
+| ------------------------------- | ------------------------------------------------------------ |
+| `/schema`                       | 表结构（暴露三开关过滤后；含枚举选项与 ref 目标表名）        |
+| `/tables/:table/records`        | 列表（size≤50、sort≤2、filter≤3、expand≤1 沿用）             |
+| `/tables/:table/records/:rowId` | 详情                                                         |
+| `/files/:fileId/stream`         | 附件流（R26 MIME；三道闸在 app 域内完成，MIME 结果随流出域） |
+
+**校验链（R125）**：站点存在 → `DisplayFacade.assertCanRead`（站点下任一挂靠展示应用存在 `disp_grant` 命中该 app）→ `app_def.is_public=1` → 表/字段暴露三开关。任一不满足 → **40400**（对外不区分原因；参数错仍 40001；限流 42900 独立配额沿用）。**缓存与失效沿用 P12**：数据 60s + 写后 DEL（授权/暴露/is_public 变更均触发 DEL：display 域经 `AppFacade.invalidatePublicCache`）、schema 600s。双路径执行器（DB 下推/内存 1 万行帽 50009）原样复用。
+
+### 30.5 退役清单（T126/T127）
+
+- `/api/pub/app/:pubCode/**` 五端点（manifest / 页 schema / 数据列表 / 数据详情 / 附件流）**整体删除**（控制器移除，访问即 404 不存在路由）；`pub_code` 停止签发与消费。
+- `PublicRenderer`、前端 `/pub/app/:pubCode` 与 `/p/:pageCode` 路由、`api/app/pub.ts` 客户端、display 页编辑/预览入口移除；页编辑器「草稿预览」改由 `ReadonlyRenderer`（登录态直查、零写请求）承接。
+- 发布校验（R103 修订）只要求 **≥1 张已暴露表**（display 页两项条件随展示页废弃取消）；`expose_data_app` 收缩为 `table` / `field` 两档。
+- PATCH2「README 三模板 · 数据应用公开接口」节与 `list_data_apps` 输出重写为授权取数口径（D118）；`smoke:ai` M 场景按新口径改写、新增 O 场景（bundle 复制全链）。
+
+### 30.6 市场 bundle（T129）
+
+- **快照结构扩展**：`market_listing.snapshot` 增加 `displays[]`（`{name, files:[{path,content}]}`）与 `grants[]`（`{displayName}`——数据应用即快照所属应用，授权边以展示应用名指向 `displays[]`；`SNAPSHOT_VERSION` 保持 1，旧快照缺这两字段时归一为空数组，向后兼容）。提交时由 market 域经 `DisplayFacade.exportBundle` 取**出边闭包**（该 app 授权的全部展示应用；挂靠态从站点目录读文本文件，未挂靠只带名称），`submit_market_app` 与 `POST /api/market/submissions` 响应 `displays[]` 逐条列明。
+- **复制物化**：`AppFacade.materializeListing` 先按原流程物化数据应用（返回 `appId`），再 `DisplayFacade.materializeBundle(userId, newAppId, {displays, grants})`：接收方名下逐个建 `disp_display`（重名自动 `xxx(2)` 递增，超 `display.copyNameSuffixMax` 记为 skipped）、写文本文件（一律进未挂靠暂存区）、按 `displayName → 新 id` 映射重建 `disp_grant`（指向新 appId）。`POST /api/market/:code/copy` 响应附 `displays: [{id,name,siteId}]` 与 `skippedDisplays[]`。
+- **边界（R128）**：快照冻结；反向边不带；二进制素材不随包（断链自担）；审核含文件内容过目。
+
+### 30.7 AI 工具链（41→43）
+
+| #   | 工具                 | 类型         | 参数                              | 说明                                                                            |
+| --- | -------------------- | ------------ | --------------------------------- | ------------------------------------------------------------------------------- |
+| 42  | `create_display_app` | 写（确认卡） | `{name, siteSlug?}`               | 创建展示应用；无站点/不填 → 暂存区；返回 `id/writePath/urlPreview` 与下一步指引 |
+| 43  | `authorize_data_app` | 写（确认卡） | `{appCode, displayId, isGranted}` | 授权/撤权，镜像 `expose_data_app` 模式（未发布应用回喂 hint）                   |
+
+既有工具修订：`list_data_apps` 输出改授权口径（`apps[].grantedDisplays` + 顶层 `displayApps[]`，不再给 pubCode 直链话术）；`submit_market_app` 确认卡扩展 bundle；`publish_data_app` / `expose_data_app` 语义与文案同步新口径。`check:ai` **19/19**（新增「授权展示应用」路由样例）+ `smoke:ai`（M 改写、新增 O）必过（T95 纪律）。手册腾挪按 R129（通用版 959/1000、能力清单 978/1200、合注 1988/2000）。
+
+### 30.8 已知边界
+
+① bundle 展示文件断链自担；② 管理端审核人工过目打包文件；③ 展示副本无数据时空渲染（与数据侧演示数据选项正交）；④ 暂存区展示应用仅属主后管可见，公开访问一律 40400；⑤ 跨用户复制的授权重建**不包含**接收方反向授予他人（复制后授权图 = 快照出边闭包的镜像）；⑥ 展示应用文件仅文本白名单（HTML/CSS/JS/JSON 等）随包读取与写入，二进制素材（图片/字体等）不随复制迁移。

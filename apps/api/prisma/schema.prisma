@@ -720,7 +720,7 @@ model AppDef {
   id          BigInt    @id @default(autoincrement())
   /// 应用标识：用户内唯一（R93 slug 化名称 + 冲突 "(1)"）
   code        String    @map("code") @db.VarChar(64)
-  /// 全局唯一 12 位随机串（R93，创建即生成，P12 公开访问才启用）
+  /// 列保留不删（P14 D115 退役：停止签发与消费，历史值无害）
   pubCode     String    @unique @map("pub_code") @db.VarChar(12)
   name        String    @map("name") @db.VarChar(50)
   description String?   @map("description") @db.VarChar(200)
@@ -732,7 +732,7 @@ model AppDef {
   sourceAppId BigInt?   @map("source_app_id")
   /// 版本号（机制预留，本期不实现历史回滚）
   version     Int       @default(1) @map("version")
-  /// 公开发布开关（P12 D101 属主自助；0 = 未公开，公开面一律 40400）
+  /// 可被授权读取的总开关（P14 D115 语义切换：授权命中后仍须为 1，否则 40400）
   isPublic    Int       @default(0) @map("is_public") @db.TinyInt
   deletedAt   DateTime? @map("deleted_at")
   createdAt   DateTime  @default(now()) @map("created_at")
@@ -931,4 +931,47 @@ model MarketListing {
   @@index([status, listedAt], map: "idx_market_status_listed")
   @@index([publisherId, sourceAppId, status], map: "idx_market_pub_app_status")
   @@map("market_listing")
+}
+
+// ==================== P14：展示应用与数据授权（D112/D114，表名 disp_ 前缀） ====================
+// 模型修订期：展示应用独立实体（自有目录 + 站点挂靠可换）；授权两跳（数据应用 → 展示应用 → 挂靠站点）。
+// 全部逻辑外键（relationMode=prisma，无物理 FK）；属主/站点均禁 JOIN。
+
+/// 展示应用（D112）：AI 生成的静态 HTML/JS 展示页容器；自有目录，可挂靠站点（site_id NULL = 暂存区）
+model DispDisplay {
+  id         BigInt    @id @default(autoincrement())
+  /// 属主（逻辑关联 sys_user，禁 JOIN）
+  ownerId    BigInt    @map("owner_id")
+  /// 展示应用名（属主内唯一，D112；软删改名释放唯一槽，同 app_table 口径）
+  name       String    @map("name") @db.VarChar(64)
+  /// 挂靠站点（逻辑关联 site_site，禁 JOIN；NULL = 暂存区未挂靠，D116）
+  siteId     BigInt?   @map("site_id")
+  /// 目录路径：挂靠 = 站点目录内相对路径；未挂靠 = 云盘暂存区路径（R127 移动语义）
+  folderPath String    @map("folder_path") @db.VarChar(512)
+  /// 1 正常 / 0 删除（软删；目录保留在云盘由用户处置，API §21.1）
+  status     Int       @default(1) @map("status") @db.TinyInt
+  deletedAt  DateTime? @map("deleted_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  @@unique([ownerId, name], map: "uk_disp_owner_name")
+  @@index([ownerId, status, deletedAt], map: "idx_disp_owner_status")
+  @@index([siteId, status, deletedAt], map: "idx_disp_site_status")
+  @@map("disp_display")
+}
+
+/// 数据授权（D114）：数据应用 → 展示应用 的授权边；表/字段级沿用 P12 暴露三开关叠加（R125 次序）
+model DispGrant {
+  id        BigInt   @id @default(autoincrement())
+  /// 数据应用（逻辑关联 app_def.id，禁 JOIN）
+  appId     BigInt   @map("app_id")
+  /// 展示应用（逻辑关联 disp_display.id，禁 JOIN）
+  displayId BigInt   @map("display_id")
+  /// 授予人（逻辑关联 sys_user，禁 JOIN）
+  grantedBy BigInt   @map("granted_by")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([appId, displayId], map: "uk_grant_app_display")
+  @@index([displayId], map: "idx_grant_display")
+  @@map("disp_grant")
 }

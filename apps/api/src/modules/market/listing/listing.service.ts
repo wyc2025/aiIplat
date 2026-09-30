@@ -6,6 +6,7 @@ import { ErrorCode } from '../../../common/constants/error-code'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { AppFacade } from '../../app/facade/app-facade.service'
+import { DisplayFacade } from '../../display/facade/display-facade.service'
 import { UserService } from '../../system/user/user.service'
 import { assertSnapshotSize, parseDemoData, parseSnapshot } from '../snapshot/snapshot-marshal.core'
 import { buildSnapshot, type AppSnapshot } from '../snapshot/snapshot'
@@ -52,6 +53,9 @@ interface SnapshotSummary {
   pageCount: number
   tables: Array<{ name: string; label: string; fieldCount: number }>
   pages: Array<{ name: string; route: string; kind: string }>
+  /** P14 D117：随包展示应用数量与清单（提交确认卡 / 详情 / 复制结果逐条列明） */
+  displayCount: number
+  displays: Array<{ name: string; fileCount: number }>
 }
 
 function summarize(snapshot: AppSnapshot): SnapshotSummary {
@@ -67,6 +71,11 @@ function summarize(snapshot: AppSnapshot): SnapshotSummary {
       name: page.name,
       route: page.route,
       kind: page.kind,
+    })),
+    displayCount: snapshot.displays.length,
+    displays: snapshot.displays.map((display) => ({
+      name: display.name,
+      fileCount: display.files.length,
     })),
   }
 }
@@ -85,6 +94,7 @@ export class ListingService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly appFacade: AppFacade,
+    private readonly displayFacade: DisplayFacade,
     private readonly userService: UserService,
   ) {}
 
@@ -95,9 +105,18 @@ export class ListingService {
   async submit(
     userId: bigint,
     dto: SubmitListingDto,
-  ): Promise<{ ok: true; listingCode: string; status: string }> {
+  ): Promise<{
+    ok: true
+    listingCode: string
+    status: string
+    /** P14 D117：随包展示应用清单（确认卡逐条列明） */
+    displays: Array<{ name: string; fileCount: number }>
+    /** 文件随包读取失败（仅带名称）的展示应用 */
+    skippedDisplays: string[]
+  }> {
     const appCode = dto.appCode.trim()
     const withDemoData = dto.withDemoData === true
+    const withDisplayApps = dto.withDisplayApps !== false
 
     const source = await this.appFacade.exportStructure(userId, appCode)
     if (source.status !== APP_STATUS_ACTIVE) {
@@ -116,7 +135,11 @@ export class ListingService {
       )
     }
 
-    const snapshot = buildSnapshot(source)
+    // P14 D117：随包展示应用 bundle（该应用的出边授权闭包）；withDisplayApps=false 时不打包
+    const bundle = withDisplayApps
+      ? await this.displayFacade.exportBundle(userId, sourceAppId)
+      : { displays: [], grants: [], skipped: [] as string[] }
+    const snapshot = buildSnapshot({ ...source, displays: bundle.displays, grants: bundle.grants })
     assertSnapshotSize(snapshot, this.config.get<number>('market.snapshotMaxBytes', 256 * 1024))
 
     let demoData: Record<string, Array<{ rowId: string; data: Record<string, unknown> }>> | null = null
@@ -152,7 +175,13 @@ export class ListingService {
         status: LISTING_STATUS_PENDING,
       },
     })
-    return { ok: true, listingCode: listing.code, status: listing.status }
+    return {
+      ok: true,
+      listingCode: listing.code,
+      status: listing.status,
+      displays: bundle.displays.map((item) => ({ name: item.name, fileCount: item.files.length })),
+      skippedDisplays: bundle.skipped,
+    }
   }
 
   /** 我的提交（全状态，时间倒序；含审核意见、卡片数字与源应用 code） */
@@ -197,6 +226,7 @@ export class ListingService {
           hasDemo: row.hasDemo === 1,
           copyCount: row.copyCount,
           listedAt: row.listedAt,
+          displayCount: summary.displayCount,
         }
       }),
       total,
@@ -221,6 +251,8 @@ export class ListingService {
       pageCount: summary.pageCount,
       tables: summary.tables,
       pages: summary.pages,
+      displayCount: summary.displayCount,
+      displays: summary.displays,
     }
   }
 
@@ -239,6 +271,11 @@ export class ListingService {
       snapshot,
       demoData,
     })
+    // P14 D117：展示应用副本 + 授权重建（副本一律进未挂靠暂存区，挂靠不随复制）
+    const bundleResult = await this.displayFacade.materializeBundle(userId, BigInt(result.appId), {
+      displays: snapshot.displays,
+      grants: snapshot.grants,
+    })
     await this.prisma.marketListing.update({
       where: { id: listing.id },
       data: { copyCount: { increment: 1 } },
@@ -249,6 +286,8 @@ export class ListingService {
       pageCount: result.pageCount,
       rowCount: result.rowCount,
       skippedRows: result.skippedRows,
+      displays: bundleResult.displays,
+      skippedDisplays: bundleResult.skipped,
     }
   }
 
@@ -281,6 +320,8 @@ export class ListingService {
       pageCount: summary.pageCount,
       tables: summary.tables,
       pages: summary.pages,
+      displayCount: summary.displayCount,
+      displays: summary.displays,
       createdAt: row.createdAt,
       reviewedAt: row.reviewedAt,
       listedAt: row.listedAt,

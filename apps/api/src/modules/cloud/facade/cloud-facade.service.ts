@@ -1171,6 +1171,22 @@ export class CloudFacade {
   }
 
   /**
+   * 用户云盘路径是否存在（基点 = 用户云盘根，P14 T125：供 display 域判定「挂靠移动」的源目录是否已落盘）。
+   * 路径非法或不存在一律 false（不抛异常，调用方据此走「空目录挂靠」分支）。
+   */
+  async existsUserPath(userId: bigint, path: string): Promise<boolean> {
+    let segments: string[]
+    try {
+      segments = this.normalizeUserPath(path)
+    } catch {
+      return false
+    }
+    if (segments.length === 0) return false
+    const entry = await this.findEntryByBase(userId, USER_ROOT_ID, segments)
+    return entry !== null && entry !== undefined
+  }
+
+  /**
    * 云盘批量删除（基点 = 用户云盘根）：仅软删进回收站（可还原）；
    * 站点根拦截 30020 经 file.service.remove 继承，逐条独立成败。
    */

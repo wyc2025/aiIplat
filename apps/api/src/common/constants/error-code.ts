@@ -217,6 +217,14 @@ export const ErrorCode = {
   MarketListingNotFound: 50014,
   /** 提交内容不合规（演示数据超 100 行/表、快照超限或结构非法；message 带原因） */
   MarketSubmitInvalid: 50015,
+
+  // ========== display 域（50xxx 段续：50016 起，P14 D112/D114） ==========
+  /** 展示应用不存在或已删除（后管与开放层统一；开放层经 R125 校验链后仍统一 40400 防探测） */
+  DisplayNotFound: 50016,
+  /** 授权关系已存在 / 不存在（grant 重复、revoke 无此边） */
+  DisplayGrantConflict: 50017,
+  /** 展示应用名称冲突（owner 内唯一，D112/R123） */
+  DisplayNameConflict: 50018,
 } as const
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode]

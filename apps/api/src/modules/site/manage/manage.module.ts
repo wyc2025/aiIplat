@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common'
 import { StorageModule } from '../../../infra/storage/storage.module'
 import { CloudModule } from '../../cloud/cloud.module'
-import { SiteOpenModule } from '../open/open.module'
+import { SiteResolveModule } from '../open/site-resolve.module'
 import { SiteQuotaService } from '../quota/quota.service'
 import { SiteAdminController } from './admin.controller'
 import { SiteManageController } from './manage.controller'
@@ -14,9 +14,13 @@ import { SiteManageService } from './manage.service'
  * 模板写正式区经 StorageService（infra 全局能力）；缓存失效复用 SiteResolveService。
  * SiteQuotaService（配额懒创建/校验/admin 调整）随本模块注册（仅本站点管理链使用，不外泄）。
  * 对外导出 SiteManageService：SiteFacade.createSite 委托同一创建链（R57/D55）。
+ *
+ * P14 T125 调整：依赖由 `SiteOpenModule` 改为 `SiteResolveModule`（解析服务已抽出）——
+ * 否则 open 依赖 display 门面时构成 `SiteFacadeModule → SiteManageModule → SiteOpenModule →
+ * DisplayFacadeModule → DisplayManageModule → SiteFacadeModule` 模块环（运行时 TDZ 崩）。
  */
 @Module({
-  imports: [StorageModule, CloudModule, SiteOpenModule],
+  imports: [StorageModule, CloudModule, SiteResolveModule],
   controllers: [SiteManageController, SiteAdminController],
   providers: [SiteManageService, SiteQuotaService],
   exports: [SiteManageService],

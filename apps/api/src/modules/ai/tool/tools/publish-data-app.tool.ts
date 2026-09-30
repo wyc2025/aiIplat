@@ -3,22 +3,23 @@ import type { AiTool } from '../tool.types'
 import { feedAppError, readStr } from './app-error.util'
 
 /**
- * 公开发布数据应用（write，P13 T120 / R122 / D110，覆盖 P12-PATCH2 的 D106 写工具缺口）。
+ * 发布数据应用（write，P13 T120 / R122 / D110；P14 T126 口径修订）。
  *
- * 行为：开启时走 R103 校验（≥1 张已暴露表 + ≥1 个已公开 display 页 + 公开页数据源字段全暴露）；
- * 未过校验**不抛错**，回喂 `{ ok:false, missing[] }` 让模型按缺项引导用户先 expose（闭环：R110）。
- * 关闭即时失效公开端（pubCode 失效，缓存 DEL 由 app 域负责）。
+ * P14 D115：`is_public` 语义 = 「**可被授权读取的总开关**」——不再产出匿名公开链接（pub_code 停止消费），
+ * 开启后仍须经展示应用授权（`authorize_data_app`）且站点页走同源取数面才可读。
+ * 开启时走发布校验（≥1 张已暴露表）；未过校验**不抛错**，回喂 `{ ok:false, missing[] }`
+ * 让模型按缺项引导用户先 expose（闭环：R110）。关闭即时失效取数面缓存。
  */
 export function createPublishDataAppTool(appFacade: AppFacade): AiTool {
   return {
     name: 'publish_data_app',
-    title: '公开发布数据应用',
+    title: '发布数据应用（可被授权读取）',
     description:
-      '开启或关闭一个数据应用的「公开发布」开关（isPublic）。开启后该应用的公开链接与公开只读接口对**匿名访客**可用；' +
-      '关闭即时失效（pubCode 立即不可访问）。开启前必须先满足公开条件：至少 1 张已暴露的表、至少 1 个已公开展示页（display）、' +
-      '且公开页数据源与区块字段引用的表和字段全部已暴露。' +
-      '若条件不满足，本工具返回 ok:false 与 missing（缺项清单）：**不要重试同一个调用**，按缺项逐项调用 expose_data_app 补齐后再重试。' +
-      '调用前先用 list_data_apps 查看应用的 isPublic 与 missing（已公开的应用无需再开）。',
+      '开启或关闭数据应用的「可被授权读取」总开关（isPublic）。开启后该应用的数据才能被展示应用（挂靠站点的静态展示页）' +
+      '经授权读取；关闭即时失效（站点取数一律 40400）。开启前至少需要 1 张已暴露的表，条件不满足时本工具返回 ok:false 与 ' +
+      'missing（缺项清单）：**不要重试同一个调用**，按缺项调用 expose_data_app 补齐后再重试。' +
+      '读取的完整前置链：本开关开启 + authorize_data_app 已授权给某展示应用 + 该展示应用已挂靠站点 + 表/字段已暴露。' +
+      '调用前先用 list_data_apps 查看 isPublic 与 missing（已开启的应用无需再开）。',
     parameters: {
       type: 'object',
       properties: {
@@ -36,8 +37,8 @@ export function createPublishDataAppTool(appFacade: AppFacade): AiTool {
       const appCode = readStr(params, 'appCode')
       const isPublic = params.isPublic === true
       return isPublic
-        ? `开启数据应用「${appCode}」的公开发布：公开链接与公开只读接口将对匿名访客可访问`
-        : `关闭数据应用「${appCode}」的公开发布：公开链接与公开只读接口立即失效`
+        ? `开启数据应用「${appCode}」的发布：授权给展示应用后，站点展示页可只读读取其数据`
+        : `关闭数据应用「${appCode}」的发布：站点取数立即失效（一律 40400）`
     },
     handler: async (ctx, params) => {
       const appCode = readStr(params, 'appCode')

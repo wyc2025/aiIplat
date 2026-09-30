@@ -13,7 +13,7 @@
  */
 import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import PublicRenderer from '@/components/app-renderer/PublicRenderer.vue'
+import ReadonlyRenderer from '@/components/app-renderer/ReadonlyRenderer.vue'
 import { FIELD_TYPE_LABELS, parseFieldSpec } from '../../utils/schema'
 import type { AppPageListItem } from '@/api/app'
 import type { AppFieldType, AppTableItem } from '@/types/api'
@@ -843,10 +843,9 @@ const previewDisplaySchema = computed<Record<string, unknown>>(() => {
       width="760px"
       append-to-body
     >
-      <PublicRenderer
+      <ReadonlyRenderer
         :key="previewRendererKey"
-        :pub-code="''"
-        :preview-app-code="appCode"
+        :app-code="appCode"
         :schema="previewDisplaySchema"
       />
       <template #footer>

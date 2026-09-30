@@ -1,7 +1,13 @@
 import { Injectable } from '@nestjs/common'
-import { AdminService, PAGE_KIND_DISPLAY } from '../admin/admin.service'
+import { AdminService } from '../admin/admin.service'
 import { DataService } from '../data/data.service'
 import { PageService } from '../page/page.service'
+import type { AppAttachmentStream } from '../../cloud/facade/cloud-facade.service'
+import { RedisService } from '../../../infra/redis/redis.service'
+import { invalidatePubAll } from '../pub/pub.cache'
+import { PubDataService } from '../pub/pub-data.service'
+import type { PublicListPayload, PublicSchemaPayload } from '../pub/pub-data.service'
+import { resolveAppPubMime } from '../pub/pub-mime'
 import { SchemaService } from '../schema/schema.service'
 import type { FieldDefDto } from '../schema/dto/schema.dto'
 import type { ResolvedTable } from '../schema/schema.types'
@@ -42,9 +48,10 @@ export interface MarketSnapshotInput {
   pages: Array<{ name: string; route: string; schema: Record<string, unknown>; genBy?: string }>
 }
 
-/** 复制物化结果（R119） */
+/** 复制物化结果（R119；P14 起附 appId 供 market 域续做展示应用 bundle 物化） */
 export interface MaterializeResult {
   ok: true
+  appId: string
   appCode: string
   tableCount: number
   pageCount: number
@@ -71,6 +78,8 @@ export class AppFacade {
     private readonly schemaService: SchemaService,
     private readonly pageService: PageService,
     private readonly dataService: DataService,
+    private readonly pubDataService: PubDataService,
+    private readonly redis: RedisService,
   ) {}
 
   /** AI 创建应用草稿（工具 create_data_app；draft 不占 active 额度，限 3 个） */
@@ -168,9 +177,11 @@ export class AppFacade {
   }
 
   /**
-   * R114（P12-PATCH2 T116）：AI 列应用与公开状态（工具 `list_data_apps`）——
-   * 返回 appCode / name / status / isPublic / pubCode / pubUrl / missing（发布缺项）。
-   * **只读**：发布与暴露开关的写工具按 D106 归 P13，本方法不代发布。
+   * R114（P12-PATCH2 T116 建 / P14 T126 修订）：AI 列应用与可读取状态（工具 `list_data_apps`）——
+   * 返回 appCode / name / status / isPublic（可被授权读取的总开关，D115）/ missing（发布缺项）。
+   * P14：不再返回 pubCode / pubUrl（匿名公开链接退役）；展示侧改由「展示应用 + 授权」承担，
+   * 授权关系由 ai 域工具另经 `DisplayFacade` 组装（本门面不依赖 display 域，防模块环）。
+   * **只读**：发布与暴露开关的写工具归 P13，本方法不代发布。
    */
   async listDataApps(userId: bigint): Promise<{
     ok: true
@@ -179,8 +190,6 @@ export class AppFacade {
       name: string
       status: string
       isPublic: number
-      pubCode: string
-      pubUrl: string
       missing: string[]
     }>
   }> {
@@ -300,28 +309,15 @@ export class AppFacade {
   ): Promise<{
     ok: boolean
     isPublic: number
-    pubCode?: string
-    pubUrl?: string
     missing?: string[]
   }> {
     try {
       const result = await this.adminService.publish(userId, appCode, isPublic)
-      return {
-        ok: true,
-        isPublic: result.isPublic,
-        pubCode: result.pubCode,
-        pubUrl: result.pubUrl,
-      }
+      return { ok: true, isPublic: result.isPublic }
     } catch (error) {
       if (error instanceof BusinessException && error.code === ErrorCode.AppPublishInvalid) {
         const config = await this.adminService.pubConfig(userId, appCode)
-        return {
-          ok: false,
-          isPublic: 0,
-          pubCode: config.pubCode,
-          pubUrl: config.pubUrl,
-          missing: config.missing,
-        }
+        return { ok: false, isPublic: 0, missing: config.missing }
       }
       throw error
     }
@@ -330,13 +326,15 @@ export class AppFacade {
   /**
    * P13 R122 / D110：粒度暴露开关（AI 工具 `expose_data_app`）。
    * - target=table：按表名解析；
-   * - target=field：name 支持 `表.字段` 或应用内唯一字段名；
-   * - target=page：name 支持页 code 或页名，**仅 display 页可公开**，否则 50004（R110）。
+   * - target=field：name 支持 `表.字段` 或应用内唯一字段名。
+   *
+   * P14 D113/T126：`target=page` 档**退役**——display 展示页整体废弃（kind 收缩为仅 admin）；
+   * 数据应用的对外可读性只由「is_public 总开关 + 表·字段暴露」决定（D115），展示改由展示应用承担。
    */
   async setExposure(
     userId: bigint,
     appCode: string,
-    target: 'table' | 'field' | 'page',
+    target: 'table' | 'field',
     name: string,
     isExposed: number,
   ): Promise<{ ok: true; target: string; name: string; isExposed: number }> {
@@ -363,19 +361,82 @@ export class AppFacade {
       return { ok: true, target, name: result.field, isExposed: result.isExposed }
     }
 
-    const pages = await this.pageService.list(userId, appCode)
-    const page = pages.find((item) => item.code === key || item.name === key)
-    if (!page) {
-      throw new BusinessException(ErrorCode.AppNotFound, `功能页不存在或无权：${key}`)
-    }
-    if (page.kind !== PAGE_KIND_DISPLAY) {
-      throw new BusinessException(
-        ErrorCode.AppPageSchemaInvalid,
-        `仅展示页（display）可公开，当前页为 ${page.kind}：${key}`,
-      )
-    }
-    await this.pageService.setPublic(userId, appCode, BigInt(page.id), flag)
-    return { ok: true, target, name: page.code, isExposed: flag }
+    throw new BusinessException(
+      ErrorCode.ParamInvalid,
+      'target 仅支持 table / field（P14：display 展示页已废弃，page 档退役）',
+    )
+  }
+
+  // ==================== P14 §30.4：授权取数面（经 R125 校验链后由 site 域开放层调用） ====================
+
+  /**
+   * 展示应用授权用：属主 + code → 应用标识（不存在/无权 → 50001；属主校验单点在域内）。
+   * display 域经本方法取 appId 落 `disp_grant.app_id`，不直读 app_def（铁律 6）。
+   */
+  async appIdByCode(
+    userId: bigint,
+    appCode: string,
+  ): Promise<{ appId: string; appCode: string; name: string; isPublic: number }> {
+    const app = await this.adminService.assertOwned(userId, appCode)
+    return { appId: app.id.toString(), appCode: app.code, name: app.name, isPublic: app.isPublic }
+  }
+
+  /** 授权增删后失效取数面缓存（display 域经此调用，避免跨域 import app 内部缓存工具，铁律 6） */
+  async invalidatePublicCache(appId: bigint): Promise<void> {
+    await invalidatePubAll(this.redis, appId)
+  }
+
+  /**
+   * 取数面定位（R125 第 ③ 步）：属主 + 应用 code + `is_public=1` 总开关，返回可读应用标识；
+   * 不存在 / 未公开 / 已软删一律 40400（防探测，不暴露存在性差异）。
+   */
+  async resolveGrantedApp(
+    ownerId: bigint,
+    appCode: string,
+  ): Promise<{ appId: string; appCode: string; name: string; description: string | null }> {
+    const app = await this.pubDataService.resolvePublicApp(ownerId, appCode)
+    return { appId: app.id.toString(), appCode: app.code, name: app.name, description: app.description }
+  }
+
+  /** 取数面暴露表结构（§30.4 `/schema`；缓存 600s） */
+  async publicSchema(ownerId: bigint, appCode: string): Promise<PublicSchemaPayload> {
+    return this.pubDataService.schema(ownerId, appCode)
+  }
+
+  /** 取数面列表（§30.4 `/tables/:table/records`；R104 固定参数口径沿用） */
+  async publicList(
+    ownerId: bigint,
+    appCode: string,
+    table: string,
+    query: Record<string, unknown>,
+  ): Promise<PublicListPayload> {
+    return this.pubDataService.listRows(ownerId, appCode, table, query)
+  }
+
+  /** 取数面单行（§30.4 `/tables/:table/records/:rowId`） */
+  async publicDetail(
+    ownerId: bigint,
+    appCode: string,
+    table: string,
+    rowId: string,
+    query: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    return this.pubDataService.getRow(ownerId, appCode, table, rowId, query)
+  }
+
+  /**
+   * 取数面附件流（§30.4 `/files/:fileId/stream`）：三道闸（引用索引 / 表·字段暴露 / R26 MIME）
+   * 全在 app 域内完成，MIME 结果随流一并出域，site 域开放层不做 app 专属 MIME 判定（铁律 6）。
+   */
+  async publicAttachment(
+    ownerId: bigint,
+    appCode: string,
+    fileId: string,
+    range?: { start: number; end: number },
+  ): Promise<AppAttachmentStream & { contentType: string; inline: boolean }> {
+    const meta = await this.pubDataService.attachmentStream(ownerId, appCode, fileId, range)
+    const resolved = resolveAppPubMime(meta.ext)
+    return { ...meta, contentType: resolved.contentType, inline: resolved.inline }
   }
 
   /**
@@ -475,7 +536,15 @@ export class AppFacade {
       throw error
     }
 
-    return { ok: true, appCode: app.code, tableCount, pageCount, rowCount, skippedRows }
+    return {
+      ok: true,
+      appId: app.id.toString(),
+      appCode: app.code,
+      tableCount,
+      pageCount,
+      rowCount,
+      skippedRows,
+    }
   }
 
   /** P13 R120：按 id 批量取应用 code（market 域「我的提交」回填 appCode；只读） */

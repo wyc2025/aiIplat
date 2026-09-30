@@ -71,37 +71,37 @@ iplat 个人网站模板 —— 作品集（portfolio）
   · 改文案：站点标题与描述在后台「站点设置」里改，无需动代码；
   · 需要图片：在后台云盘页上传到 media/ 目录（AI 助手无法代写二进制文件）。
 
-六、数据应用公开接口（只读，可选）
-  如果后台「应用中心」里的数据应用已「公开」，站点页可直接读取它的公开数据（只读、无需登录）。
-  注意：本节是第一节「相对路径」纪律的唯一例外——数据应用公开接口挂在平台根 /api/pub/app/ 下
-  （不在站点子路径内），必须用绝对路径调用；站点自身接口仍用 ./api/ 相对口径。
+六、数据应用取数（展示页读数据，可选）
+  如果后台「应用中心」的数据应用要给你本站的展示页提供数据，需要先「授权」——授权后
+  站点展示页可以经**同源相对路径**读取该应用已暴露的数据（只读、无需登录）。
+  注意：本节与第一节「相对路径」纪律一致——取数接口仍在站点子路径内（./api/app/...），
+  站点页内直接相对调用即可，无需绝对地址。
 
-  前置条件（三者缺一即 40400，与「不存在」不可区分）：
-    ① 应用已发布：应用中心 → 该应用「公开」开关已开；
-    ② 表与字段已暴露：该应用「结构」编辑器里表/字段的「公开」开关；
-    ③ 展示页已公开：该应用「功能页」里 display 类型页的「公开」开关。
+  前置条件（缺一即 40400，与「不存在」不可区分）：
+    ① 展示应用已挂靠本站点：应用中心 → 展示应用 → 挂靠本站；
+    ② 数据应用已授权给该展示应用：应用中心 → 展示应用 → 授权（或对话中让 AI 授权）；
+    ③ 数据应用已开启「可被授权读取」：应用中心 → 我的应用 → 发布；
+    ④ 表与字段已暴露：应用中心 → 结构 → 表/字段的「公开」开关。
 
-  端点清单（响应体仍是 { code, message, data }）：
-    1. GET /api/pub/app/{pubCode}                          公开页清单
-       data: { name, description, pages: [{ code, name }] }
-    2. GET /api/pub/app/{pubCode}/pages/{pageCode}/schema   展示页模式（dataSources + 区块）
-    3. GET /api/pub/app/{pubCode}/data/{table}              只读列表
+  接口清单（响应体仍是 { code, message, data }；相对路径口径）：
+    1. GET ./api/app/{appCode}/schema                              暴露的表结构
+       data: { app: { name, description }, tables: [{ name, label, fields: [{ name, label, type }] }] }
+    2. GET ./api/app/{appCode}/tables/{table}/records              只读列表
        参数（均可选）：page（默认 1）/ size（≤50，默认 20）
          sort=字段:asc|desc          最多 2 组（重复传参）
          filter=字段:eq|contains:值   最多 3 组（重复传参；contains 仅文本/枚举）
          expand=引用字段[:字段1,字段2] 最多 1 组，展开 1 层
        data: { list, total, pageNo, pageSize }
        list 项：仅「已暴露字段」+ rowId / createdAt / updatedAt；展开结果在 expanded 字段里
-    4. GET /api/pub/app/{pubCode}/data/{table}/{rowId}      只读单行（行不存在 → 40400）
-    5. GET /api/pub/app/{pubCode}/file/{fileId}             附件图片/文件流（?download=1 触发下载）
+    3. GET ./api/app/{appCode}/tables/{table}/records/{rowId}      只读单行（行不存在 → 40400）
+    4. GET ./api/app/{appCode}/files/{fileId}/stream               附件图片/文件流（?download=1 触发下载）
 
-  fetch 示例（pubCode 见应用中心「公开」弹窗里的公开链接，形如 /pub/app/xxxxxxxxxxxx）：
-    const PUB = '/api/pub/app/{pubCode}'   // 平台根路径，可直接用（见上方例外说明）
-    const res = await fetch(`${PUB}/data/books?size=10&sort=score:desc&filter=title:contains:沙`)
+  fetch 示例（同源相对路径，站点页内直接用；appCode 见应用中心或对话中的 list_data_apps）：
+    const res = await fetch(`./api/app/${APP_CODE}/tables/books?size=10&sort=score:desc`)
     const { code, data } = await res.json()
     if (code === 0 && data.list) { /* data.list / data.total / data.pageNo / data.pageSize */ }
-    图片字段取值后拼 <img src="/api/pub/app/{pubCode}/file/{fileId}">
+    图片字段取值后拼 <img src="./api/app/{appCode}/files/{fileId}/stream">
 
-  错误口径：40400（应用/表/行/文件不存在或未暴露，统一防探测）；40001（参数越界）；
+  错误口径：40400（未授权/未挂靠/未发布/未暴露/不存在，统一防探测）；40001（参数越界）；
            42900（限流 60 次/分/IP）。
-  边界：公开面只读——写入永不进公开层，数据录入请走后台「应用中心」的功能页。
+  边界：只读——写入永不进取数面，数据录入请走后台「应用中心」的功能页。

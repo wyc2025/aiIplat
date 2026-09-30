@@ -75,11 +75,4 @@ export class PageActionDto {
   params?: Record<string, unknown>
 }
 
-/** 公开 / 取消公开 display 页（P12 §19.1，R108；admin 页 → 50004） */
-export class PublishPageDto {
-  @ApiProperty({ description: '1 = 公开该展示页；0 = 取消公开', enum: [0, 1] })
-  @Type(() => Number)
-  @IsInt()
-  @IsIn([0, 1], { message: 'isPublic 仅允许 0 / 1' })
-  isPublic!: number
-}
+// P14 R126：`PublishPageDto`（展示页公开开关入参）随 display 展示页废弃移除。

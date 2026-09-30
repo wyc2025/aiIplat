@@ -6,7 +6,6 @@ import { ErrorCode } from '../../../common/constants/error-code'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { RedisService } from '../../../infra/redis/redis.service'
-import { dslTargetTable, parseFieldDsl } from '../page/page.schema'
 import { invalidatePubAll, invalidatePubData } from '../pub/pub.cache'
 import { invalidateAppSchema } from '../schema/schema.cache'
 import {
@@ -20,13 +19,8 @@ import type { CreateAppDto, ListAppQueryDto, UpdateAppDto } from './dto/admin.dt
 export const APP_STATUS_DRAFT = 'draft'
 export const APP_STATUS_ACTIVE = 'active'
 
-/** 页类型：display = 公开展示页（P12 R108；admin 页不可公开） */
-export const PAGE_KIND_DISPLAY = 'display'
-
-/** 判定普通对象（公开面 schema 结构遍历用） */
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
+// P14 D113/R126：display 展示页整体废弃（`app_page.kind` 收缩为仅 admin），PAGE_KIND_DISPLAY 常量
+// 与其公开面 schema 遍历辅助（isPlainRecord）随之移除——展示改由展示应用（display 域）与站点静态页承担。
 
 /** pubCode 字母数字表（R93：12 位随机，全局唯一，P12 启用） */
 const PUB_CODE_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789'
@@ -265,157 +259,35 @@ export class AdminService {
     }
   }
 
-  // ===== P12 T109：公开面暴露管理（R100 / R103 / R108，API §19.1）=====
-
-  /** 公开页前端路由（相对路径，前端拼域名；照站点分享先例） */
-  private pubUrl(pubCode: string): string {
-    return `/pub/app/${pubCode}`
-  }
+  // ===== P12 T109 暴露管理（R100 / R103；P14 T126 修订为「授权取数面」）=====
 
   /**
-   * R103 发布校验（返回缺项清单，空数组 = 可发布）：
-   * ① ≥1 张已暴露表；② ≥1 个已公开 display 页；
-   * ③ 每个公开页的 dataSources（含 expand/ref 目标表）与区块字段 DSL 引用的表·字段全部已暴露。
+   * R103 发布校验（P14 D115 修订，返回缺项清单，空数组 = 可发布）：仅要求 **≥1 张已暴露表**。
+   *
+   * P12 的两项 display 页条件（≥1 个公开展示页 + 公开页 dataSources/字段引用已暴露）随展示页整体
+   * 废弃（D113）一并取消：展示改由**展示应用**（`disp_display` + 站点静态页）承担，取数走 R125
+   * 授权链（站点 → 授权 → is_public → 暴露），与数据应用发布开关解耦。
    */
   private async collectPublishMissing(appId: bigint): Promise<string[]> {
-    const missing: string[] = []
     const tables = await this.prisma.appTable.findMany({
       where: { appId, deletedAt: null, isSystem: 0 },
-      select: { id: true, name: true, label: true, isExposed: true },
+      select: { name: true, isExposed: true },
     })
-    const tableById = new Map(tables.map((table) => [table.id.toString(), table]))
-    const exposedTableByName = new Map(
-      tables.filter((table) => table.isExposed === 1).map((table) => [table.name, table]),
-    )
-    if (exposedTableByName.size === 0) {
-      // P13 R122：缺项文案带**可操作清单**（模型据此调用 expose_data_app 补齐，人类同样够用）
-      const names = tables.map((table) => table.name)
-      missing.push(
-        names.length > 0
-          ? `至少需要 1 张已暴露的表（本应用表：${names.join('、')}）`
-          : '至少需要 1 张已暴露的表（当前应用没有逻辑表）',
-      )
-    }
-
-    const fields = tables.length
-      ? await this.prisma.appField.findMany({
-          where: { tableId: { in: tables.map((table) => table.id) }, isDeleted: 0 },
-          select: { tableId: true, name: true, isExposed: true, refTableId: true },
-        })
-      : []
-    const exposedFieldsByTableId = new Map<string, Set<string>>()
-    /** ref 字段 → 目标表名（"表.字段" → 目标表名），供 expand/ref 目标暴露校验 */
-    const refTargetByField = new Map<string, string>()
-    for (const field of fields) {
-      const tableKey = field.tableId.toString()
-      if (field.isExposed === 1) {
-        const set = exposedFieldsByTableId.get(tableKey) ?? new Set<string>()
-        set.add(field.name)
-        exposedFieldsByTableId.set(tableKey, set)
-      }
-      if (field.refTableId) {
-        const owner = tableById.get(tableKey)
-        const target = tableById.get(field.refTableId.toString())
-        if (owner && target) refTargetByField.set(`${owner.name}.${field.name}`, target.name)
-      }
-    }
-
-    const publicPages = await this.prisma.appPage.findMany({
-      where: { appId, deletedAt: null, kind: PAGE_KIND_DISPLAY, isPublic: 1 },
-      select: { code: true, name: true, schema: true },
-    })
-    if (publicPages.length === 0) {
-      // 同上：列出可用 display 页（含 code），模型可用 expose_data_app(target=page) 直接公开
-      const displayPages = await this.prisma.appPage.findMany({
-        where: { appId, deletedAt: null, kind: PAGE_KIND_DISPLAY },
-        select: { code: true, name: true },
-        orderBy: [{ sort: 'asc' }, { id: 'asc' }],
-      })
-      missing.push(
-        displayPages.length > 0
-          ? `至少需要 1 个已公开的展示页（display）；可用展示页：${displayPages
-              .map((page) => `${page.name}(${page.code})`)
-              .join('、')}`
-          : '至少需要 1 个已公开的展示页（display）；当前应用没有展示页，请先新建 display 页',
-      )
-    }
-
-    for (const page of publicPages) {
-      const schema = page.schema
-      if (!isPlainRecord(schema)) {
-        missing.push(`展示页「${page.name}」模式非法`)
-        continue
-      }
-      const dataSources = isPlainRecord(schema.dataSources) ? schema.dataSources : {}
-      /** 数据源名 → 表名（区块 bind 反查表用） */
-      const tableNameByDs = new Map<string, string>()
-      for (const [dsName, ds] of Object.entries(dataSources)) {
-        if (!isPlainRecord(ds) || typeof ds.table !== 'string') continue
-        const tableName = ds.table
-        tableNameByDs.set(dsName, tableName)
-        const table = exposedTableByName.get(tableName)
-        if (!table) {
-          missing.push(`展示页「${page.name}」数据源 ${dsName} 引用的表未暴露：${tableName}`)
-          continue
-        }
-        const allowed = exposedFieldsByTableId.get(table.id.toString()) ?? new Set<string>()
-        const refs: string[] = []
-        if (Array.isArray(ds.fields)) {
-          refs.push(...ds.fields.filter((field): field is string => typeof field === 'string'))
-        }
-        for (const key of ['filter', 'sort', 'expand'] as const) {
-          const list = ds[key]
-          if (!Array.isArray(list)) continue
-          for (const item of list) {
-            if (isPlainRecord(item) && typeof item.f === 'string') refs.push(item.f)
-          }
-        }
-        for (const ref of refs) {
-          if (ref === 'rowId') continue
-          if (!allowed.has(ref)) {
-            missing.push(`展示页「${page.name}」数据源 ${dsName} 引用的字段未暴露：${tableName}.${ref}`)
-            continue
-          }
-          const target = refTargetByField.get(`${tableName}.${ref}`)
-          if (target && !exposedTableByName.has(target)) {
-            missing.push(`展示页「${page.name}」字段 ${tableName}.${ref} 的目标表未暴露：${target}`)
-          }
-        }
-      }
-
-      const layout = Array.isArray(schema.layout) ? schema.layout : []
-      layout.forEach((block, blockIndex) => {
-        if (!isPlainRecord(block) || typeof block.bind !== 'string') return
-        const tableName = tableNameByDs.get(block.bind)
-        const table = tableName ? exposedTableByName.get(tableName) : undefined
-        if (!tableName || !table) return
-        const allowed = exposedFieldsByTableId.get(table.id.toString()) ?? new Set<string>()
-        for (const key of ['columns', 'fields'] as const) {
-          const list = block[key]
-          if (!Array.isArray(list)) continue
-          for (const raw of list) {
-            if (typeof raw !== 'string') continue
-            const dsl = parseFieldDsl(raw)
-            if (dsl.field && dsl.field !== 'rowId' && !allowed.has(dsl.field)) {
-              missing.push(`展示页「${page.name}」区块 ${blockIndex} 字段未暴露：${tableName}.${dsl.field}`)
-            }
-            const explicitTarget = dslTargetTable(dsl)
-            const inferredTarget = dsl.field
-              ? refTargetByField.get(`${tableName}.${dsl.field}`)
-              : undefined
-            const target = explicitTarget ?? inferredTarget
-            if (target && !exposedTableByName.has(target)) {
-              missing.push(`展示页「${page.name}」区块 ${blockIndex} 展开目标表未暴露：${target}`)
-            }
-          }
-        }
-      })
-    }
-
-    return missing
+    if (tables.some((table) => table.isExposed === 1)) return []
+    // P13 R122 口径保留：缺项文案带**可操作清单**（模型据此调用 expose_data_app 补齐，人类同样够用）
+    const names = tables.map((table) => table.name)
+    return [
+      names.length > 0
+        ? `至少需要 1 张已暴露的表（本应用表：${names.join('、')}）`
+        : '至少需要 1 张已暴露的表（当前应用没有逻辑表）',
+    ]
   }
 
-  /** 发布 / 取消发布（R103：置 1 先校验，缺项 50012 带清单；置 0 即时失效公开端） */
+
+  /**
+   * 发布 / 取消发布（R103：置 1 先校验≥1 暴露表，缺项 50012 带清单；置 0 即时失效取数面缓存）。
+   * P14 D115：`is_public` 语义为「可被授权读取的总开关」，不再产出公开链接（pub_code 消费停止）。
+   */
   async publish(userId: bigint, code: string, isPublic: number) {
     const app = await this.assertOwned(userId, code)
     const flag = isPublic === 1 ? 1 : 0
@@ -431,22 +303,20 @@ export class AdminService {
     }
     await this.prisma.appDef.update({ where: { id: app.id }, data: { isPublic: flag } })
     await invalidatePubAll(this.redis, app.id)
-    return { isPublic: flag, pubCode: app.pubCode, pubUrl: this.pubUrl(app.pubCode) }
+    return { isPublic: flag }
   }
 
-  /** 公开总览（前端引导用）：状态 + 链接 + 表/字段暴露明细 + 公开页 + 当前缺项清单 */
+  /**
+   * 取数面总览（前端引导用）：发布态 + 表/字段暴露明细 + 当前缺项清单。
+   * P14：公开链接（pubCode/pubUrl）与展示页清单（publicPages）随匿名公开面与 display 页一并退役。
+   */
   async pubConfig(userId: bigint, code: string) {
     const app = await this.assertOwned(userId, code)
-    const [tables, pages, missing] = await Promise.all([
+    const [tables, missing] = await Promise.all([
       this.prisma.appTable.findMany({
         where: { appId: app.id, deletedAt: null, isSystem: 0 },
         select: { id: true, name: true, label: true, isExposed: true },
         orderBy: { id: 'asc' },
-      }),
-      this.prisma.appPage.findMany({
-        where: { appId: app.id, deletedAt: null, kind: PAGE_KIND_DISPLAY },
-        select: { id: true, code: true, name: true, route: true, isPublic: true },
-        orderBy: { sort: 'asc' },
       }),
       this.collectPublishMissing(app.id),
     ])
@@ -466,8 +336,6 @@ export class AdminService {
     }
     return {
       isPublic: app.isPublic,
-      pubCode: app.pubCode,
-      pubUrl: this.pubUrl(app.pubCode),
       exposedTables: tables
         .filter((table) => table.isExposed === 1)
         .map((table) => ({ id: table.id.toString(), tableCode: table.name, label: table.label })),
@@ -483,13 +351,6 @@ export class AdminService {
           type: field.type,
           isExposed: field.isExposed,
         })),
-      })),
-      publicPages: pages.map((page) => ({
-        id: page.id.toString(),
-        pageCode: page.code,
-        name: page.name,
-        route: page.route,
-        isPublic: page.isPublic,
       })),
       missing,
     }
@@ -537,10 +398,11 @@ export class AdminService {
   }
 
   /**
-   * R114（P12-PATCH2 T116）：列当前用户未删应用（含公开态 + 公开凭证 + 发布缺项），
+   * R114（P12-PATCH2 T116 建 / P14 T126 修订）：列当前用户未删应用（发布态 + 发布缺项），
    * 供 AI 只读工具 `list_data_apps` 经 AppFacade 消费。draft 也列出（status 标明）；
    * `missing` 复用 collectPublishMissing（与 `GET /app/:code/pub-config` 同源逻辑）；
-   * 已发布的应用不再计算缺项（公开态下必为空，省一次全表扫描）。
+   * 已发布的应用不再计算缺项（发布态下必为空，省一次全表扫描）。
+   * P14 D115：不再输出 pubCode / pubUrl（公开链接退役，消费端改经展示应用授权）。
    * **只读**：不代发布、不改任何状态。
    */
   async listWithPubState(userId: bigint): Promise<
@@ -549,23 +411,19 @@ export class AdminService {
       name: string
       status: string
       isPublic: number
-      pubCode: string
-      pubUrl: string
       missing: string[]
     }>
   > {
     const apps = await this.prisma.appDef.findMany({
       where: { ownerId: userId, deletedAt: null },
       orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-      select: { id: true, code: true, name: true, status: true, isPublic: true, pubCode: true },
+      select: { id: true, code: true, name: true, status: true, isPublic: true },
     })
     const result: Array<{
       appCode: string
       name: string
       status: string
       isPublic: number
-      pubCode: string
-      pubUrl: string
       missing: string[]
     }> = []
     for (const app of apps) {
@@ -574,8 +432,6 @@ export class AdminService {
         name: app.name,
         status: app.status,
         isPublic: app.isPublic,
-        pubCode: app.pubCode,
-        pubUrl: this.pubUrl(app.pubCode),
         missing: app.isPublic === 1 ? [] : await this.collectPublishMissing(app.id),
       })
     }

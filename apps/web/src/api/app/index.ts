@@ -185,37 +185,26 @@ export interface PubConfigTable {
   fields: PubConfigField[]
 }
 
-/** 公开总览中的展示页项 */
-export interface PubConfigPage {
-  id: string
-  pageCode: string
-  name: string
-  route: string
-  isPublic: number
-}
-
-/** 公开总览（发布状态 + 链接 + 暴露明细 + 公开页 + 当前缺项清单） */
+/**
+ * 取数面总览（P14 T127：公开链接与公开展示页已退役——`is_public` 语义改为
+ * 「可被授权读取的总开关」，能否读取另由展示应用授权决定）。
+ */
 export interface PubConfig {
   isPublic: number
-  pubCode: string
-  pubUrl: string
   exposedTables: Array<{ id: string; tableCode: string; label: string }>
   tables: PubConfigTable[]
-  publicPages: PubConfigPage[]
   missing: string[]
 }
 
-/** 发布结果 */
+/** 发布结果（P14 D115：不再产出公开链接） */
 export interface PublishResult {
   isPublic: number
-  pubCode: string
-  pubUrl: string
 }
 
-/** 公开总览（未发布时 missing 即发布缺项清单，供前端引导） */
+/** 取数面总览（未开启时 missing 即缺项清单，供前端引导） */
 export const getPubConfig = (code: string) => get<PubConfig>(`/app/${code}/pub-config`)
 
-/** 发布 / 取消发布（置 1 走 R103 校验，缺项 50012 带清单；置 0 公开端即时失效） */
+/** 发布 / 取消发布（置 1 走校验，缺项 50012 带清单；置 0 站点取数即时失效） */
 export const publishApp = (code: string, isPublic: number) =>
   put<PublishResult>(`/app/${code}/publish`, { isPublic })
 
@@ -227,9 +216,7 @@ export const exposeTable = (code: string, tid: string, isExposed: number) =>
 export const exposeField = (code: string, fid: string, isExposed: number) =>
   put(`/app/${code}/fields/${fid}/expose`, { isExposed })
 
-/** 公开展示页开关（R108；admin 页 50004） */
-export const publishPage = (code: string, pid: string, isPublic: number) =>
-  put(`/app/${code}/pages/${pid}/publish`, { isPublic })
+// P14 T127：`publishPage`（公开展示页开关）随 display 展示页退役移除。
 
 // 类型再导出（页面按需引用）
 export type { AppDefItem, AppTableItem, AppFieldInput, DataRowView }

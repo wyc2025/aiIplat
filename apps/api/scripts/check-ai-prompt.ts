@@ -186,6 +186,18 @@ function main(): void {
     `groups=${marketRoute.groups.join(',')} 下发 ${marketInjected.length}/${names.length}`,
   )
 
+  // P14 T130（D112/D114）：展示应用/授权复合词根（精准复合词，不得抢 siteCms 的「发布」等泛词）
+  const displayRoute = resolveToolGroups('帮我把这个数据应用授权给展示应用')
+  const displayInjected = inject(permittedAll, displayRoute.groups, displayRoute.fallback)
+  check(
+    '「授权展示应用」命中 app 组且含 create_display_app/authorize_data_app',
+    !displayRoute.fallback &&
+      displayRoute.groups.includes('app') &&
+      displayInjected.includes('create_display_app') &&
+      displayInjected.includes('authorize_data_app'),
+    `groups=${displayRoute.groups.join(',')} 下发 ${displayInjected.length}/${names.length}`,
+  )
+
   const weatherRoute = resolveToolGroups('今天天气怎么样')
   check(
     '无命中 → 全量兜底',

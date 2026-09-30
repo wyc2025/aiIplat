@@ -11,15 +11,14 @@ const WHITE_LIST = ['/login', '/404']
  * 免登录公开页（云盘访客分享页与公开落地页，凭 token 访问，不要求登录态）：
  * - /share/*：访客分享页（P4d 起含子路由 /share/:token/file 单文件预览）
  * - /view/*：公开落地页（P4c）
- * - /pub/*：数据应用公开展示页（P12 T113，凭 pubCode 访问）
  * 前端白名单与后端 @Public **任一缺失都不可匿名访问**（验收须双端核对）。
+ * P14 D115：`/pub/*`（数据应用公开展示页）已随匿名公开面退役移除；展示走站点开放层。
  */
 function isPublicRoute(to: { path: string; name: unknown | symbol }): boolean {
   return (
     WHITE_LIST.includes(to.path) ||
     to.path.startsWith('/share/') ||
-    to.path.startsWith('/view/') ||
-    to.path.startsWith('/pub/')
+    to.path.startsWith('/view/')
   )
 }
 

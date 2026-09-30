@@ -27,6 +27,7 @@
 | P11  | 应用平台 · 数据应用 A 全链：应用中心 + 结构管理 + 沙箱数据 + 功能页引擎 + CSV + 附件字段 + AI app 组（37 工具） | 已完成 |
 | P12  | 数据应用 B 侧：公开数据接口 + 只读展示页 + 暴露/发布控制 + 可视化页编辑器（38 工具：+1 只读 list_data_apps）    | 已完成 |
 | P13  | 应用市场：快照式发布 + admin 审核 + 一键复制 + 公开面写工具三件套（41 工具）                                    | 已完成 |
+| P14  | 展示应用与数据授权（模型修订期）：独立展示应用域 + 授权两跳 + 匿名公开面退役 + 市场 bundle（43 工具）           | 已完成 |
 
 ## P7 任务拆解（站点内容池化 + 多站发表 + 路径美化）
 
@@ -322,7 +323,9 @@
 - 退出码：**0** 全过 / **1** 有失败 / **2** 前置不满足（按「跳过」处理）；
 - 副作用：消耗积分、写入会话与工具流水（**不落库文章**）；I 用例要求云盘里有一份 md/markdown/txt，没有则自动跳过该用例；
 - J/K 用例由脚本**自建夹具**（云盘 `/ai-attachments/smoke-attach-inject.txt` 与 `smoke-attach-listed.txt`，固定内容 + 固定核对码，已存在则复用）：J 验证「全文注入」，K 把核对码放在 3 万字符之后从而**强制分段自读**（P10 T99）。
-- **N 用例（P13 T120）**：脚本自建夹具应用（1 表 `book` + 1 展示页 `书展示`，均未暴露未发布 → 发布缺项非空），提示词要求「公开发布并提交市场，缺什么按缺项补齐」；确认卡自动批准（`MARKET_WRITE_TOOLS`）+ 续接同会话推进（`MARKET_FLOW_FOLLOW_UPS`），断言 `expose → publish → submit` 按 `ai_tool_call.id` 升序 + `market_listing` 落 pending；跑完清理夹具应用与市场条目（`market_listing` 物理删，条目无发布者自助撤回入口）。
+- **N 用例（P13 T120 建 / P14 T130 改）**：脚本自建夹具应用（1 表 `book`，未暴露未发布 → 发布缺项非空；P14 起不再建 display 展示页），提示词要求「发布并提交市场，缺什么按缺项补齐」；确认卡自动批准（`MARKET_WRITE_TOOLS`）+ 续接同会话推进（`MARKET_FLOW_FOLLOW_UPS`），断言 `expose → publish → submit` 按 `ai_tool_call.id` 升序 + `market_listing` 落 pending；跑完清理夹具应用与市场条目（`market_listing` 物理删，条目无发布者自助撤回入口）。
+- **O 用例（P14 T130，**API 直调**）**：市场 bundle 复制全链——建应用 + 表 + 暴露 + 发布 → 建展示应用（不挂靠 → 暂存区）+ 授权 → 提交市场（断言响应 `displays[]` 含该展示应用）→ admin 审核通过 → 复制（断言响应 `displays[]` 非空、副本 `siteId=null` 进暂存区、`disp_grant` 已在新 app 与展示应用副本之间重建）；跑完清理条目、源/副本应用与展示应用。不走模型对话（审核与复制为后管端点，无对应 AI 工具）。
+- **M 用例（P12-PATCH2 建 / P14 T130 改口径）**：夹具应用 1 个（未发布 → `missing` 非空）；断言 `list_data_apps` 结果 `apps[]` 每项含 `appCode/name/status/isPublic/missing/grantedDisplays`（P14 去除 pubCode/pubUrl，改断授权清单）。
 - **I 用例夹具健壮性（P13 T122 修正）**：候选文件必须**祖先目录链全部存活**（回收站文件夹被删后其子行仍可能 `deletedAt=null`，按 path 寻址必 30001 而误判失败）；产品代码零改动。
 - **L 用例的写工具确认链（P11 T105）**：app 组 7 工具全为 write 级，脚本会**自动批准** `tool_confirm`（`confirmTool`）并收集后续新确认卡；判定用 `ai_tool_call.status='executed'` + `app_def`/`app_table` 落库。两条**必须遵守**的约束（首轮实测踩坑后固化）：
   1. **推进消息必须续接同一会话**（带 `conversationId`）——否则新开会话、模型丢上下文，只反复 `create_data_app`/`add_table` 而永不推进到 `gen_admin_page`（`APP_FLOW_FOLLOW_UPS` 三条推进消息即为此设计：写工具逐个出卡，模型每条消息通常只推进 1~2 个）；
@@ -603,9 +606,33 @@
 | T9   | 系统管理页面：用户 / 角色 / 菜单 / 部门 / 字典 / 日志查询页（ProTable + FormDialog 模式）                             | 已完成 | 2026-08-23 |
 | T10  | Dashboard + 个人中心 + 整体联调验收（对照 PRD.md 验收标准）                                                           | 已完成 | 2026-08-23 |
 
+## P14 任务拆解（展示应用与数据授权：模型修订期）
+
+> 来源：`docs/P14/PRD-P14-展示应用与数据授权.md` + `ARCHITECTURE-P14-增补.md` + `API-P14-增补.md`（已并入 ARCHITECTURE §30 / API §21）。
+> 编号：D112~~D118 / R124~~R129 / T124~~T131。
+> 增量：**+1 域（display）+2 表（`disp_display` / `disp_grant`）/ +11 HTTP 端点（退役 5）/ +3 错误码（50016~50018）/ +1 配置组（`DISPLAY_*`）/ 零新依赖 / AI 工具 41→43**。
+
+| 编号 | 任务                                                                                                                                                                                                                                                                                               | 状态   | 完成日期   |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ---------- |
+| T124 | DB 迁移 `20260930100000_add_display_domain`（两表 + 三索引）+ 错误码 50016~50018 + `display.config.ts`（stagingPath / copyNameSuffixMax）+ R126 收缩 `app_page.kind`（存量 display 页登记 14 行后删除，清单见迁移目录 `display-pages-removed.md`）                                                 | 已完成 | 2026-09-30 |
+| T125 | display 域（Service/Controller/Facade/Module）+ 开放层：`:slug/disp/:id/**` 静态文件服务（挂靠校验 + 复用站点静态同一流程）与 `:slug/api/app/:appCode/**` 四数据端点（R125 校验链 + 60s/600s 缓存 + 42900 独立限流）+ app 域取数语义改造（`AppFacade` 五个取数方法；pubCode 定位改为属主 + code）  | 已完成 | 2026-09-30 |
+| T126 | 匿名端点退役：`/api/pub/app/**` 五端点控制器删除、`pub_code` 停签停消费、`app_def.is_public` 语义切换、R103 发布校验修订（仅 ≥1 暴露表）、`expose_data_app` 收缩为 table/field 两档、pub 缓存工具收敛                                                                                              | 已完成 | 2026-09-30 |
+| T127 | display 页 / `PublicRenderer` 废弃：前端 `PublicRenderer` / `api/app/pub.ts` / `views/app/public` 删除，新增 `ReadonlyRenderer`（页编辑器草稿预览，登录态零写）；`/pub/app` 路由与 guard 白名单移除；`PubConfig`/`PublishResult` 去 pubCode/pubUrl/publicPages；应用中心与功能页编辑器公开入口清理 | 已完成 | 2026-09-30 |
+| T128 | 后管最小管理面：`views/display/index.vue`（列表 / 创建 / 挂靠·换挂靠 / 授权·撤权 / 删除）+ `api/display/index.ts` + seed 菜单「展示应用」（应用中心子菜单，无 perms）                                                                                                                              | 已完成 | 2026-09-30 |
+| T129 | 市场 bundle：快照结构扩展 `displays[]`/`grants[]`（`SNAPSHOT_VERSION` 保持 1，旧快照归一空数组）+ `DisplayFacade.exportBundle` / `materializeBundle`（副本进暂存区 + 授权按 displayName 重建）+ 提交/复制响应扩展                                                                                  | 已完成 | 2026-09-30 |
+| T130 | AI：`create_display_app`(42) / `authorize_data_app`(43) 两写工具 + `list_data_apps` 改授权口径（`grantedDisplays` + `displayApps[]`）+ 站点 README 三模板「数据应用取数」节重写 + 手册腾挪（R129）+ `check:ai` 19/19 + `smoke:ai` M 改写 / O 新增                                                  | 已完成 | 2026-09-30 |
+| T131 | 文档回写：勘误回写清单 ①②③（PRD-P12 / PATCH2 / PRD-P13）+ ARCHITECTURE §30（含 §5 数据库小节）+ API §21（§19 退役标注）+ 本文件                                                                                                                                                                    | 已完成 | 2026-09-30 |
+
+**关键设计点**
+
+- **授权两跳（D114）**：数据应用 →（`disp_grant` 授权）→ 展示应用 →（`site_id` 挂靠）→ 站点；站点展示页取数走**同源相对路径** `/api/open/:slug/api/app/:appCode/...`，服务端按 R125 链（站点 → 授权 → `is_public` → 表·字段暴露）逐级放行，任一不满足统一 **40400**（不区分原因）。
+- **展示应用目录即站点目录子树（§30.3）**：挂靠 = 目录物理移动到 `{slug}/disp/{id}/`，换挂靠 = 移动 + `site_id` 更新（库更新失败即反向移动补偿 = 全回滚）；开放层静态路由因此可**复用站点静态同一流程**（MIME / index 回退 / SPA 回退 / Range / ETag 全一致）。
+- **bundle 与「挂靠不随复制」（D117）**：快照只带出边闭包（授权的展示应用 + 文本文件 + 授权边），复制时授权在**副本之间**重建；副本一律落未挂靠暂存区，接收方自行挂靠后取数——跨属主授权问题自然消解。
+- **退役的连锁面（T126/T127）**：R103 发布校验由「≥1 暴露表 + ≥1 公开 display 页」收缩为「≥1 暴露表」；`list_data_apps` 输出去 pubCode 改授权清单；站点 README 由「直链 pubCode 绝对路径」改为「同源相对路径 + 授权前置」。
+
 ## 进行中
 
-**无进行中任务**（P13 应用市场 T117~T123 已全部完成并通过收口验证，见「P13 任务拆解」与文末 P13 回执）。
+**无进行中任务**（P14 展示应用与数据授权 T124~T131 已全部完成并通过验证，见「P14 任务拆解」与文末 P14 回执）。
 P12 尾巴（T122）已销项：铁律 3 / ARCH §6.2 文本修订、里程碑与工具数口径、走查待补取证 3 项（含发现并修复的 PublicRenderer 缺陷）。
 下一期待用户立项（候选：市场版本更新机制、站点内嵌应用数据语义（遗留 31）、P10 走查遗留的上游失败加固三项）。
 
@@ -683,6 +710,14 @@ P12 尾巴（T122）已销项：铁律 3 / ARCH §6.2 文本修订、里程碑�
     - ④ **与遗留 32 合流**：思考/正文/工具片段化之后，"进行中的片段"天然可续传，切片模型是①②的地基；
     - ⑤ **验收建议**：把「生成中切页 / 刷新 / 关闭标签 / 双标签并发 / 多端登录」五个场景做成自动化用例（本期只有一次人工浏览器验证）。
     - 关联：遗留 32（AI 会话模型升级）、遗留 30（思考模式 400）、本日修复记录（文末）。
+
+35. ~~（2026-09-30 登记，**待用户立项：应用形态与「数据授权」模型修订**）**「展示应用」概念缺失 + 公开面口径应为「授权」而非「匿名」**——用户在试用展示页后判断「需求理解有误」，并给出三种形态口径。本条即立项输入，与遗留 31（站点内嵌应用数据语义）配套阅读。~~ **已立项并交付（2026-09-30，P14 T124~T131）**：用户当日拍板六项（PRD-P14 §3），当期完成模型修订——展示应用独立实体（`disp_display`）+ 授权两跳（`disp_grant`）+ 匿名公开面退役（`/api/pub/app/**` 五端点下线、`app_page.kind=display` 废弃、`PublicRenderer` 移除）+ 市场 bundle 化（快照连展示应用与授权一起复制）。六项拍板结论见 `docs/P14/PRD-P14-展示应用与数据授权.md`；落地细节见 ARCHITECTURE §30 / API §21 / 「P14 任务拆解」与文末 P14 回执。**顺带查到的实现偏差（`getAppMenuSegments` 未按 `kind` 过滤）随 display 页废弃自然消失**（不再有 display 页需要过滤）。
+    - **用户的形态定义**：① **数据应用** = 数据 + 管理页，**放在后管系统中的页面一律需登录、不公开**；② **展示应用** = 借助站点能力、由 AI 生成的原生 HTML 等静态页面，**默认挂靠一个站点、可换挂靠**（通过更换站点文件目录）；③ **合体** = 展示应用 + 数据应用**授权**给它，该展示应用才有权限读取已暴露的数据 API。
+    - **与现状的 4 处实质偏差**：① 现状「展示」指**应用内的 `display` 页**（区块 schema + `PublicRenderer`，挂 `/api/pub/app/:pubCode/p/:pageCode` 匿名渲染），并不是站点上的静态页；② 现状「公开 = 匿名」（**R107：pub_code 即能力凭证**，拿到即可读），用户口径为「**授权给某展示应用之后才可读**」；③ 现状 **app ↔ site 零关联**（**D99 明文不建 `app_binding` 表**，「站点静态页可直接链公开地址」），用户口径要求展示应用**有站点归属、可换挂靠**；④ 现状站点取数靠 **P12-PATCH2 R116「站点 README 教模型直链 pubCode」**，用户口径要求经**服务端授权校验**（开放层同源路径如 `/api/open/:slug/api/app/{appCode}/...`，经 AppFacade）。
+    - **顺带查到的实现偏差（与本需求直接相关，待立项时一并裁定）**：`getAppMenuSegments` 取该用户所有 active 应用的**全部页且未按 `kind` 过滤**（`apps/api/src/modules/app/admin/admin.service.ts:631-654`），而 **R108 原文为「display 页不入 userinfo 动态菜单」** → 实际表现为同一个 display 页**两副面孔**（后管左侧菜单点进去是登录态渲染，另有匿名公开链接），语义不成立，很可能即用户「理解有误」观感的直接来源；裁定方向二选一：补 `kind` 过滤，或随形态修订取消「应用内 display 页」。
+    - **立项前须拍板（6 项）**：① **展示应用是什么实体**（应用中心新增类型 `kind=data|display|hybrid` / 独立实体 / 站点即展示应用、不加新实体）；② **页面生产方式**（AI 写静态 HTML·JS 文件走站点开放层 / 仍用区块 schema）——若取前者，P12 的 display 页 + `PublicRenderer` 是废弃还是降级为「后管预览」；③ **授权粒度与层级**（`数据应用 → 站点` 一跳 / `数据应用 → 展示应用 → 挂靠站点` 两跳；是否叠加表·字段级，现已有暴露开关可复用）；④ **授权后调用方式**（开放层代理 + 授权校验 / 仍用 pubCode）——关键子问题：**`/api/pub/app/:pubCode/*` 匿名端点是否保留**（保留则授权可被绕过、形同虚设；不保留则同步收敛 P12/P13 公开面口径与三个写工具语义）；⑤ **「换挂靠」语义**（文件移动·复制到目标站点目录 / 站点支持「挂载点」多站点引用同一目录——后者要改 `site_site.root_folder_id` 单根模型）；⑥ **市场（P13）如何承接**（市场条目是否连「展示应用 + 授权关系」一起复制；跨用户、跨站点的授权在复制后如何重建）。
+    - **需修订的既有决策与文档**：**D98**（公开面由应用域自供、`/api/pub/app` 族）、**D99**（不建绑定表）、**R107**（pub_code 即能力凭证）、**R108**（display 不入动态菜单）、**R116**（站点 README 直链 pubCode 示例）；文档侧 `docs/P12/PRD-P12-APP-PUBLIC.md` §2/§3、`API.md` §19、`ARCHITECTURE.md` §28，以及 P13 公开面写工具三件套（`publish_data_app` / `expose_data_app` / `submit_market_app`）语义须一并复核。
+    - **量级评估**：非 P12 补丁，属**模型修订 + 新实体**（DB +1~2 表，`app_def` 可能 +`kind` / +`site_id` / +`folder_id`；公开端点语义收敛；AI 工具重写；前端展示入口改造），量级约等于一个新期。**本轮只登记，代码零改动**；立项建议直接修订 P12 或另立新期（P14）。
 
 ## 完成记录
 
@@ -1730,3 +1765,10 @@ P12 尾巴（T122）已销项：铁律 3 / ARCH §6.2 文本修订、里程碑�
 > 2026-09-30：**功能页「新建」弹窗化（form 区块 `placement`，用户提出的体验不一致）**。**问题**：新建表单是 layout 里的第三个区块、内嵌在列表下方（要滚到底），而「编辑」是引擎内置弹窗 → **新建/编辑体验割裂**（首发 P11 T106 的取舍，非有意设计）。**方案（用户选 B：schema 显式化）**：form 区块新增 `placement: 'inline' | 'dialog'`，**缺省 dialog**（存量页面无需改 schema 即生效；确需内嵌的页面在页编辑器选 inline）——dialog 型渲染为**表格卡片头部「新建 XX」按钮 + 弹窗**，字段控件复用 `FieldInput`，与「编辑」同款。**落地**：前端引擎（`placementOf` / `tableOfDs` / `dialogFormsOf` / `hasInlineForm` / `createDialog` 状态 + `openCreate` / `submitCreate` / `createFields`；表头按钮区、新建弹窗、form 区块仅 inline 内嵌、样式）＋ 前后端同源模板默认 `dialog`（`views/app/utils/schema.ts`、`api/.../page.builder.ts`）＋ 后端 R94 校验放行并校验 `placement`（非 form 区块携带 / 非法值 → 50004）＋ 可视化页编辑器（P12 T115）加「展示形态」下拉。
 > **顺带修复（实测中发现）**：表块行内「编辑 / 删除」与表头「清空表单」的动作名解析用错变量——`actionTable(block.bind)` 里 table 区块的 `bind` 是**数据源名**（`mainList`）而非动作名，于是拼出 `delete_` / `update_` 这类**空表名动作**，导致**行内编辑/删除一直不可用**（实测点击删除报「页面未声明动作「delete_」，请在功能页编辑器补充后重试」）；改用新增的 `tableOfDs(block.bind)`（按数据源解析逻辑表名）后闭环通过。
 > **验证**：存量页面（`app(23)`，schema 无 `placement`）实测——表头出现「新建字帖」、页面**无内嵌表单**、点开弹窗 6 个字段控件正常、**提交成功**（提示「操作成功」+ 列表新增行）、**行内删除成功**（回到 0 行，自检数据已清理）；切菜单正常（旧修复无回归）；console 全程零错误；双端 `eslint` / `vue-tsc` / `tsc` 零错。**注意**：后端两处（模板默认值 + R94 校验）需**重启 API 后生效**（与遗留 30 的 400 修复一并生效）。
+
+> 2026-09-30（P14）：**展示应用与数据授权（模型修订期，T124~~T131）全部完成**——落实用户当日六项拍板（PRD-P14 §3），认领并修正 P12 的规格错误（「匿名公开窗」整体改造为「授权取数」）。增量：**+1 域（display）+2 表（`disp_display` / `disp_grant`，迁移 `20260930100000_add_display_domain` 已应用）/ +11 端点（退役 5）/ +3 错误码（50016~50018）/ +1 配置组（`DISPLAY_*`）/ 零新依赖 / AI 工具 41→43**。
+> **落地**：① 开放层新增 `:slug/disp/:id/**`（展示页静态文件，挂靠校验 + 复用站点静态同一流程）与 `:slug/api/app/:appCode/**` 四数据端点（R125 链：站点 → 授权 → `is_public` → 暴露，未命中统一 40400）；② 匿名公开面退役——`/api/pub/app/**` 五端点控制器删除、`pub_code` 停签停消费、R103 收缩为「≥1 暴露表」、`expose_data_app` 收缩为 table·field 两档、pub 缓存工具收敛；③ display 页与前端 `PublicRenderer` / `api/app/pub.ts` / `/pub/app` 路由整体清理，页编辑器草稿预览改由新增 `ReadonlyRenderer`（登录态零写）；④ 后管「展示应用」页（列表 / 创建 / 挂靠·换挂靠 / 授权·撤权 / 删除）+ `api/display` + seed 菜单一条；⑤ 市场 bundle：快照扩展 `displays[]`/`grants[]`（向后兼容）、提交/复制响应扩展、`DisplayFacade.materializeBundle`（副本进暂存区 + 授权按 displayName 重建）；⑥ AI 两写工具（`create_display_app` / `authorize_data_app`）+ `list_data_apps` 改授权口径 + 站点 README 三模板「数据应用取数」节重写 + 手册腾挪（R129）。
+> **验证证据（本轮实测）**：① **端到端 16/16**（一次性脚本，跑完即清理）——匿名公开面退役（`/api/pub/app/*` → HTTP 404）、R125 授权链四道闸（未发布 → 40400 / 已发布未授权 → 40400 / 授权+发布+暴露 → 200 且只出暴露表·字段 / 参数越界 → 40001 / 行不存在 → 40400）、展示应用创建即挂靠（`writePath=p14-xxxxx/disp/{id}`、`urlPreview=/api/open/{slug}/disp/{id}/`）、静态挂靠校验（挂靠但无入口 → 40400、站点不存在 → 40400）、**撤权与取消发布即时失效**（均 40400）；② `check:ai` **19/19**（含新增「授权展示应用」路由样例；三段字数 **通用版 959/1000、能力清单 978/1200、合注 1988/2000**）；③ 迁移已应用 + Prisma client 已生成；存量 display 页 **14 行**登记后删除（清单随迁移目录 `display-pages-removed.md`）；④ 双端 `tsc` / `vue-tsc` / `eslint` 零错；后端 `tsc -p tsconfig.build.json` 编译通过 + `node dist/main.js` **启动成功**（工具注册 43 个、握手日志确认路由与手册加载正常）；⑤ `seed` 已跑（新增菜单 1 条「展示应用」）。
+> **实测发现并修复的 2 个运行时缺陷（静态检查查不出，均为本期新增依赖引发）**：**(a) 模块环 TDZ 崩**——`SiteOpenModule` 新增依赖 `DisplayFacadeModule` 后构成 `SiteFacadeModule → SiteManageModule → SiteOpenModule → DisplayFacadeModule → DisplayManageModule → SiteFacadeModule` 环，启动即 `ReferenceError: Cannot access 'SiteFacadeModule' before initialization`（`tsc`/`eslint` 全绿照崩）；**修复**：把 `SiteResolveService` 抽成独立 `SiteResolveModule`（open 与 manage 共用），依赖改正单向。**(b) 展示应用静态路由被通配吞掉**——`:slug/disp/:id` 声明在站点静态通配 `:slug/*path` 之后，`/disp/:id/` 被通配捕获后经 SPA/美化回退兜成**站点首页 200**（端到端实测发现）；**修复**：调整控制器内声明顺序（展示应用路由先于通配，控制器内声明顺序即注册顺序）。
+> **勘误回写清单（P14）：①②③ 已插入**（`docs/P12/PRD-P12-APP-PUBLIC.md`、`docs/P12/PRD-P12-PATCH2-AI公开面闭环.md`、`docs/P13/PRD-P13-MARKETPLACE.md` 头部引用块；逐字、纯插入、未改既有文字）。
+> **本轮遗留（如实登记）**：① 前端 `vite build` 收官验证因本机内存/句柄压力未完成（多次尝试分别报 esbuild `write ENOMEM` / rollup `realpath … echarts` UNKNOWN error / node 初始化异常，均为**环境级**失败，与本次改动无关；`vue-tsc --noEmit` 已零错）——待环境恢复后补跑；② `pnpm smoke:ai` 本轮未执行（需可用模型与积分），M 场景已按新契约改写、O 场景（bundle 复制全链）与 N 场景（去 display 页夹具）均已就位，待下次跑通后补记；③ 开放层静态**正例**（写入口文件后经 `/api/open/:slug/disp/:id/` 取到页面）未做——站点/展示应用文件写入目前只有 AI 工具与后管上传两条路径、**无 REST 端点**，补做方式：建站后用 `write_cloud_file`（对话）或云盘上传写到 `{slug}/disp/{id}/index.html` 再访问入口；④ 展示应用挂靠/授权/站点取数的**浏览器人工复验**未做，建议下次连同 build 一并补。

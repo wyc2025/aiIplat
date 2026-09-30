@@ -5,7 +5,9 @@ import {
   SNAPSHOT_FIELD_TYPES,
   SNAPSHOT_VERSION,
   type AppSnapshot,
+  type SnapshotDisplay,
   type SnapshotField,
+  type SnapshotGrant,
   type SnapshotPage,
   type SnapshotRel,
   type SnapshotTable,
@@ -188,7 +190,68 @@ export function parseSnapshot(raw: unknown): AppSnapshot {
     routes.add(page.route)
   }
 
-  return { version: SNAPSHOT_VERSION, tables, rels, pages }
+  // P14 D117：bundle（展示应用 + 授权边）；旧快照无这两字段 → 归一为空数组（向后兼容）
+  const displaysRaw = raw.displays ?? []
+  if (!Array.isArray(displaysRaw)) fail('displays 必须是数组')
+  const displays = displaysRaw.map((item, index) => parseDisplay(item, index))
+  const displayNames = new Set<string>()
+  for (const display of displays) {
+    if (displayNames.has(display.name)) fail(`展示应用名重复：${display.name}`)
+    displayNames.add(display.name)
+  }
+  const grantsRaw = raw.grants ?? []
+  if (!Array.isArray(grantsRaw)) fail('grants 必须是数组')
+  const grants = grantsRaw.map((item, index) => parseGrant(item, index, displayNames))
+
+  return { version: SNAPSHOT_VERSION, tables, rels, pages, displays, grants }
+}
+
+/**
+ * 展示页文件路径校验（P14 §30.6 / R124 口径）：相对路径、禁反斜杠与绝对路径、
+ * 禁空段与 `.`/`..`、深度 ≤10、单段 ≤64（与站点路径规则同集，防复制后越界落盘）。
+ */
+function assertDisplayFilePath(path: string, where: string): void {
+  if (path.includes('\\')) fail(`${where} 路径含反斜杠：${path}`)
+  if (path.startsWith('/')) fail(`${where} 路径不能是绝对路径：${path}`)
+  const segments = path.split('/')
+  if (segments.length > 10) fail(`${where} 路径层级超限：${path}`)
+  for (const segment of segments) {
+    if (segment === '' || segment === '.' || segment === '..') {
+      fail(`${where} 路径含空段/./..：${path}`)
+    }
+    if (segment.length > 64) fail(`${where} 路径单段超长：${path}`)
+  }
+}
+
+/** 快照内展示应用（bundle 元素）：name + 文本文件清单 */
+function parseDisplay(raw: unknown, index: number): SnapshotDisplay {
+  const where = `displays[${index}]`
+  if (!isRecord(raw)) fail(`${where} 不是对象`)
+  const name = readString(raw, 'name', where)
+  if (name.length > 64) fail(`${where} 的 name 过长`)
+  const filesRaw = raw.files
+  if (!Array.isArray(filesRaw)) fail(`${where} 的 files 必须是数组`)
+  const seen = new Set<string>()
+  const files = filesRaw.map((item, fileIndex) => {
+    const fileWhere = `${where}.files[${fileIndex}]`
+    if (!isRecord(item)) fail(`${fileWhere} 不是对象`)
+    const path = readString(item, 'path', fileWhere)
+    assertDisplayFilePath(path, fileWhere)
+    if (seen.has(path)) fail(`${fileWhere} 路径重复：${path}`)
+    seen.add(path)
+    if (typeof item.content !== 'string') fail(`${fileWhere} 的 content 必须是字符串`)
+    return { path, content: item.content }
+  })
+  return { name, files }
+}
+
+/** 快照内授权边：displayName 必须指向 displays[] 中的展示应用 */
+function parseGrant(raw: unknown, index: number, displayNames: Set<string>): SnapshotGrant {
+  const where = `grants[${index}]`
+  if (!isRecord(raw)) fail(`${where} 不是对象`)
+  const displayName = readString(raw, 'displayName', where)
+  if (!displayNames.has(displayName)) fail(`${where} 指向不存在的展示应用：${displayName}`)
+  return { displayName }
 }
 
 /** 入库序列化（快照对象 → JSON 字符串；用于体积护栏与落库） */

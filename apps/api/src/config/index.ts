@@ -6,6 +6,7 @@ import siteConfig from './site.config'
 import aiConfig from './ai.config'
 import appConfig from './app.config'
 import marketConfig from './market.config'
+import displayConfig from './display.config'
 
 /** ConfigModule.forRoot({ load }) 统一注册入口 */
 export const configLoaders = [
@@ -17,4 +18,5 @@ export const configLoaders = [
   aiConfig,
   appConfig,
   marketConfig,
+  displayConfig,
 ]

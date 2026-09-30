@@ -1347,10 +1347,14 @@ system 动态追加（不计手册 2000 字帽，上限 20 条，R84）：
 | DB        | +7 表                                   | ARCHITECTURE §27.2                             |
 | 前端依赖  | +0                                      | 复用 ProTable/FormDialog/uploadFile 等既有资产 |
 
-## 19. P12：数据应用 B 侧（公开与展示）（增补并入）
+## 19. P12：数据应用 B 侧（公开与展示）（增补并入）——⚠ 公开面五端点已退役
 
+> ⚠ **P14 退役标注（2026-09-30）**：本节 `GET /api/pub/app/{pubCode}/**` 五端点（manifest / 页 schema /
+> 数据列表 / 数据详情 / 附件流）已随匿名公开面**整体退役**（P14 D115），访问即 404（不存在路由）。
+> 替代：站点开放层 **`/api/open/:slug/api/app/:appCode/**`** 四数据端点（授权取数面，见 §21.1-8~~11）；
+> `app_page.kind=display` 展示页与前端 `PublicRenderer` 一并废弃（D113）。本节保留作历史基线。
 > 来源：`docs/P12/API-P12-增补.md`。上游 §18（P11，+18 端点）已闭环。
-> 编号：D97~~D105 / R100~~R113 / T108~T115。**HTTP 端点 +10（管理侧 5 + 公开侧 5）；错误码 +1（50012）；零新 AI 工具（37 不变）；零新依赖**。
+> 编号：D97~~D105 / R100~~R113 / T108~~T115。**HTTP 端点 +10（管理侧 5 + 公开侧 5）；错误码 +1（50012）；零新 AI 工具（37 不变）；零新依赖**。
 
 > 管理侧：登录态 + 属主校验（50001），写挂 `@OperationLog`（同 §18 口径）。
 > 公开侧：免登录 `@Public` + `@SkipTransform`，独立限流 60 次/分/IP（42900），**资源类失败统一 40400 防探测**（参数校验 40001 为例外）——开放层 §6/§8 同款结构。
@@ -1387,7 +1391,7 @@ system 动态追加（不计手册 2000 字帽，上限 20 条，R84）：
 | **50012**                                     | 发布校验未过（message 带缺项） | R103                                          |
 | 40400 / 40001 / 42900 / 50009 / 50001 / 50004 | 复用                           | 防探测 / 参数 / 限流 / 护栏 / 属主 / 页面校验 |
 
-50xxx 段用至 50012（**P13 续用 50013~50015，见 §20.3**）；30xxx（30021 封顶）、40xxx（40120 封顶）零新增。
+50xxx 段用至 50012（**P13 续用 50013~~50015，见 §20.3；P14 续用 50016~~50018，见 §21.2**）；30xxx（30021 封顶）、40xxx（40120 封顶）零新增。
 
 ### 19.4 配置登记（§18.5 app 配置组追加）
 
@@ -1473,3 +1477,92 @@ system 动态追加（不计手册 2000 字帽，上限 20 条，R84）：
 | DB        | +1 表（market_listing） | ARCHITECTURE §29.2                                    |
 | AI 工具   | +3（38→41）             | §20.2；`check:ai` 18/18 + smoke N 用例                |
 | 前端依赖  | +0                      | 复用卡片流/抽屉/表单既有资产                          |
+
+---
+
+## 21. P14：展示应用与数据授权（模型修订期）
+
+> 来源：`docs/P14/API-P14-增补.md`（并入本节）。编号：D112~~D118 / R124~~R129 / T124~~T131。
+> 本期 **+11 端点、+3 错误码（50016~~50018）、AI 工具 41→43**；退役 §19 公开面五端点（见 §19 顶部标注）；+2 表（§21 对应 ARCHITECTURE §30）。
+
+### 21.1 端点总览（+11）
+
+**后管（登录态，display 域自服务，无 `@RequirePermission`）：**
+
+| #   | 方法与路径                                | 说明                                                                     | 错误码            |
+| --- | ----------------------------------------- | ------------------------------------------------------------------------ | ----------------- |
+| 1   | `POST /api/display`                       | 创建展示应用 `{name, siteSlug?}`；无 siteSlug → 云盘暂存区               | 50018 重名、40001 |
+| 2   | `GET /api/display`                        | 我的展示应用列表（含挂靠站点名、开放层入口与授权清单）                   | —                 |
+| 3   | `PUT /api/display/:id/affiliate`          | 挂靠 / 换挂靠 / 取消挂靠 `{siteSlug}`（目录移动 + 关系更新；中断全回滚） | 50016、40001      |
+| 4   | `DELETE /api/display/:id`                 | 软删（清授权；目录保留于云盘由用户处置）                                 | 50016             |
+| 5   | `POST /api/display/:id/grants`            | 授权 `{appCode}`（is_public=0 的应用给出提示但仍可授权）                 | 50001、50017      |
+| 6   | `DELETE /api/display/:id/grants/:appCode` | 撤权                                                                     | 50016、50017      |
+
+**开放层（匿名可达，R125 校验链）：**
+
+| #   | 方法与路径                                                          | 说明                                                       | 错误码            |
+| --- | ------------------------------------------------------------------- | ---------------------------------------------------------- | ----------------- |
+| 7   | `GET /api/open/:slug/disp/:id/**`                                   | 展示页静态文件（挂靠校验、index/SPA 回退、R26 MIME）       | 40400             |
+| 8   | `GET /api/open/:slug/api/app/:appCode/schema`                       | 暴露后表结构                                               | 40400/40001/42900 |
+| 9   | `GET /api/open/:slug/api/app/:appCode/tables/:table/records`        | 列表（R104 固定口径：size≤50、sort≤2、filter≤3、expand≤1） | 同上              |
+| 10  | `GET /api/open/:slug/api/app/:appCode/tables/:table/records/:rowId` | 详情                                                       | 同上              |
+| 11  | `GET /api/open/:slug/api/app/:appCode/files/:fileId/stream`         | 附件流（`?download=1` → attachment + 原名）                | 同上              |
+
+**退役（§19 已标注）**：`/api/pub/app/:pubCode/**` 五端点整体下线，访问一律 404（不存在路由）；`pub_code` 停止签发与消费。
+`/api/open/:slug/api/**` 与既有 `/api/open/:slug/` 站点开放能力同前缀、零歧义（D31 口径）；路由注册顺序：取数/展示控制器先于静态通配。
+
+### 21.2 错误码（+3）
+
+| 码    | 含义                             | 场景                                         |
+| ----- | -------------------------------- | -------------------------------------------- |
+| 50016 | 展示应用不存在或已删除           | 后管（属主校验）/ 开放层（对外仍统一 40400） |
+| 50017 | 授权关系已存在 / 不存在          | grant / revoke                               |
+| 50018 | 展示应用名称冲突（owner 内唯一） | 创建（市场物化重名自动 `(2)` 递增，不触发）  |
+
+开放层未授权（未授权/未公开/未挂靠/未暴露）**统一 40400**，不区分原因（R125，防探测口径沿用）。
+
+### 21.3 请求/响应要点
+
+- **创建展示应用**：`POST /api/display` → `{id, name, siteId|null, siteSlug, siteTitle, folderPath, writePath, urlPreview, grantCount, grants, createdAt}`；`writePath` = 写页面文件的云盘路径（挂靠 = `{slug}/disp/{id}`，未挂靠 = 暂存区路径）；`urlPreview` = 挂靠后开放层入口 `/api/open/{slug}/disp/{id}/`（未挂靠为 null）。
+- **换挂靠**：`PUT /api/display/:id/affiliate` → 事务内完成目录移动 + site_id 更新；响应附 `moved`；中断全回滚（R127）。
+- **授权/撤权**：`POST /api/display/:id/grants` / `DELETE .../grants/:appCode`；授权变更立即触发该 app 取数面缓存 DEL（写后失效沿用）。
+- **取数面响应**：结构 = §19 公开面对应端点响应体（`schema` 为 `{app:{name,description}, tables:[{name,label,fields:[…]}]}`；列表 `{list,total,pageNo,pageSize}`、单行 `{op:'get',row}`）。
+- **市场 bundle**：`POST /api/market/submissions` 请求扩展 `withDisplayApps?: boolean`（默认 true——存在出边授权闭包时随快照打包），响应扩展 `displays: [{name, fileCount}]` 与 `skippedDisplays[]`；`POST /api/market/:code/copy` 响应扩展 `displays: [{id, name, siteId|null}]` 与 `skippedDisplays[]`（快照含 bundle 时）。
+
+### 21.4 配置（新增 display 组，`src/config/display.config.ts`，env 前缀 `DISPLAY_*`）
+
+| 键                          | 默认           | 说明                                                        |
+| --------------------------- | -------------- | ----------------------------------------------------------- |
+| `display.stagingPath`       | `disp-staging` | 暂存区根目录（云盘内；未挂靠展示应用目录的父目录）          |
+| `display.copyNameSuffixMax` | `20`           | 市场物化重名递增上限 `(2)…(20)`，超出记为 `skippedDisplays` |
+
+另：站点开放层取数面限流键 `site.siteOpenAppDataRateLimit`（默认 60 次/分/IP → 42900，与静态桶分离）。
+
+### 21.5 AI 工具（41→43）
+
+| #   | 工具                 | 类型            | parameters                        | 成功返回要点                                                   |
+| --- | -------------------- | --------------- | --------------------------------- | -------------------------------------------------------------- |
+| 42  | `create_display_app` | write（确认卡） | `{name, siteSlug?}`               | `{ok, id, name, siteSlug, writePath, urlPreview, nextSteps[]}` |
+| 43  | `authorize_data_app` | write（确认卡） | `{appCode, displayId, isGranted}` | `{ok, appCode, displayId, isGranted}`（未发布应用附 `hint`）   |
+
+既有修订：`list_data_apps` → 授权口径（`apps[].grantedDisplays` + 顶层 `displayApps[]`）；`submit_market_app` 确认卡扩展 bundle；`publish_data_app` / `expose_data_app` 文案同步。
+`check:ai` **19/19**；`smoke:ai` 新增 **O 场景（bundle 复制全链）**、M 场景改授权口径；手册三版（通用版 959/1000、能力清单 978/1200、合注 1988/2000，R129 腾挪后落地）。
+
+### 21.6 冒烟与回归
+
+- `smoke:ai` O 场景全过（提交含授权展示应用 → 审核通过 → 复制三副本 + 授权重建 + 副本进暂存区）；M 场景按新口径全过。
+- 开放层五端点（7~11）回归：授权正例 200 + 负例全 40400（未授权/未公开/未挂靠/未暴露各一）；42900 独立限流复测。
+- 退役检查：`/api/pub/app/*` 任意路径 404（非 401/403，避免探测差异）。
+
+### 21.7 编号登记
+
+| 系列      | 本期使用                           | 说明                                           |
+| --------- | ---------------------------------- | ---------------------------------------------- |
+| 决策      | D112~D118                          | PRD-P14 §3/§4（六项拍板）                      |
+| 规则      | R124~R129                          | PRD-P14 §5                                     |
+| 任务      | T124~T131                          | 见 PROGRESS「P14 任务拆解」                    |
+| HTTP 端点 | +11（退役 −5）                     | §21.1                                          |
+| 错误码    | +3（50016~50018）                  | §21.2                                          |
+| DB        | +2 表（disp_display / disp_grant） | ARCHITECTURE §30.2                             |
+| AI 工具   | +2（41→43）                        | §21.5；`check:ai` 19/19 + smoke O 用例         |
+| 前端依赖  | +0                                 | 复用卡片流/抽屉/表单既有资产（新增展示应用页） |

@@ -10,7 +10,6 @@ import { DataService } from '../data/data.service'
 import { invalidateAppSchema } from '../schema/schema.cache'
 import { SchemaService } from '../schema/schema.service'
 import type { ResolvedTable } from '../schema/schema.types'
-import { invalidatePubAll } from '../pub/pub.cache'
 import { buildAdminPageSchema, pickMainTable } from './page.builder'
 import { validatePageSchema, type PageSchemaContext } from './page.schema'
 import type { CreatePageDto, PageActionDto, UpdatePageDto } from './dto/page.dto'
@@ -18,16 +17,15 @@ import type { CreatePageDto, PageActionDto, UpdatePageDto } from './dto/page.dto
 /** 页面 code 唯一后缀最大尝试 */
 const CODE_SUFFIX_MAX = 100
 
-/** 页类型常量（P12：display 公开展示页；admin 管理页恒不可公开） */
+/** 页类型常量（P14 R126：kind 收缩为仅 admin，display 展示页已废弃并清理） */
 export const PAGE_KIND_ADMIN = 'admin'
-export const PAGE_KIND_DISPLAY = 'display'
 
 /**
  * 由已过校验的 schema.kind 判定落库页类型（单一事实来源：schema 说了算，
- * 避免 DTO 与 schema 双写不一致造成「kind=admin 但 schema 是 display」的脏数据）。
+ * 避免 DTO 与 schema 双写不一致造成脏数据）。P14：校验器只放行 admin，故恒 admin。
  */
-function resolvePageKind(schema: Record<string, unknown>): string {
-  return schema.kind === PAGE_KIND_DISPLAY ? PAGE_KIND_DISPLAY : PAGE_KIND_ADMIN
+function resolvePageKind(_schema: Record<string, unknown>): string {
+  return PAGE_KIND_ADMIN
 }
 /** 单动作步骤上限（与校验器一致） */
 const MAX_STEPS = 10
@@ -128,8 +126,8 @@ export class PageService {
       const nextKind = resolvePageKind(dto.schema)
       data.schema = dto.schema as Prisma.InputJsonValue
       data.kind = nextKind
-      // display → admin 回退时清公开标记（admin 页恒不可公开，R108）
-      if (nextKind === PAGE_KIND_ADMIN && page.isPublic === 1) data.isPublic = 0
+      // P14：页公开标记退役（管理页恒不可公开），存量值就地归零
+      if (page.isPublic === 1) data.isPublic = 0
     }
     if (Object.keys(data).length === 0) {
       throw new BusinessException(ErrorCode.ParamInvalid, '没有需要更新的字段')
@@ -313,24 +311,8 @@ export class PageService {
     return { values, rowId: typeof rowId === 'string' ? rowId : null }
   }
 
-  /**
-   * 公开 / 取消公开 display 页（P12 R108）：仅 display 页可公开（admin 页 → 50004）；
-   * 置 1 不单独校验暴露（发布时统一走 R103），改动即失效公开面缓存。
-   */
-  async setPublic(userId: bigint, appCode: string, pageId: bigint, isPublic: number) {
-    const app = await this.adminService.assertOwned(userId, appCode)
-    const page = await this.requirePage(app.id, pageId)
-    if (page.kind !== PAGE_KIND_DISPLAY) {
-      throw new BusinessException(ErrorCode.AppPageSchemaInvalid, '仅展示页（display）可公开，管理页恒不可公开')
-    }
-    const flag = isPublic === 1 ? 1 : 0
-    if (page.isPublic !== flag) {
-      await this.prisma.appPage.update({ where: { id: page.id }, data: { isPublic: flag } })
-    }
-    await invalidateAppSchema(this.redis, app.id)
-    await invalidatePubAll(this.redis, app.id)
-    return { ok: true, pageCode: page.code, isPublic: flag }
-  }
+  // P14 R126：`setPublic`（display 页公开标记开关）随展示页整体废弃移除——管理页恒不可公开；
+  // 数据应用的对外可读性由「is_public 总开关 + 表·字段暴露」承担（D115），展示改由展示应用承担。
 
   /** 校验上下文：非系统表 → 字段名集合 + 同应用页 code 集合（页面只允许引用用户表；display rowLink 校验用） */
   private async buildContext(appId: bigint): Promise<PageSchemaContext> {

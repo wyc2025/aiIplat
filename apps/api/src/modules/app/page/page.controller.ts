@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Put } from '@
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger'
 import { CurrentUser } from '../../../gateway/decorators/current-user.decorator'
 import { OperationLog } from '../../../gateway/decorators/operation-log.decorator'
-import { CreatePageDto, PageActionDto, PublishPageDto, UpdatePageDto } from './dto/page.dto'
+import { CreatePageDto, PageActionDto, UpdatePageDto } from './dto/page.dto'
 import { PageService } from './page.service'
 
 /**
@@ -59,18 +59,7 @@ export class PageController {
     return this.pageService.remove(BigInt(userId), code, BigInt(pid))
   }
 
-  @Put(':code/pages/:pid/publish')
-  @OperationLog('应用中心', '设置展示页公开')
-  @ApiParam({ name: 'code', description: '应用 code' })
-  @ApiOperation({ summary: '公开/取消公开展示页（P12 R108；admin 页 50004）' })
-  publish(
-    @CurrentUser('userId') userId: string,
-    @Param('code') code: string,
-    @Param('pid', ParseIntPipe) pid: number,
-    @Body() dto: PublishPageDto,
-  ) {
-    return this.pageService.setPublic(BigInt(userId), code, BigInt(pid), dto.isPublic)
-  }
+  // P14 R126：`PUT :code/pages/:pid/publish`（展示页公开开关）已随 display 展示页废弃移除。
 }
 
 /**

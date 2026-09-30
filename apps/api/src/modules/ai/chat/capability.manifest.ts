@@ -32,7 +32,7 @@ export const CAPABILITY_MANIFEST: readonly CapabilityRow[] = [
   {
     key: 'personal',
     perms: null,
-    text: '个人账号：查/改我的资料（改需确认）、查套餐剩余积分。',
+    text: '个人账号：查/改资料（改需确认）、查剩余积分。',
     tools: ['get_my_profile', 'update_my_profile', 'get_my_credits'],
   },
   {
@@ -122,19 +122,19 @@ export const CAPABILITY_MANIFEST: readonly CapabilityRow[] = [
   {
     key: 'site.comment',
     perms: 'site:comment:audit',
-    text: '评论管理：查待审评论、批量通过或驳回（≤20 条）、以作者身份回复或清除回复（均需确认）。',
+    text: '评论管理：查待审、批量通过或驳回（≤20 条）、作者身份回复或清除（均需确认）。',
     tools: ['list_site_comments', 'audit_site_comments', 'reply_site_comment'],
   },
   {
     key: 'site.lifecycle',
     perms: 'site:site:manage',
-    text: '站点管理：新建站点（受配额限制）、改标题描述与标识、启停、评论审核开关、删站（确认卡列明影响，不可恢复）。',
+    text: '站点管理：新建（受配额）、改标题描述与标识、启停、评论审核开关、删站（确认卡列明影响）。',
     tools: ['create_site', 'update_site', 'delete_site'],
   },
   {
     key: 'app.data',
     perms: null,
-    text: '数据应用：用对话建数据应用（自定义表/字段/关系）并自动生成管理页面，确认后入册（均需确认）。',
+    text: '数据应用：对话建应用（表/字段/关系）并生成管理页，确认后入册（均需确认）。',
     tools: [
       'create_data_app',
       'add_table',
@@ -146,29 +146,43 @@ export const CAPABILITY_MANIFEST: readonly CapabilityRow[] = [
     ],
   },
   {
-    // P12-PATCH2 T116（R114/R115）：公开面只读能力行——让模型知道「应用可公开发布」并能拿到 pubCode
+    // P12-PATCH2 T116（R114/R115）建行 / P14 T130 改授权口径：不再给 pubCode 直链话术（D115）
     key: 'app.pub',
     perms: null,
-    text: '查数据应用公开状态：列应用、公开凭证 pubCode、公开链接与发布缺项（只读）。',
+    text: '查数据应用状态：列应用、可被授权读取与发布缺项（只读）。',
     tools: ['list_data_apps'],
   },
   {
-    // P13 T120（R122/D110）：公开面写三件套——暴露/发布/市场提交（合注预算已按 R123 腾挪）
+    // P13 T120（R122/D110）建行 / P14 T130 收敛：暴露只剩表·字段两档（display 页退役）
     key: 'app.expose',
     perms: null,
-    text: '数据应用暴露：开关表/字段/展示页的公开范围（需确认）。',
+    text: '数据应用暴露：开关表/字段的公开范围（需确认）。',
     tools: ['expose_data_app'],
   },
   {
     key: 'app.publish',
     perms: null,
-    text: '数据应用发布：暴露齐备后开启公开（匿名可访问，关闭即失效）（需确认）。',
+    text: '数据应用发布：暴露齐备后开启可被授权读取（关闭即失效）（需确认）。',
     tools: ['publish_data_app'],
+  },
+  {
+    // P14 T130（D112）：展示应用（静态展示页容器）——建容器并挂靠站点
+    key: 'app.display',
+    perms: null,
+    text: '展示应用：建静态展示页容器并挂靠站点，页面文件用云盘写入（需确认）。',
+    tools: ['create_display_app'],
+  },
+  {
+    // P14 T130（D114）：授权两跳第一跳——数据应用 → 展示应用（站点页取数前置）
+    key: 'app.authorize',
+    perms: null,
+    text: '数据授权：把数据应用授权给展示应用，站点页才可只读取数（需确认）。',
+    tools: ['authorize_data_app'],
   },
   {
     key: 'app.market',
     perms: null,
-    text: '应用市场：提交上架审核（冻结结构快照 + 可选演示数据，通过后可被复制）（需确认）。',
+    text: '应用市场：提交上架审核（冻结快照 + 展示应用随包，通过后可复制）（需确认）。',
     tools: ['submit_market_app'],
   },
 ]

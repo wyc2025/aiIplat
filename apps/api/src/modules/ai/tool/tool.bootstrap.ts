@@ -1,6 +1,7 @@
 import { Injectable, Logger, type OnModuleInit } from '@nestjs/common'
 import { AppFacade } from '../../app/facade/app-facade.service'
 import { CloudFacade } from '../../cloud/facade/cloud-facade.service'
+import { DisplayFacade } from '../../display/facade/display-facade.service'
 import { CreditService } from '../credit/credit.service'
 import { SiteFacade } from '../../site/facade/site-facade.service'
 import { MarketFacade } from '../../market/facade/market-facade.service'
@@ -58,14 +59,18 @@ import { createListDataAppsTool } from './tools/list-data-apps.tool'
 import { createPublishDataAppTool } from './tools/publish-data-app.tool'
 import { createExposeDataAppTool } from './tools/expose-data-app.tool'
 import { createSubmitMarketAppTool } from './tools/submit-market-app.tool'
+// P14 T130：展示应用两件套（D112/D114：全 write 走确认卡，handler 只注入 DisplayFacade）
+import { createCreateDisplayAppTool } from './tools/create-display-app.tool'
+import { createAuthorizeDataAppTool } from './tools/authorize-data-app.tool'
 
 /**
- * 工具装配器：注入各域暴露的门面 Service，在模块启动时把注册表内全部工具（P12-PATCH2 起 38 个）注册到 ToolRegistry。
+ * 工具装配器：注入各域暴露的门面 Service，在模块启动时把注册表内全部工具（P14 起 43 个）注册到 ToolRegistry。
  * 新增工具 = tools/ 下加一个工厂 + 在此处 register + 在 tool.groups.ts 归组（R70）。
  * 域门面纪律（见 ARCHITECTURE §12.3）：handler 只注入域 exports 的 Service，零跨域 import 内部实现——
  * 站点系列（文件三件套 + create_site + CMS 七件套 + 评论三件套 + 生命周期两件套）只注入 SiteFacade；
  * 云盘五件套只注入 CloudFacade（P5 T72 起）；
- * 数据应用八件套只注入 AppFacade（P11 T105 七件套 + P12-PATCH2 T116 只读 list_data_apps）。
+ * 数据应用八件套只注入 AppFacade（P11 T105 七件套 + P12-PATCH2 T116 只读 list_data_apps）；
+ * 展示应用两件套只注入 DisplayFacade（P14 T130：create_display_app / authorize_data_app）。
  */
 @Injectable()
 export class ToolBootstrap implements OnModuleInit {
@@ -79,6 +84,7 @@ export class ToolBootstrap implements OnModuleInit {
     private readonly cloudFacade: CloudFacade,
     private readonly appFacade: AppFacade,
     private readonly marketFacade: MarketFacade,
+    private readonly displayFacade: DisplayFacade,
   ) {}
 
   private readonly logger = new Logger(ToolBootstrap.name)
@@ -129,12 +135,15 @@ export class ToolBootstrap implements OnModuleInit {
     this.registry.register(createGenAdminPageTool(this.appFacade))
     this.registry.register(createAdjustPageTool(this.appFacade))
     this.registry.register(createConfirmDataAppTool(this.appFacade))
-    // P12-PATCH2 T116：数据应用公开面只读一件套（零参数、零写副作用；不代发布）
-    this.registry.register(createListDataAppsTool(this.appFacade))
+    // P12-PATCH2 T116 建 / P14 T130 改授权口径：只读一件套（应用 + 展示应用清单，零参数零写副作用）
+    this.registry.register(createListDataAppsTool(this.appFacade, this.displayFacade))
     // P13 T120：公开面写工具三件套（D110：publish/expose 经 AppFacade，submit 经 MarketFacade；全 write 走确认卡）
     this.registry.register(createPublishDataAppTool(this.appFacade))
     this.registry.register(createExposeDataAppTool(this.appFacade))
     this.registry.register(createSubmitMarketAppTool(this.marketFacade))
+    // P14 T130：展示应用两件套（create 建容器并返回 writePath；authorize 授权/撤权，镜像 expose 模式）
+    this.registry.register(createCreateDisplayAppTool(this.displayFacade))
+    this.registry.register(createAuthorizeDataAppTool(this.displayFacade))
 
     // P6 T77：工具归组校验（R70）——孤儿工具会让组路由漏发工具，启动即告警
     this.assertToolGroups()
