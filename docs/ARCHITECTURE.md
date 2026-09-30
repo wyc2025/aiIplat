@@ -897,6 +897,7 @@ P11 增补（app 配置组，见 `apps/api/src/config/app.config.ts`，§27.8）
 | ext-contract.service | api/src/modules/access/ext | 对外契约冻结层：envelope / 游标编解码（含 `Date→ISO` 规范化）/ keyset 分页 / scope 投影；内部响应形状不漂移到 v1（D124） | 已建（T135） |
 | ext-path.util | api/src/modules/access/ext | 请求路径 → 端点名（守卫 401 留痕与审计拦截器**共用一处实现**，R141） | 已建（T136） |
 | access 前端资产 | web/src/api/access、web/src/views/access | 接入凭证 API 客户端 + 凭证管理页（列表 / 新建 / **密钥一次性展示与复制** / 轮换 / 吊销 / scope 编辑 / 审计抽屉） | 已建（T137） |
+| reloadMenus | web/src/router/dynamic.ts | **重取菜单树 + 重建动态路由**（新建/入册应用、增删功能页后调用；`registerDynamicRoutes` 幂等且会移除「已消失」的旧路由）；返回菜单是否变化 | 已建（P15 修复） |
 
 ### Redis Key 增补约定（写入 RedisKey 常量）
 

@@ -58,6 +58,8 @@ interface CallResult {
   status: number
   body: Envelope | null
   headers: Headers
+  /** 原始响应文本（静态页 HTML 等非 JSON 响应断言用） */
+  text: string
 }
 
 let passed = 0
@@ -99,7 +101,44 @@ async function call(
   } catch {
     body = null
   }
-  return { status: response.status, body, headers: response.headers }
+  return { status: response.status, body, headers: response.headers, text }
+}
+
+/** 目录按需创建（同名已存在则复用；避免 mkdir 的「同名自动 (1)」语义） */
+async function ensureFolder(token: string, parentId: string, name: string): Promise<string> {
+  const listed = (await ok<{ list?: Array<{ id: string; name: string; isDir?: unknown }> }>(
+    `/api/cloud/file/list?parentId=${parentId}`,
+    { token },
+  )) as { list?: Array<{ id: string; name: string; isDir?: unknown }> }
+  const found = (listed.list ?? []).find((item) => item.name === name)
+  if (found) return found.id
+  const created = await ok<{ id: string }>('/api/cloud/file/mkdir', {
+    method: 'POST',
+    json: { parentId: Number(parentId), name },
+    token,
+  })
+  return created.id
+}
+
+/** 上传文本文件到云盘目录（multipart；Node 内置 FormData / Blob，零新依赖） */
+async function uploadFile(
+  token: string,
+  parentId: string,
+  name: string,
+  content: string,
+): Promise<{ id: string }> {
+  const form = new FormData()
+  form.append('file', new Blob([content], { type: 'text/html' }), name)
+  const response = await fetch(`${BASE}/api/cloud/file/upload?parentId=${parentId}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  })
+  const payload = (await response.json()) as Envelope
+  if (payload.code !== 0) {
+    throw new Error(`上传 ${name} 失败：code=${payload.code} ${payload.message ?? ''}`)
+  }
+  return payload.data as { id: string }
 }
 
 /** 断言 code=0 并返回 data */
@@ -452,6 +491,69 @@ async function main(): Promise<void> {
       where: { principal: { startsWith: 'display:' }, ownerId: appDef.ownerId },
     })
     check('匿名层取数（display 主体）亦落表', anonymousRows > 0, `count=${anonymousRows}`)
+    console.log('')
+
+    // ==================== 6. 展示应用静态文件（P14 遗留③ 销项）====================
+    console.log('6. 展示应用静态文件（上传 index.html → 开放层静态入口 → 同源取数）')
+    {
+      let uploadedId: string | null = null
+      try {
+        // 目录**按需创建**：挂靠本身不建目录（P14 §30.3——AI 或上传写文件时才 mkdir -p）
+        const siteRow = await prisma.siteSite.findFirstOrThrow({
+          where: { slug },
+          select: { rootFolderId: true },
+        })
+        const dispDirId = await ensureFolder(
+          token,
+          (siteRow.rootFolderId ?? BigInt(0)).toString(),
+          'disp',
+        )
+        const appDirId = await ensureFolder(token, dispDirId, displayA.id)
+        check('展示应用目录可由写文件按需创建（{站点根}/disp/{id}）', !!appDirId)
+
+        const html = [
+          '<!doctype html><html><head><meta charset="utf-8"><title>冒烟展示页</title></head><body>',
+          '<h1 id="marker">IPLAT-STATIC-OK</h1>',
+          '<script>',
+          `fetch('./api/app/${appCode}/tables/book/records?size=1')`,
+          '  .then(function (r) { return r.json() })',
+          "  .then(function (p) { document.body.insertAdjacentHTML('beforeend', '<p id=\"rows\">rows=' + (p.data ? p.data.length : -1) + '</p>') })",
+          '</script></body></html>',
+        ].join('\n')
+        const uploaded = await uploadFile(token, appDirId, 'index.html', html)
+        uploadedId = uploaded.id
+
+        const page = await call(`/api/open/${slug}/disp/${displayA.id}/`)
+        check(
+          '静态入口 200 且返回上传的页面',
+          page.status === 200 && page.text.includes('IPLAT-STATIC-OK'),
+          `status=${page.status}`,
+        )
+
+        const sameOrigin = await call(
+          `/api/open/${slug}/disp/${displayA.id}/api/app/${appCode}/tables/book/records?size=1`,
+        )
+        // 开放层（同源页面取数）沿用 P14 内部形状 `{list,total,pageNo,pageSize}`；
+        // 对外 `/api/ext/v1` 才走契约层 envelope（`data[] + paging`）——形状差异是 D124 的刻意设计
+        const payload = sameOrigin.body?.data as { list?: unknown[] } | undefined
+        check(
+          '页面内同源相对路径取数可用（./api/app/<appCode>/…）',
+          sameOrigin.body?.code === 0 && (payload?.list?.length ?? 0) === 1,
+          `code=${sameOrigin.body?.code} list=${payload?.list?.length ?? 'n/a'}`,
+        )
+
+        const empty = await call(`/api/open/${slug}/disp/${displayB.id}/index.html`)
+        check('同站点另一展示应用（无文件）不可达', empty.body?.code === 40400, `code=${empty.body?.code}`)
+      } catch (error) {
+        check('展示应用静态文件正例', false, (error as Error).message)
+      }
+      // 清理：软删上传文件（进回收站，物理清除由既有 cron 负责）
+      if (uploadedId) {
+        await prisma.cloudFile
+          .update({ where: { id: BigInt(uploadedId) }, data: { deletedAt: new Date() } })
+          .catch(() => undefined)
+      }
+    }
   } finally {
     // ==================== 清理（best-effort）====================
     try {
