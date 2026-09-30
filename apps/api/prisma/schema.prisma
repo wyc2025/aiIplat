@@ -975,3 +975,66 @@ model DispGrant {
   @@index([displayId], map: "idx_grant_display")
   @@map("disp_grant")
 }
+
+// ==================== P15：对外开放接入层（D119/D126，表名前缀 acc_） ====================
+// 主体化授权链的「凭证主体」侧：一凭证一应用（凭证即授权，不建 acc_grant）；
+// 全部逻辑外键（relationMode=prisma，无物理 FK）；跨域禁 JOIN。
+
+/// 接入凭证（R130/R131）：对外系统以 `Authorization: Bearer {keyId}.{secret}` 取数
+model AccCredential {
+  id           BigInt    @id @default(autoincrement())
+  /// 属主（逻辑关联 sys_user，禁 JOIN；同 app_def.owner_id 口径）
+  ownerId      BigInt    @map("owner_id")
+  /// 数据应用（逻辑关联 app_def.id，禁 JOIN；D126 一凭证一应用）
+  appId        BigInt    @map("app_id")
+  /// 备注名（属主内不要求唯一）
+  name         String    @map("name") @db.VarChar(64)
+  /// 定位索引：'ik_' + 10 位 base62
+  keyId        String    @unique(map: "uk_cred_keyid") @map("key_id") @db.VarChar(16)
+  /// sha256(secret) hex；secret 不落库、仅创建/轮换时一次性返回（R130）
+  secretHash   String    @map("secret_hash") @db.Char(64)
+  /// secret 前 4 位（可辨识溯源，列表回显）
+  secretPrefix String    @map("secret_prefix") @db.VarChar(8)
+  /// {tables:[], fields:{table:[field]}, ops:['read'], rowFilter:null}（R133/D125）
+  scope        Json      @map("scope")
+  /// 1 active / 0 revoked（吊销不可逆，R131）
+  status       Int       @default(1) @map("status") @db.TinyInt
+  /// NULL = 不过期；到点惰性判定失效（R130）
+  expiresAt    DateTime? @map("expires_at")
+  /// 最近命中时间（异步更新，允许分钟级延迟）
+  lastUsedAt   DateTime? @map("last_used_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@index([appId], map: "idx_cred_app")
+  @@index([ownerId, status], map: "idx_cred_owner")
+  @@map("acc_credential")
+}
+
+/// 接入审计（R135/D122）：元数据 + 参数摘要（≤512 字符），不记返回内容；高基数流水，无外键
+model AccAudit {
+  id            BigInt   @id @default(autoincrement())
+  /// 'display:{id}'（匿名层展示应用取数）| 'cred:{id}'（对外凭证取数）
+  principal     String   @map("principal") @db.VarChar(40)
+  /// 属主（逻辑关联 sys_user，禁 JOIN）
+  ownerId       BigInt   @map("owner_id")
+  /// 数据应用（失败链路过早如应用不匹配时可为空）
+  appId         BigInt?  @map("app_id")
+  /// schema / records / detail / file
+  endpoint      String   @map("endpoint") @db.VarChar(32)
+  tableName     String?  @map("table_name") @db.VarChar(64)
+  /// 查询参数摘要（截断 ≤512；不含返回内容）
+  paramsSummary String?  @map("params_summary") @db.VarChar(512)
+  /// 返回行数（schema 端点计 0）
+  rows          Int      @default(0) @map("rows")
+  durationMs    Int      @default(0) @map("duration_ms")
+  ip            String?  @map("ip") @db.VarChar(64)
+  /// 0 / 40001 / 40400 / 42900 / 50019 …
+  resultCode    Int      @map("result_code")
+  createdAt     DateTime @map("created_at")
+
+  @@index([principal, createdAt], map: "idx_audit_cred_time")
+  @@index([ownerId, createdAt], map: "idx_audit_owner_time")
+  @@index([createdAt], map: "idx_audit_created")
+  @@map("acc_audit")
+}

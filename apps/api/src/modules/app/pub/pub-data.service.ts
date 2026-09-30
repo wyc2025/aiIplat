@@ -233,6 +233,34 @@ export class PubDataService {
     return payload
   }
 
+  /**
+   * 取数面**全量投影**（P15 T135：对外 `/api/ext/v1/**` 的 cursor 分页用）。
+   *
+   * 只做「应用定位 + 暴露校验 + R104 参数白名单（sort/filter/expand 语义完全一致）+ 取数 + R101 投影」，
+   * **不切片、不分页、不缓存**——切片与游标编解码是 access 域契约层的职责（R136；契约冻结层独立）。
+   * 取数仍走 `DataService.queryForPublic`（铁律 5：单一执行器，与开放层同一路径）；
+   * 排序由契约层统一处理（需按排序键做 keyset 定位，故此处不做内存排序）。
+   */
+  async listAll(
+    ownerId: bigint,
+    appCode: string,
+    tableName: string,
+    query: Record<string, unknown>,
+  ): Promise<{ rows: Array<Record<string, unknown>>; sort: QuerySortDto[] }> {
+    const app = await this.resolvePublicApp(ownerId, appCode)
+    const { table, tableId } = await this.resolveExposedTable(app.id, tableName)
+    const exposure = await this.computeExposure(app.id, table, tableId)
+    // 复用 R104 参数解析（size 由契约层控制，这里传 1 占位：本方法不做切片）
+    const plan = this.parseListParams({ ...query, page: 1, size: 1 }, table, exposure)
+    const { rows } = await this.dataService.queryForPublic(app, table, {
+      op: 'list',
+      filter: plan.filter,
+      sort: plan.executorSort,
+      expand: plan.expand,
+    })
+    return { rows: rows.map((view) => this.project(view, exposure, plan)), sort: plan.sort }
+  }
+
   /** 取数面单行（行不存在 → 40400；支持 expand） */
   async getRow(
     ownerId: bigint,

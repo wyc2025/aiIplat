@@ -10,7 +10,7 @@ type ExposeTarget = (typeof TARGETS)[number]
  * 粒度暴露开关（write，P13 T120 / R110 / D110；P14 T126 收缩为两档）。
  *
  * target=table 传表名；target=field 传「表.字段」（或应用内唯一字段名）。
- * 暴露范围决定**授权取数面**（展示应用挂靠的站点，经 `/api/open/:slug/api/app/:appCode/...`）
+ * 暴露范围决定**授权取数面**（展示应用页面经同源相对路径 `./api/app/:appCode/...`）
  * 能读到哪些数据：`is_public` 总开关（`publish_data_app`）为第一道闸，本工具管表·字段级（第三、四道）。
  */
 export function createExposeDataAppTool(appFacade: AppFacade): AiTool {

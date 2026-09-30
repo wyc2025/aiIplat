@@ -402,7 +402,8 @@ const menuTree: MenuSeed[] = [
   // P11：应用中心（登录用户均可访问；子菜单「我的应用」+ 后端按用户 active 应用实时追加的
   // 「应用 ▸ 功能页」动态段 —— 动态段不落 sys_menu，R96；P13 增「应用市场」页
   // 与 admin 专属「市场审核」页（market:review，**须从 common 角色授予中排除**）；
-  // P14 增「展示应用」页（D112：静态展示页容器 + 站点挂靠 + 数据授权））
+  // P14 增「展示应用」页（D112：静态展示页容器 + 站点挂靠 + 数据授权）；
+  // P15 增「接入凭证」页（D119~D128：对外 API Key 管理，登录态自服务、无 perms））
   {
     name: '应用中心',
     type: 1,
@@ -433,6 +434,14 @@ const menuTree: MenuSeed[] = [
         component: 'display/index',
         icon: 'Picture',
         sort: 3,
+      },
+      {
+        name: '接入凭证',
+        type: 2,
+        path: 'app-center/credentials',
+        component: 'access/index',
+        icon: 'Key',
+        sort: 5,
       },
       {
         name: '市场审核',

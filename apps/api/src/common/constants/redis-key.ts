@@ -52,4 +52,15 @@ export const RedisKey = {
   appPubDataPrefix: (appId: string) => `app:pub:${appId}:data:`,
   /** 取数面限流计数（60 次/分/IP，R106）：app:pub:rate:{ip}，INCR + 首次 60s TTL */
   appPubRate: (ip: string) => `app:pub:rate:${ip}`,
+
+  // ===== access 域对外配额（P15 T136 / R134，ARCHITECTURE-P15 §5）=====
+  /** 凭证请求数·分钟窗：acc:quota:req:{credentialId}:m:{yyyyMMddHHmm}，INCR + 首次 120s TTL */
+  accQuotaReqMinute: (credentialId: string, window: string) =>
+    `acc:quota:req:${credentialId}:m:${window}`,
+  /** 凭证请求数·日窗：acc:quota:req:{credentialId}:d:{yyyyMMdd}，INCR + 首次 48h TTL */
+  accQuotaReqDay: (credentialId: string, window: string) =>
+    `acc:quota:req:${credentialId}:d:${window}`,
+  /** 凭证返回行数·日窗：acc:quota:rows:{credentialId}:d:{yyyyMMdd}，INCRBY + 首次 48h TTL（按返回行数计） */
+  accQuotaRowsDay: (credentialId: string, window: string) =>
+    `acc:quota:rows:${credentialId}:d:${window}`,
 } as const

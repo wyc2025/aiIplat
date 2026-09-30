@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common'
+import { AccessFacadeModule } from '../../access/facade/access-facade.module'
 import { AppFacadeModule } from '../../app/facade/app-facade.module'
 import { CloudModule } from '../../cloud/cloud.module'
 import { DisplayFacadeModule } from '../../display/facade/display-facade.module'
@@ -13,9 +14,10 @@ import { SiteOpenService } from './open.service'
  * 路由顺序（§14.4 铁律）：具体路由控制器（`:slug/api/*`、`:slug/disp/*`）必须先于
  * OpenStaticController（`:slug` 通配）注册；静态层首段 api 双保险兜底（T35）。
  *
- * P14 T125：新增 `OpenAppDataController`（授权取数面 `/api/open/:slug/api/app/:appCode/**`，
- * R125 校验链经 `DisplayFacade.assertCanRead` + `AppFacade`）与展示应用静态路由
+ * P14 T125：新增 `OpenAppDataController`（授权取数面）与展示应用静态路由
  * （`:slug/disp/:id/**`，经 `DisplayFacade.resolveForOpen`）。
+ * P15 T133（D123）：取数路径收窄为 `/api/open/:slug/disp/:id/api/app/:appCode/**`，判定粒度由
+ * 站点级 → **展示应用级**（旧 `:slug/api/app/**` 退役）；静态侧加 `disp/:id/api/` 子前缀排除双保险。
  *
  * **依赖方向（P14 运行时定案）**：`SiteResolveService` 已抽到独立的 `SiteResolveModule`
  * （open 与 manage 共用）——否则 `SiteFacadeModule → SiteManageModule → SiteOpenModule →
@@ -23,7 +25,14 @@ import { SiteOpenService } from './open.service'
  * 现依赖单向：site.open → display.facade → display.manage → site.facade → site.manage → site.resolve。
  */
 @Module({
-  imports: [CloudModule, SiteResolveModule, DisplayFacadeModule, AppFacadeModule],
+  imports: [
+    CloudModule,
+    SiteResolveModule,
+    DisplayFacadeModule,
+    AppFacadeModule,
+    // P15 T136：匿名层取数审计经 AccessFacade.writeAudit（site → access 的唯一依赖，铁律 3）
+    AccessFacadeModule,
+  ],
   controllers: [OpenAppDataController, OpenApiController, OpenStaticController],
   providers: [SiteOpenService],
 })

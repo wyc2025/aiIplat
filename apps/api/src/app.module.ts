@@ -14,6 +14,7 @@ import { TransformInterceptor } from './gateway/interceptors/transform.intercept
 import { PermissionModule } from './gateway/services/permission.module'
 import { PrismaModule } from './infra/prisma/prisma.module'
 import { RedisModule } from './infra/redis/redis.module'
+import { AccessModule } from './modules/access/access.module'
 import { AiModule } from './modules/ai/ai.module'
 import { AppDomainModule } from './modules/app/app-domain.module'
 import { CloudModule } from './modules/cloud/cloud.module'
@@ -46,6 +47,7 @@ import { UserModule } from './modules/system/user/user.module'
     AppDomainModule,
     MarketDomainModule,
     DisplayDomainModule,
+    AccessModule,
     AuthModule,
     DashboardModule,
     UserModule,

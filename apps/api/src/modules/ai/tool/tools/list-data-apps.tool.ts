@@ -23,8 +23,8 @@ export function createListDataAppsTool(appFacade: AppFacade, displayFacade: Disp
       'apps[] 每项含 appCode、名称、status（draft/active）、isPublic（是否已开启可被授权读取）、' +
       'missing（发布缺项清单）、grantedDisplays（已授权读取该应用的展示应用）；' +
       'displayApps[] 每项含 id（授权时用）、名称、siteSlug（挂靠站点，null=未挂靠则不对外）、urlPreview、grantedApps（已授权的应用 code）。' +
-      '展示页读取数据的完整前置链：展示应用已挂靠站点 → authorize_data_app 授权 → publish_data_app 开启 isPublic → ' +
-      'expose_data_app 暴露表/字段（缺一，站点取数即 40400）。' +
+      '展示应用页面读取数据的完整前置链：展示应用已挂靠站点 → authorize_data_app 授权 → publish_data_app 开启 isPublic → ' +
+      'expose_data_app 暴露表/字段（缺一，取数即 40400）。' +
       'missing 非空 = 还不满足读取条件：**不要代发布**，把缺项原样告诉用户并引导补齐。',
     parameters: {
       type: 'object',

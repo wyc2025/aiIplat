@@ -71,19 +71,26 @@ iplat 个人网站模板 —— 名片站（card）
   · 改配色/布局：直接编辑 style.css；
   · 需要图片：在后台云盘页上传到 media/ 目录（AI 助手无法代写二进制文件）。
 
-六、数据应用取数（展示页读数据，可选）
-  如果后台「应用中心」的数据应用要给你本站的展示页提供数据，需要先「授权」——授权后
-  站点展示页可以经**同源相对路径**读取该应用已暴露的数据（只读、无需登录）。
-  注意：本节与第一节「相对路径」纪律一致——取数接口仍在站点子路径内（./api/app/...），
-  站点页内直接相对调用即可，无需绝对地址。
+六、数据应用取数（展示应用页面读数据，可选）
+  如果后台「应用中心」的数据应用要给你的展示应用页面提供数据，需要先「授权」——数据应用授权
+  给某个展示应用、且该展示应用挂靠本站点后，**该展示应用的页面**可经同源相对路径读取该应用
+  已暴露的数据（只读、无需登录）。
+
+  路径形态（D123 收窄：取数按「展示应用」判定，不再按站点判定）：
+    · 你的页面文件位于本站点目录的 disp/{展示应用id}/ 下，取数写**相对路径**即可：
+        ./api/app/{appCode}/...
+      （浏览器实际请求 /api/open/{站点slug}/disp/{展示应用id}/api/app/{appCode}/...）
+    · 若要在**站点根目录页面**里取数，必须写绝对路径
+      /api/open/{站点slug}/disp/{展示应用id}/api/app/{appCode}/...
+      ——根页面用相对路径会落到 /api/open/{slug}/api/app/...（旧路径形态，已退役 → 404）。
 
   前置条件（缺一即 40400，与「不存在」不可区分）：
     ① 展示应用已挂靠本站点：应用中心 → 展示应用 → 挂靠本站；
-    ② 数据应用已授权给该展示应用：应用中心 → 展示应用 → 授权（或对话中让 AI 授权）；
+    ② 数据应用已授权给**该展示应用**：应用中心 → 展示应用 → 授权（或对话中让 AI 授权）；
     ③ 数据应用已开启「可被授权读取」：应用中心 → 我的应用 → 发布；
     ④ 表与字段已暴露：应用中心 → 结构 → 表/字段的「公开」开关。
 
-  接口清单（响应体仍是 { code, message, data }；相对路径口径）：
+  接口清单（响应体仍是 { code, message, data }；下例以展示应用页内的相对路径书写）：
     1. GET ./api/app/{appCode}/schema                              暴露的表结构
        data: { app: { name, description }, tables: [{ name, label, fields: [{ name, label, type }] }] }
     2. GET ./api/app/{appCode}/tables/{table}/records              只读列表
@@ -96,7 +103,7 @@ iplat 个人网站模板 —— 名片站（card）
     3. GET ./api/app/{appCode}/tables/{table}/records/{rowId}      只读单行（行不存在 → 40400）
     4. GET ./api/app/{appCode}/files/{fileId}/stream               附件图片/文件流（?download=1 触发下载）
 
-  fetch 示例（同源相对路径，站点页内直接用；appCode 见应用中心或对话中的 list_data_apps）：
+  fetch 示例（展示应用页内直接用；appCode 见应用中心或对话中的 list_data_apps）：
     const res = await fetch(`./api/app/${APP_CODE}/tables/books?size=10&sort=score:desc`)
     const { code, data } = await res.json()
     if (code === 0 && data.list) { /* data.list / data.total / data.pageNo / data.pageSize */ }

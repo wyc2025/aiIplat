@@ -6,6 +6,7 @@ import {
   Logger,
 } from '@nestjs/common'
 import type { Request, Response } from 'express'
+import { CREDENTIAL_WWW_AUTHENTICATE } from '../../common/constants/credential.constant'
 import { ErrorCode } from '../../common/constants/error-code'
 import { BusinessException } from '../../common/exceptions/business.exception'
 import { maskSensitiveQuery } from '../../common/utils/url-mask.util'
@@ -49,7 +50,19 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
     if (exception instanceof HttpException) {
       const status = exception.getStatus()
-      const code = HTTP_STATUS_TO_CODE[status] ?? ErrorCode.InternalError
+      const body = exception.getResponse()
+      // P15 D120/R132：对外凭证层需要「真实 HTTP 状态码 + 平台业务码」并存
+      // （401 + 50019、429 + 42900 + Retry-After）。自定义 HttpException 的响应体自带数字 `code`
+      // 时优先采用（Nest 默认体 { statusCode, message, error } 无 code 字段，故既有行为不变）。
+      const explicitCode =
+        body && typeof body === 'object' && typeof (body as { code?: unknown }).code === 'number'
+          ? (body as { code: number }).code
+          : undefined
+      const code = explicitCode ?? HTTP_STATUS_TO_CODE[status] ?? ErrorCode.InternalError
+      // 凭证层 401 需带 WWW-Authenticate（外部系统与下期 MCP 客户端据此发现授权要求）
+      if (explicitCode === ErrorCode.CredentialInvalid) {
+        response.set('WWW-Authenticate', CREDENTIAL_WWW_AUTHENTICATE)
+      }
       // Multer 超限（413）message 为英文 "File too large"，统一中文提示
       const message = status === 413 ? '文件大小超出限制' : this.resolveMessage(exception)
       response.status(status).json({ code, message, data: null })

@@ -225,6 +225,18 @@ export const ErrorCode = {
   DisplayGrantConflict: 50017,
   /** 展示应用名称冲突（owner 内唯一，D112/R123） */
   DisplayNameConflict: 50018,
+
+  // ========== access 域（50xxx 段续：50019 起，P15 D119~D128 / API-P15 §5） ==========
+  /**
+   * 凭证缺失 / 无效 / 已吊销 / 已过期（对外四端点）。
+   * 刻意与匿名层分治：凭证层用**真实 HTTP 401** + `WWW-Authenticate: Bearer`（外部系统与
+   * 下期 MCP 客户端据此发现授权要求），body 统一体 code=50019；应用/资源层失败仍 40400。
+   */
+  CredentialInvalid: 50019,
+  /** 凭证数达上限（每用户 access.maxCredentialsPerUser，默认 20；R130） */
+  CredentialQuotaExceeded: 50020,
+  /** 授权范围越界（scope 引用未暴露 / 不存在的表或字段；R133，显式报错优于静默收窄） */
+  CredentialScopeInvalid: 50021,
 } as const
 
 export type ErrorCodeValue = (typeof ErrorCode)[keyof typeof ErrorCode]

@@ -10,6 +10,7 @@
     "seed": "tsx prisma/seed.ts",
     "check:ai": "tsx scripts/check-ai-prompt.ts",
     "smoke:ai": "tsx scripts/smoke-ai-tools.ts",
+    "smoke:ext": "tsx scripts/smoke-ext-access.ts",
     "clean:app": "tsx scripts/clean-app-drafts.ts"
   },
   "dependencies": {

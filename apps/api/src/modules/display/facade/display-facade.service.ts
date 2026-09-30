@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common'
-import { DisplayService, type DisplayView } from '../manage/display.service'
+import { DisplayService, type AccessPrincipal, type DisplayView } from '../manage/display.service'
 
 /**
  * display 域门面（P14 T125 / ARCH §30.1）：跨域唯一入口（铁律 3/6）。
@@ -52,9 +52,12 @@ export class DisplayFacade {
     return this.displayService.revoke(userId, displayId, appCode)
   }
 
-  /** R125 第 ② 步：站点下是否存在被授予该数据应用的挂靠展示应用（未命中 40400） */
-  async assertCanRead(appId: bigint, siteId: bigint): Promise<void> {
-    return this.displayService.assertCanRead(appId, siteId)
+  /**
+   * R125 修订版第 ③ 步（P15 R138 主体化）：该**展示应用**是否被授予此数据应用（未命中 40400）。
+   * 挂靠校验（存在 / 未软删 / 本站点）由 `resolveForOpen` 前置完成（D123 粒度收窄到展示应用级）。
+   */
+  async assertCanRead(appId: bigint, principal: AccessPrincipal): Promise<void> {
+    return this.displayService.assertCanRead(appId, principal)
   }
 
   /** 开放层静态服务解析（`:slug/disp/:id/**`）：返回站点内相对路径（未挂靠/挂他站 → 40400） */

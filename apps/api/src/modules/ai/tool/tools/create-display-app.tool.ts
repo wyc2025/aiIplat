@@ -7,7 +7,8 @@ import { feedDisplayError, readStr } from './display-error.util'
  *
  * 展示应用 = AI 生成的**静态展示页**（HTML/CSS/JS）容器：默认落云盘暂存区，可挂靠到某个站点对外访问
  * （挂靠后入口 `/api/open/{slug}/disp/{id}/`）。文件由 `write_cloud_file` 写到 `writePath` 下
- * （建议 `index.html` 为入口），数据读取经 `authorize_data_app` 授权后走站点同源取数面。
+ * （建议 `index.html` 为入口），数据读取经 `authorize_data_app` 授权后，在页面内以同源相对路径
+ * `./api/app/{appCode}/...` 调取数面（D123：取数按展示应用判定，非按站点）。
  */
 export function createCreateDisplayAppTool(displayFacade: DisplayFacade): AiTool {
   return {
@@ -18,7 +19,7 @@ export function createCreateDisplayAppTool(displayFacade: DisplayFacade): AiTool
       'siteSlug 可选：填站点 slug 则创建即挂靠该站点（站点须是自己的）；不填则创建在云盘暂存区（稍后可换挂靠）。' +
       '创建成功后返回 writePath（写文件的云盘路径）与 urlPreview（挂靠后的访问入口）：' +
       '用 write_cloud_file 把页面文件写到 writePath 下（建议 index.html 作入口，页面内用相对路径引用素材），' +
-      '再用 authorize_data_app 授权数据应用，站点页即可经同源路径读取该应用已暴露的数据（只读）。',
+      '再用 authorize_data_app 授权数据应用，页面内即可经同源相对路径读取该应用已暴露的数据（只读）。',
     parameters: {
       type: 'object',
       properties: {

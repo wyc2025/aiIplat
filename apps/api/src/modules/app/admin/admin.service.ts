@@ -439,6 +439,71 @@ export class AdminService {
   }
 
   /**
+   * 暴露清单（P15 T134 / R133）：属主 + 未软删应用 → **已暴露**的表与字段名清单。
+   *
+   * 供 access 域校验凭证 `scope` 只能**收窄**暴露三开关并集（越界 50021）。
+   * 不要求 `is_public=1`——凭证可在发布前创建（R131 的创建条件为「自己名下、未软删」）。
+   */
+  async exposedSchema(
+    userId: bigint,
+    code: string,
+  ): Promise<{
+    appId: string
+    appCode: string
+    name: string
+    isPublic: number
+    tables: Array<{ name: string; label: string; fields: Array<{ name: string; label: string }> }>
+  }> {
+    const app = await this.assertOwned(userId, code)
+    const tables = await this.prisma.appTable.findMany({
+      where: { appId: app.id, deletedAt: null, isSystem: 0, isExposed: 1 },
+      orderBy: { id: 'asc' },
+      select: { id: true, name: true, label: true },
+    })
+    const fields = tables.length
+      ? await this.prisma.appField.findMany({
+          where: { tableId: { in: tables.map((table) => table.id) }, isDeleted: 0, isExposed: 1 },
+          orderBy: [{ sort: 'asc' }, { id: 'asc' }],
+          select: { tableId: true, name: true, label: true },
+        })
+      : []
+    return {
+      appId: app.id.toString(),
+      appCode: app.code,
+      name: app.name,
+      isPublic: app.isPublic,
+      tables: tables.map((table) => ({
+        name: table.name,
+        label: table.label,
+        fields: fields
+          .filter((field) => field.tableId === table.id)
+          .map((field) => ({ name: field.name, label: field.label })),
+      })),
+    }
+  }
+
+  /**
+   * P15 T134：属主批量应用摘要（凭证列表回填 appCode / 应用名用；只读）。
+   * 返回 id 字符串 → 摘要；非本人 / 已软删应用不在结果中（凭证侧兜底为「（应用已删除）」）。
+   */
+  async appBriefByIds(
+    userId: bigint,
+    ids: bigint[],
+  ): Promise<Array<{ id: string; code: string; name: string; isPublic: number }>> {
+    if (ids.length === 0) return []
+    const apps = await this.prisma.appDef.findMany({
+      where: { id: { in: ids }, ownerId: userId, deletedAt: null },
+      select: { id: true, code: true, name: true, isPublic: true },
+    })
+    return apps.map((app) => ({
+      id: app.id.toString(),
+      code: app.code,
+      name: app.name,
+      isPublic: app.isPublic,
+    }))
+  }
+
+  /**
    * P13 R120：按 id 批量取本用户未删应用的 code（市场「我的提交」回填 appCode 用；只读）。
    * 返回 id 字符串 → code 的映射；非本人/已删应用不在结果中。
    */

@@ -16,6 +16,15 @@ export const DISPLAY_NAME_MAX = 40
 /** 站点目录内展示应用子目录名（ARCH §30.3：`{站点目录}/disp/{displayId}/`） */
 export const DISP_DIR = 'disp'
 
+/**
+ * 授权判定主体（P15 R138 / ARCHITECTURE-P15 §6）：本期实现 `display` 分支（查 `disp_grant`）；
+ * `credential` 分支由 access 域自行完成（R132 第 2~4 步，凭证判定不需要 `disp_grant`），
+ * 此处保留签名占位——下期 MCP 适配器（D129）复用同一主体模型。
+ */
+export type AccessPrincipal =
+  | { type: 'display'; displayId: bigint }
+  | { type: 'credential'; credentialId: bigint; appId: bigint }
+
 /** 展示应用视图（后管与 AI 工具出域形态；bigint 一律转字符串） */
 export interface DisplayView {
   id: string
@@ -238,19 +247,29 @@ export class DisplayService {
   // ==================== 开放层支撑（R125 / §30.3） ====================
 
   /**
-   * R125 第 ② 步：该站点下是否存在「挂靠中的展示应用」被授予此数据应用。
+   * R125 修订版第 ③ 步（P15 R138 主体化）：该**展示应用**是否被授予此数据应用。
    * 未命中一律 **40400**（对外不区分原因，防探测口径沿用）。
+   *
+   * P15 D123 收窄：判定粒度由「站点级」收窄为「展示应用级」——原先「站点下任一挂靠展示应用命中
+   * 即放行」会让**同站点其他未授权的展示应用**也能调同一接口；现挂靠校验（存在 / 未软删 / 本站点）
+   * 由 `resolveForOpen` 前置完成，本方法只按 `displayId` 精确查 `disp_grant` 命中。
+   *
+   * `credential` 主体不经本方法（凭证判定由 access 域完成，R132 第 2~4 步），签名预留多主体。
    */
-  async assertCanRead(appId: bigint, siteId: bigint): Promise<void> {
-    const displays = await this.prisma.dispDisplay.findMany({
-      where: { siteId, status: DISPLAY_STATUS_ACTIVE, deletedAt: null },
+  async assertCanRead(appId: bigint, principal: AccessPrincipal): Promise<void> {
+    if (principal.type !== 'display') {
+      // 凭证主体不走 disp_grant（R132 由 access 域自行判定）；防御性 40400
+      throw new BusinessException(ErrorCode.NotFound, '资源不存在')
+    }
+    const display = await this.prisma.dispDisplay.findFirst({
+      where: { id: principal.displayId, status: DISPLAY_STATUS_ACTIVE, deletedAt: null },
       select: { id: true },
     })
-    if (displays.length === 0) {
+    if (!display) {
       throw new BusinessException(ErrorCode.NotFound, '资源不存在')
     }
     const hit = await this.prisma.dispGrant.findFirst({
-      where: { appId, displayId: { in: displays.map((display) => display.id) } },
+      where: { appId, displayId: display.id },
       select: { id: true },
     })
     if (!hit) {

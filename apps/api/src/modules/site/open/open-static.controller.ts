@@ -87,6 +87,12 @@ export class OpenStaticController {
     @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
+    // P15 D123 双保险：`disp/{id}/api/**` 是取数面子前缀（由 OpenAppDataController 承接）——
+    // 若因注册顺序意外落到静态通配，一律 40400，绝不把 `api/` 当文件路径解析
+    // （否则会被路径美化 / SPA 回退兜成 200 站点首页，P14 已实测过该类吞并）。
+    if (path.length > 0 && path[0] === 'api') {
+      throw new BusinessException(ErrorCode.NotFound, '资源不存在')
+    }
     const prefix = await this.resolveDisplayPrefix(slug, id)
     await this.serve(slug, `${prefix}/${path.join('/')}`, req, res)
   }

@@ -381,6 +381,22 @@ export class AppFacade {
     return { appId: app.id.toString(), appCode: app.code, name: app.name, isPublic: app.isPublic }
   }
 
+  /**
+   * 暴露清单（P15 T134 / R133）：access 域校验凭证 `scope` 只能收窄暴露三开关并集。
+   * 属主 + 未软删校验在域内单点完成；不要求 `is_public=1`（凭证可在发布前创建，R131）。
+   */
+  async exposedSchemaOf(userId: bigint, appCode: string) {
+    return this.adminService.exposedSchema(userId, appCode)
+  }
+
+  /** 属主批量应用摘要（P15 T134：凭证列表回填 appCode / 应用名；已删应用不在结果中） */
+  async appBriefByIds(
+    userId: bigint,
+    ids: bigint[],
+  ): Promise<Array<{ id: string; code: string; name: string; isPublic: number }>> {
+    return this.adminService.appBriefByIds(userId, ids)
+  }
+
   /** 授权增删后失效取数面缓存（display 域经此调用，避免跨域 import app 内部缓存工具，铁律 6） */
   async invalidatePublicCache(appId: bigint): Promise<void> {
     await invalidatePubAll(this.redis, appId)
@@ -413,14 +429,28 @@ export class AppFacade {
     return this.pubDataService.listRows(ownerId, appCode, table, query)
   }
 
-  /** 取数面单行（§30.4 `/tables/:table/records/:rowId`） */
+  /**
+   * 取数面全量投影（P15 T135）：对外 `/api/ext/v1/**` 的 cursor 分页数据源。
+   * 不切片、不缓存——切片与游标编解码在 access 域契约层（契约冻结层独立，R136）；
+   * 取数仍走同一 `DataService.queryForPublic`（铁律 5）。
+   */
+  async publicListAll(
+    ownerId: bigint,
+    appCode: string,
+    table: string,
+    query: Record<string, unknown>,
+  ): Promise<{ rows: Array<Record<string, unknown>>; sort: Array<{ f: string; dir: 'asc' | 'desc' }> }> {
+    return this.pubDataService.listAll(ownerId, appCode, table, query)
+  }
+
+  /** 取数面单行（§30.4 `/tables/:table/records/:rowId`）；返回 `{ op, row }`（取数执行器语义） */
   async publicDetail(
     ownerId: bigint,
     appCode: string,
     table: string,
     rowId: string,
     query: Record<string, unknown>,
-  ): Promise<Record<string, unknown>> {
+  ): Promise<{ op: string; row: Record<string, unknown> }> {
     return this.pubDataService.getRow(ownerId, appCode, table, rowId, query)
   }
 

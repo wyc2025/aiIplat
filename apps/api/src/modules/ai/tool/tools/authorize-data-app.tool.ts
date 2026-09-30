@@ -6,7 +6,8 @@ import { feedDisplayError, readStr } from './display-error.util'
  * 数据应用授权（write，P14 T130 / D114 / ARCHITECTURE §30.7 工具 43）。
  *
  * 授权两跳的第一跳（数据应用 → 展示应用）：授权后，该展示应用挂靠站点的展示页才能经
- * 同源路径 `/api/open/{slug}/api/app/{appCode}/...` 读取该应用的数据；未授权一律 40400。
+ * 同源相对路径 `./api/app/{appCode}/...`（页面位于 `disp/{id}/` 下，即
+ * `/api/open/{slug}/disp/{id}/api/app/{appCode}/...`）读取该应用的数据；未授权一律 40400。
  * displayId 取 `list_data_apps` 返回的展示应用清单（含 id / 名称 / 挂靠站点 / 已授权应用）。
  */
 export function createAuthorizeDataAppTool(displayFacade: DisplayFacade): AiTool {
@@ -15,7 +16,7 @@ export function createAuthorizeDataAppTool(displayFacade: DisplayFacade): AiTool
     title: '授权数据应用给展示应用',
     description:
       '把某个数据应用「授权」给一个展示应用（isGranted=false 则撤销授权）。授权后该展示应用挂靠的站点页' +
-      '才能经同源路径 /api/open/{站点slug}/api/app/{appCode}/... 读取该应用的数据（只读）。' +
+      '才能在该展示应用页面内经同源相对路径 ./api/app/{appCode}/... 读取该应用的数据（只读）。' +
       'displayId 从 list_data_apps 的展示应用清单里取（形如 { id, name, siteSlug }）。' +
       '读取的完整前置：① 已授权（本工具）② 应用已发布 is_public=1（publish_data_app）' +
       '③ 表与字段已暴露（expose_data_app）④ 展示应用已挂靠站点。任一不满足 → 取数一律 40400。',
