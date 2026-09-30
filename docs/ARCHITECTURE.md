@@ -2524,6 +2524,7 @@ app 域（附件上传）          ──▶ CloudFacade.uploadForApp
 ```
 
 - 区块四型：`filterBar/table/form/detail`；字段 string DSL（`字段[:op]` / `字段:expand:目标` / `字段:ref:目标[:multiple]`）。
+- **2026-09-30 增补**：form 区块新增 `placement: 'inline' | 'dialog'`（**缺省 `dialog`**）——`dialog` 渲染为**表格卡片头部「新建 XX」按钮 + 弹窗**（字段控件与「编辑」同款 `FieldInput`），`inline` 保留历史"内嵌区块"形态；R94 校验放行并校验该字段（**仅 form 区块可携带**，非法值 → 50004）。已同步：前端引擎 `AdminRenderer`、同源模板（`views/app/utils/schema.ts` 与 `page/page.builder.ts` 均默认 `dialog`）、可视化页编辑器「展示形态」开关。
 - 校验（R94，50004 带路径）：kind 必须 admin；dataSources/tables 存在、filter/sort 字段存在；layout 绑定必须指向已声明数据源（form → 动作）；
   `rowId` 为内置列（非 app_field 定义），显式放行。
   **实现注记**：增补写「zod/class-validator」，但 zod 非现有依赖且铁律 7 禁止新增 → 落地为**手写结构校验**（`page/page.schema.ts`，纯函数零依赖）。
