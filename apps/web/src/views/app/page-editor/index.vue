@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { reloadMenus } from '@/router/dynamic'
 import {
   createPage,
   deletePage,
@@ -177,6 +178,10 @@ async function submit(): Promise<void> {
     }
     dialog.visible = false
     await load()
+    // 功能页即「应用中心」动态菜单项：新增后重取菜单树（已入册应用立即可见，无需 F5）
+    if (!dialog.editingId) {
+      await reloadMenus()
+    }
   } catch (error) {
     // R113：50004 就地展示（message 形如「页面模式校验失败（路径）：原因」）
     dialog.error = error instanceof Error ? error.message : '保存失败，请稍后重试'
@@ -189,12 +194,14 @@ async function submit(): Promise<void> {
 }
 
 async function removePage(page: AppPageListItem): Promise<void> {
-  if (!(await confirmDialog(`删除功能页「${page.name}」？菜单将在下次刷新后消失。`, '删除确认', { type: 'warning' }))) {
+  if (!(await confirmDialog(`删除功能页「${page.name}」？菜单项将立即消失。`, '删除确认', { type: 'warning' }))) {
     return
   }
   await deletePage(appCode.value, page.id)
   ElMessage.success('已删除')
   await load()
+  // 菜单项随之消失（不再需要「下次刷新后消失」）
+  await reloadMenus()
 }
 
 function openPage(page: AppPageListItem): void {

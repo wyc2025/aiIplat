@@ -85,21 +85,47 @@ const activeApps = computed(() => apps.value)
 /** 当前所选应用**已暴露**的表（scope 只能从中选） */
 const exposedTables = computed(() => (formDialog.pubConfig ?? []).filter((table) => table.isExposed === 1))
 
+/** 应用列表项归一（`listApps` 的 isPublic/status 为扩展字段） */
+function mapApp(app: { appCode: string; name: string }): AppOption {
+  const extra = app as unknown as { isPublic?: number; status?: string }
+  return {
+    appCode: app.appCode,
+    name: app.name,
+    isPublic: Number(extra.isPublic ?? 0),
+    status: String(extra.status ?? 'active'),
+  }
+}
+
+/**
+ * 刷新应用下拉（打开「新建凭证」时调用）。
+ *
+ * 必要性：本页数据只在 `onMounted` 取一次，而多页签 + keep-alive 下切回不会重挂载——
+ * 用户刚在「我的应用」新建的应用会不可见（复验实测）。每次开弹窗重取一次即可闭合该场景。
+ */
+async function refreshApps(): Promise<void> {
+  try {
+    apps.value = (await listApps()).map(mapApp)
+  } catch {
+    // 保留原列表；请求层已提示
+  }
+}
+
+/** 刷新凭证列表（打开审计抽屉时调用：筛选下拉须含刚创建 / 吊销的凭证） */
+async function refreshCredentials(): Promise<void> {
+  try {
+    list.value = await listCredentials()
+  } catch {
+    // 保留原列表；请求层已提示
+  }
+}
+
 async function load(): Promise<void> {
   loading.value = true
   loadError.value = false
   try {
     const [credentials, appList] = await Promise.all([listCredentials(), listApps()])
     list.value = credentials
-    apps.value = appList.map((app) => {
-      const extra = app as unknown as { isPublic?: number; status?: string }
-      return {
-        appCode: app.appCode,
-        name: app.name,
-        isPublic: Number(extra.isPublic ?? 0),
-        status: String(extra.status ?? 'active'),
-      }
-    })
+    apps.value = appList.map(mapApp)
   } catch {
     list.value = []
     loadError.value = true
@@ -127,7 +153,7 @@ async function loadSchema(appCode: string): Promise<void> {
   }
 }
 
-function openCreate(): void {
+async function openCreate(): Promise<void> {
   formDialog.id = ''
   formDialog.name = ''
   formDialog.appCode = ''
@@ -136,6 +162,8 @@ function openCreate(): void {
   formDialog.fields = {}
   formDialog.pubConfig = null
   formDialog.visible = true
+  // 下拉取最新：页面加载后（或另一页签里）新建的应用要能选到
+  await refreshApps()
 }
 
 async function openEdit(item: CredentialItem): Promise<void> {
@@ -300,6 +328,8 @@ function openAudit(): void {
   auditDrawer.pageNo = 1
   auditDrawer.resultCode = undefined
   auditDrawer.credentialId = ''
+  // 筛选下拉取最新凭证（刚创建 / 吊销的应立即可见）
+  void refreshCredentials()
   void loadAudits()
 }
 
@@ -356,7 +386,7 @@ function resultText(code: number): string {
       title="接入凭证用于外部系统经 /api/ext/v1 只读读取数据应用已暴露的数据"
     >
       <template #default>
-        密钥只在**创建 / 轮换**时展示一次，请立即妥善保存；此后任何页面都不再回显。授权范围只能收窄
+        密钥只在创建 / 轮换时展示一次，请立即妥善保存；此后任何页面都不再回显。授权范围只能<b>收窄</b>
         （表 / 字段须为已暴露项）。
       </template>
     </el-alert>

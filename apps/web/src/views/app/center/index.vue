@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { reloadMenus } from '@/router/dynamic'
 import {
   confirmApp,
   createApp,
@@ -221,6 +222,11 @@ async function submitCreate(): Promise<void> {
     )
     dialogVisible.value = false
     await load()
+    // 正式应用（非草稿）参与「应用中心」动态菜单：重取菜单树，已生成管理页的立即可见
+    // （草稿待入册后才有菜单项，故此处不刷新）
+    if (result.status !== 'draft') {
+      await reloadMenus()
+    }
   } catch {
     // 请求层已提示
   } finally {
@@ -233,8 +239,10 @@ async function confirmDraft(item: AppDefItem): Promise<void> {
     return
   }
   await confirmApp(item.appCode)
-  ElMessage.success('已入册，功能页已挂到应用中心菜单')
   await load()
+  // 入册即挂「应用中心」菜单：此前只提示不刷新（需手动 F5），此处重取菜单树使提示名副其实
+  const changed = await reloadMenus()
+  ElMessage.success(changed ? '已入册，功能页已挂到应用中心菜单' : '已入册')
 }
 
 async function removeApp(item: AppDefItem): Promise<void> {
@@ -250,6 +258,8 @@ async function removeApp(item: AppDefItem): Promise<void> {
   await deleteApp(item.appCode)
   ElMessage.success('已删除')
   await load()
+  // 菜单项随应用删除消失（否则旧路由仍留在侧边栏）
+  await reloadMenus()
 }
 
 function goSchema(item: AppDefItem): void {
