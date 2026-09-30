@@ -373,7 +373,7 @@ apps/api/src/
 
 ---
 
-## 5. 数据库设计（sys_ 前缀为 P1 底座；P2a 新增 7 张 ai_ 表；P3 新增 3 张 cloud_ 表；P4a 新增 6 张 site_ 表；**P4e 新增 1 张 `site_quota` 表并解除 `site_site.user_id` 唯一索引**；**P11 新增 7 张 app\_ 表，见 §27.2**；**P12 增 4 列，见 §28.2**；**P13 新增 1 张 `market_listing` 表（`market_` 前缀），见 §29.2**；**P14 新增 2 张 `disp_display` / `disp_grant` 表（`disp_` 前缀）并收缩 `app_page.kind` 为仅 admin，见 §30.2**）
+## 5. 数据库设计（sys_ 前缀为 P1 底座；P2a 新增 7 张 ai_ 表；P3 新增 3 张 cloud_ 表；P4a 新增 6 张 site_ 表；**P4e 新增 1 张 `site_quota` 表并解除 `site_site.user_id` 唯一索引**；**P11 新增 7 张 app\_ 表，见 §27.2**；**P12 增 4 列，见 §28.2**；**P13 新增 1 张 `market_listing` 表（`market_` 前缀），见 §29.2**；**P14 新增 2 张 `disp_display` / `disp_grant` 表（`disp_` 前缀）并收缩 `app_page.kind` 为仅 admin，见 §30.2**；**P15 新增 2 张 `acc_credential` / `acc_audit` 表（`acc_` 前缀），见 §31.2**）
 
 > Prisma model 用 PascalCase + `@@map("sys_user")`，字段 camelCase + `@map("user_name")`。以下为数据库层结构。时间字段统一 `created_at / updated_at`，软删除用 `deleted_at`。
 >
@@ -891,25 +891,34 @@ P11 增补（app 配置组，见 `apps/api/src/config/app.config.ts`，§27.8）
 | MarketFacade | api/src/modules/market/facade | market 域门面（`submitMarketApp`）；ai 域工具唯一入口，market 域零跨域 import（§29.1） | 已建（T120） |
 | snapshot-marshal.core.ts | api/src/modules/market/snapshot | 市场快照/演示数据**手写结构校验与序列化**（入库·出库双向；非法 50015，不静默修补）；纯函数零 Nest 依赖 | 已建（T118） |
 | market 前端资产 | web/src/api/market、web/src/views/market | 市场 API 客户端 + 应用市场页（卡片流/详情抽屉/复制）+ 市场审核页（待审/在架双标签、拒绝必填理由） | 已建（T121） |
+| AccessFacade.writeAudit | api/src/modules/access/facade | access 域门面：匿名层取数审计投递（site 域开放层的唯一跨域消费点；铁律 3/R141） | 已建（T136） |
+| quota.service / quota.interceptor | api/src/modules/access/quota | 按 principal 的对外配额（请求数分·日双窗 + 返回行数日窗）：429 + `Retry-After` + `X-RateLimit-*` 响应头；行数为响应后记账 | 已建（T136） |
+| audit.service / audit.interceptor | api/src/modules/access/audit | 接入审计：内存缓冲（5s 或满 100 条）批量落 `acc_audit`、成功与负例统一埋点、90 天分批清理与属主隔离检索 | 已建（T136） |
+| ext-contract.service | api/src/modules/access/ext | 对外契约冻结层：envelope / 游标编解码（含 `Date→ISO` 规范化）/ keyset 分页 / scope 投影；内部响应形状不漂移到 v1（D124） | 已建（T135） |
+| ext-path.util | api/src/modules/access/ext | 请求路径 → 端点名（守卫 401 留痕与审计拦截器**共用一处实现**，R141） | 已建（T136） |
+| access 前端资产 | web/src/api/access、web/src/views/access | 接入凭证 API 客户端 + 凭证管理页（列表 / 新建 / **密钥一次性展示与复制** / 轮换 / 吊销 / scope 编辑 / 审计抽屉） | 已建（T137） |
 
 ### Redis Key 增补约定（写入 RedisKey 常量）
 
-| Key                                  | 类型/TTL                                                 | 用途                                                                                                         |
-| ------------------------------------ | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `online:{userId}`                    | hash，30min 滑动                                         | 在线用户（username/nickname/ip/loginAt/lastActiveAt），JwtAuthGuard 校验通过时刷新，登出删除                 |
-| `ai:chatting:{userId}`               | string，TTL 300s（兜底防进程崩溃残留），流结束时主动删除 | 单用户并发流限制（存在即拒绝新流，20007）                                                                    |
-| `ai:confirm:{toolCallId}`            | string（JSON），TTL 600s                                 | write 工具确认单：{ userId, conversationId, toolName, params }，确认/取消/过期即失效                         |
-| `app:schema:{appId}`                 | string（JSON），TTL 600s                                 | 应用 schema 全量打包缓存（def+tables+fields+rels+pages）；结构/页面/应用变更即 DEL（R99）                    |
-| `app:import:{taskId}`                | string（JSON），TTL 3600s                                | CSV 导入进度 { status,total,done,errors }（含 userId 归属校验）                                              |
-| `site:resolve:{slug}`                | string（JSON），TTL 300s                                 | slug → 站点信息；site 域写操作（改 slug/启停）主动 DEL                                                       |
-| `site:path:{siteId}:{path}`          | string，TTL 60s                                          | 路径 → fileId；"404" 为负缓存；cloud 侧变更靠 TTL 被动失效（R12）                                            |
-| `site:data:{siteId}:{...}`           | string（JSON），TTL 60s                                  | 开放数据热缓存；site 域内容变更 scanDel 前缀失效                                                             |
-| `site:view:{articleId}:{ip}`         | string，SET NX EX 300                                    | 查看数去重窗口（R8）                                                                                         |
-| `site:comment:rate:{articleId}:{ip}` | string，TTL 60s                                          | 同文章同 IP 评论间隔（R9，命中即 40111）                                                                     |
-| `site:rate:{bucket}:{ip}`            | counter，60s 窗口                                        | 开放层独立限流计数（bucket = static/api/comment）                                                            |
-| `pub:rate:{bucket}:{ip}`             | counter，60s 窗口                                        | 云盘公开端点独立限流计数（P4c R32：bucket = static→raw/download 120次/分、data→info/list 60次/分），见 §16.2 |
-| `share:pass:{token}:{sid}`           | string，TTL = min(2h, 分享剩余有效期)                    | 分享提取码通过后的短期访问凭证（P4d R42）；改密码/移除密码时按前缀 scanDel 失效                              |
-| `share:passfail:{ip}:{token}`        | counter，10 分钟窗口                                     | 分享提取码错误计数（P4d R42：连续 5 次锁 10 分钟，照登录 10102 口径）                                        |
+| Key                                   | 类型/TTL                                                 | 用途                                                                                                         |
+| ------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `online:{userId}`                     | hash，30min 滑动                                         | 在线用户（username/nickname/ip/loginAt/lastActiveAt），JwtAuthGuard 校验通过时刷新，登出删除                 |
+| `ai:chatting:{userId}`                | string，TTL 300s（兜底防进程崩溃残留），流结束时主动删除 | 单用户并发流限制（存在即拒绝新流，20007）                                                                    |
+| `ai:confirm:{toolCallId}`             | string（JSON），TTL 600s                                 | write 工具确认单：{ userId, conversationId, toolName, params }，确认/取消/过期即失效                         |
+| `app:schema:{appId}`                  | string（JSON），TTL 600s                                 | 应用 schema 全量打包缓存（def+tables+fields+rels+pages）；结构/页面/应用变更即 DEL（R99）                    |
+| `app:import:{taskId}`                 | string（JSON），TTL 3600s                                | CSV 导入进度 { status,total,done,errors }（含 userId 归属校验）                                              |
+| `site:resolve:{slug}`                 | string（JSON），TTL 300s                                 | slug → 站点信息；site 域写操作（改 slug/启停）主动 DEL                                                       |
+| `site:path:{siteId}:{path}`           | string，TTL 60s                                          | 路径 → fileId；"404" 为负缓存；cloud 侧变更靠 TTL 被动失效（R12）                                            |
+| `site:data:{siteId}:{...}`            | string（JSON），TTL 60s                                  | 开放数据热缓存；site 域内容变更 scanDel 前缀失效                                                             |
+| `site:view:{articleId}:{ip}`          | string，SET NX EX 300                                    | 查看数去重窗口（R8）                                                                                         |
+| `site:comment:rate:{articleId}:{ip}`  | string，TTL 60s                                          | 同文章同 IP 评论间隔（R9，命中即 40111）                                                                     |
+| `site:rate:{bucket}:{ip}`             | counter，60s 窗口                                        | 开放层独立限流计数（bucket = static/api/comment）                                                            |
+| `pub:rate:{bucket}:{ip}`              | counter，60s 窗口                                        | 云盘公开端点独立限流计数（P4c R32：bucket = static→raw/download 120次/分、data→info/list 60次/分），见 §16.2 |
+| `share:pass:{token}:{sid}`            | string，TTL = min(2h, 分享剩余有效期)                    | 分享提取码通过后的短期访问凭证（P4d R42）；改密码/移除密码时按前缀 scanDel 失效                              |
+| `share:passfail:{ip}:{token}`         | counter，10 分钟窗口                                     | 分享提取码错误计数（P4d R42：连续 5 次锁 10 分钟，照登录 10102 口径）                                        |
+| `acc:quota:req:{id}:m:{yyyyMMddHHmm}` | counter，TTL 120s                                        | 对外凭证请求数·分钟窗（P15 R134；INCR + 首写设 TTL，过期即重置）                                             |
+| `acc:quota:req:{id}:d:{yyyyMMdd}`     | counter，TTL 48h                                         | 对外凭证请求数·日窗（P15 R134）                                                                              |
+| `acc:quota:rows:{id}:d:{yyyyMMdd}`    | counter，TTL 48h                                         | 对外凭证**返回行数**·日窗（P15 R134，响应后 INCRBY 记账；schema 端点计 0 行）                                |
 
 > P4e 无新增 Key：删站在既有三族基础上扩展删除时机（`DEL site:resolve:{slug}` + `scanDel site:path|data:{siteId}:*`，R55）；`site:path` / `site:data` 按 siteId 隔离，多站天然不串。
 
@@ -2942,3 +2951,159 @@ disp_grant (
 ### 30.8 已知边界
 
 ① bundle 展示文件断链自担；② 管理端审核人工过目打包文件；③ 展示副本无数据时空渲染（与数据侧演示数据选项正交）；④ 暂存区展示应用仅属主后管可见，公开访问一律 40400；⑤ 跨用户复制的授权重建**不包含**接收方反向授予他人（复制后授权图 = 快照出边闭包的镜像）；⑥ 展示应用文件仅文本白名单（HTML/CSS/JS/JSON 等）随包读取与写入，二进制素材（图片/字体等）不随复制迁移。
+
+---
+
+## 31. P15：对外开放接入层（地基收敛 + 外部系统接入）
+
+> 来源：`docs/P15/PRD-P15-OPEN-ACCESS.md` / `ARCHITECTURE-P15-增补.md` / `API-P15-增补.md`（并入 §31 / API §22）。
+> 本期为**接入层新建期**：+1 域（access）、+2 表（`acc_credential` / `acc_audit`）、+11 端点（管理侧 7 + 对外 4）、+3 错误码（50019~~50021）、+1 配置组（`ACCESS_*`）；开放层取数路径收窄为**展示应用级**（D123）并退役站点级旧路径；**零新依赖**（MCP SDK 属下期 D130 预登记，本期不安装）。
+
+### 31.1 新域 access
+
+`apps/api/src/modules/access/`：**独立 Nest 模块**，表前缀 `acc_`，**零跨域 import 业务模块**（铁律 6）；对外只经 `AccessFacade`（铁律 3）。子模块（实施后结构）：
+
+```
+modules/access/
+  access.module.ts          # 聚合：CredentialModule + ExtModule + AccessFacadeModule
+  credential/               # 凭证生命周期（管理侧 /api/access/credentials/**）
+    credential.controller.ts / credential.service.ts / credential.util.ts（密钥生成与解析）/ dto/
+  ext/                      # 对外取数面（凭证态 /api/ext/v1/app/:appCode/**）
+    ext-auth.guard.ts       # Bearer 凭证解析 → request.principal；401 + WWW-Authenticate
+    ext-data.controller.ts  # 四端点；@UseInterceptors(AuditInterceptor, QuotaInterceptor)
+    ext-contract.service.ts # 契约冻结层：envelope / 游标 / keyset 分页 / scope 投影
+    ext-path.util.ts        # 路径 → 端点名（守卫与审计共用）
+  quota/                    # quota.service.ts（Redis 双窗）+ quota.interceptor.ts（429 + Retry-After + 响应头）
+  audit/                    # audit.service.ts（异步缓冲落表 + 检索 + 清理编排）/ audit.interceptor.ts / audit.controller.ts / access-clean.task.ts
+  facade/                   # access-facade.service.ts：writeAudit（site 域开放层唯一消费点）
+```
+
+跨域依赖（全部经门面，无模块环）：出向 `AppFacadeModule`（取数五方法 + `exposedSchemaOf` / `appBriefByIds` / `invalidatePublicCache`）；入向 site 域开放层经 `AccessFacade.writeAudit` 埋匿名取数审计（app 域与 display 域**无感知**）。
+
+### 31.2 表结构（迁移 `20260930120000_add_access_domain`）
+
+```sql
+acc_credential (
+  id            BIGINT UNSIGNED PK AI,
+  owner_id      BIGINT UNSIGNED NOT NULL,        -- 属主（同 app_def.owner_id 口径）
+  app_id        BIGINT UNSIGNED NOT NULL,        -- 一凭证一应用（D126）→ KEY idx_cred_app
+  name          VARCHAR(64)  NOT NULL,           -- 备注名（属主内不要求唯一）
+  key_id        VARCHAR(16)  NOT NULL,           -- 'ik_' + 10 位 base62，定位索引
+  secret_hash   CHAR(64)     NOT NULL,           -- sha256(secret) hex；secret 不落库
+  secret_prefix VARCHAR(8)   NOT NULL,           -- secret 前 4 位（列表回显、可溯源）
+  scope         JSON         NOT NULL,           -- {tables:[], fields:{table:[field]}, ops:['read'], rowFilter:null}
+  status        TINYINT      NOT NULL DEFAULT 1, -- 1 active / 0 revoked（吊销不可逆）
+  expires_at    DATETIME NULL,                   -- NULL = 不过期（惰性判定，无 cron）
+  last_used_at  DATETIME NULL,                   -- 异步更新（允许分钟级延迟）
+  created_at / updated_at,
+  UNIQUE KEY uk_cred_keyid (key_id),
+  KEY idx_cred_owner (owner_id, status)
+);
+
+acc_audit (
+  id             BIGINT UNSIGNED PK AI,
+  principal      VARCHAR(40) NOT NULL,           -- 'display:{id}'（匿名层）| 'cred:{id}'（凭证层）
+  owner_id       BIGINT UNSIGNED NOT NULL,
+  app_id         BIGINT UNSIGNED NULL,           -- 失败链路过早（如应用不匹配）可为空
+  endpoint       VARCHAR(32) NOT NULL,           -- schema / records / detail / file
+  table_name     VARCHAR(64) NULL,
+  params_summary VARCHAR(512) NULL,              -- 查询参数摘要（截断；不含返回内容）
+  rows           INT NOT NULL DEFAULT 0,         -- 返回行数
+  duration_ms    INT NOT NULL DEFAULT 0,
+  ip             VARCHAR(64) NULL,
+  result_code    INT NOT NULL,                   -- 0 / 40001 / 40400 / 42900 / 50019 …
+  created_at     DATETIME NOT NULL,
+  KEY idx_audit_cred_time (principal, created_at),
+  KEY idx_audit_owner_time (owner_id, created_at),
+  KEY idx_audit_created (created_at)             -- 90 天清理扫描用
+);
+```
+
+设计要点：**不建 `acc_grant`**（D126 一凭证一应用，授权关系即凭证行本身，`scope` 内嵌）；`acc_audit` 是高基数流水表（不设外键、不做 JOIN；索引只服务「按凭证 / 按属主 / 按时间」三类查询与清理扫描）；本期 `acc_credential` **不设 `type` 列**（`oauth_token` 属演进预留，见 §31.9）。
+
+### 31.3 凭证校验链（`ext/ext-auth.guard.ts`，R130/R131/R132-1）
+
+```
+Authorization: Bearer {keyId}.{secret}
+  │ 缺头 / 形态不符（无点号、keyId 非 ik_ 前缀、secret 过短）
+  ▼ 按 key_id 查行（uk_cred_keyid）
+  │ 不存在 → 401 ｜ sha256(secret) ≠ secret_hash → 401 ｜ status=0 → 401 ｜ expires_at 已过 → 401
+  ▼ request.principal = { type:'credential', credentialId, ownerId, appId, scope }
+  异步更新 last_used_at（不阻塞响应）
+```
+
+- **401 语义真实化**：`HTTP 401` + `WWW-Authenticate: Bearer realm="iplat-ext", error="invalid_token"` + body `{code:50019}` —— 外部系统与下期 MCP 客户端据此发现授权要求；这是与**匿名层「HTTP 200 + 40400」防探测口径的刻意分治**（凭证错误不泄露资源存在性，应用 / 资源层失败仍统一 40400）。实现要点：网关 `GlobalExceptionFilter` 支持「自带业务码的 HttpException」（响应体 `code` 为数字时优先于状态码映射表，Nest 默认体无该字段故既有行为不变）。
+- **校验不缓存**（每请求一次主键级查询）：吊销 / 轮换**立即生效**，无失效传播问题；代价由配额兜住。
+- **401 也留痕**（R135 验收要求负例落表）：守卫在抛 401 前经 `AuditService` 记一条（`principal = cred:{keyId}`，`ownerId = 0` 为系统流水，不进属主检索）。
+
+### 31.4 对外契约层（`ext/ext-contract.service.ts`，R136/D124）
+
+**契约冻结层独立成服务**：对外端点不直接透传 `AppFacade` 返回值形状，统一经本层改写——内部响应形状变更不漂移到 v1。
+
+- `schema` → `{data:{app:{name,description}, tables:[…]}}`（表 / 字段已按 `scope ∩ 暴露` 投影）；
+- `records` 列表 → `{data:[…行…], paging:{nextCursor, size}}`（**无 total**：全量拉取场景 total 既贵又随写入漂移，管理面用管理侧接口拿 total）；
+- `records/:rowId` → `{data:{…行…}}`（**解包**：内部取数执行器返回 `{op:'get', row}`，对外只出 `row`）；`files/:f/stream` → 流式（R26 MIME，`?download=1` 同开放层语义）。
+- **游标**：`base64url(JSON({v:1, sort, last:[…]}))`；默认排序 `rowId ASC`；`sort` 至多 2 组白名单字段（R104 口径）且服务端**强制追加 `rowId ASC` tiebreaker**；游标非法 / 与本次 `sort` 不一致 / 长度不符 → 40001；**无 pageNo / offset**。
+- **游标值必须规范化**：`Date → ISO 字符串`（比较与写入游标两侧共用 `cursorValue` 归一）。否则时间字段排序翻页时，游标经 JSON 往返由 `Date` 变串、与库内 `Date` 不可比 → keyset 定位失效（返回空页）。**该缺陷由 `smoke:ext` 实测发现并修复**。
+- **「不重不漏」的适用边界**：keyset 分页在**单调排序键**（如 `createdAt ASC`）下可保证「边拉边写不重不漏」；默认 `rowId` 是 **UUID（非单调）**，此时翻页**不重**成立、「不漏」不成立（新行可能落在游标之前——非单调键下任何分页方案都无法保证）。`smoke:ext` 因此分两条断言：默认排序断「不重」，`sort=createdAt:asc` 断「不重不漏」。
+- 行字段名 = 用户逻辑字段名（`app_field.name`）；`rowId / createdAt / updatedAt` 恒留；内部列（`r_cN`、`app_id` 等）不出域；`scope.fields` 对行数据同样收窄（内置三件套恒留，`expanded` 内层一并裁剪）。
+
+### 31.5 配额与审计横切（R134/R135/R141）
+
+- **quota.interceptor**（仅挂 `ExtDataController`）：进入时预检并计数 `req/min` 与 `req/day`（`INCR` + 首写 `EXPIRE`），超限 → `HTTP 429` + `code=42900` + `Retry-After`（按窗口重置点算）；响应完成后按**返回行数** `INCRBY rows/day`——行数**响应后记账**（先放行后扣账；单日超额 ≤ 一次页大小，可接受）。成功响应带 `X-RateLimit-Remaining-Minute` / `-Day` / `X-RateLimit-Rows-Remaining-Day`。**匿名层既有「60 次/分/IP」限流保留不动**（防爬，与凭证配额是两层）。
+- **audit.interceptor**：挂 `ExtDataController` **最外层**（以覆盖内层配额 429 与 handler 侧 40400/40001 负例），从 `request.principal` + `res.locals.extAudit`（controller 只报告 `endpoint / tableName / rows / paramsSummary` 事实，记账集中一处）组装条目投递 `AuditService`；locals 缺失（负例在 handler 前抛出）时经 `extEndpointOf(request.path)` 兜底推断端点。
+- **AuditService**：内存缓冲队列，**每 5s 或满 100 条** `createMany`；`onApplicationShutdown` drain；写库失败只记日志不阻断取数（进程崩溃损失 ≤ 5s 流水，登记为可接受口径）。保留 90 天：`AccessCleanTask`（`0 0 5 * * *`）分批（1000/批）删除。
+- **匿名层埋点**：开放层取数控制器在响应出口（含异常路径）调 `AccessFacade.writeAudit({principal:'display:{id}', …})`——site 域对 access 域的唯一依赖，走门面；站点解析失败（无法归属属主）时不记。
+- Redis Key（已登记 §9）：三键见 §9 Redis Key 表；**审计不落 Redis**（内存缓冲即可）。
+
+### 31.6 开放层路径收窄与主体化（R137/R138；site 域 + display 域改动）
+
+| 项                  | 变化                                                                                                                                                                                                                     |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 数据端点            | `GET /api/open/:slug/api/app/:appCode/**` → **`GET /api/open/:slug/disp/:id/api/app/:appCode/**`**（旧路径控制器移除）                                                                                                   |
+| 校验链（R125 修订） | 站点存在 → **该 `displayId` 存在、未软删、且挂靠该站点**（`DisplayFacade.resolveForOpen`）→ `disp_grant(displayId, appId)` 命中 → `is_public=1` → 表 / 字段暴露三开关；任一不满足 40400                                  |
+| 判定主体化（R138）  | `DisplayFacade.assertCanRead(appId, principal)`，`principal ∈ {display, credential}`：display 分支查 `disp_grant`；credential 分支由 access 域自行完成（R132 第 2~4 步，不需要 `disp_grant`）——签名为下期 MCP 的复用挂点 |
+| 路由双保险          | 数据控制器声明在 `:slug/disp/:id/*path` 与 `:slug/*path` 通配**之前**；静态侧对 `disp/:id/api/**` 子前缀直接 40400（不落入文件解析）                                                                                     |
+
+**实施实测两点（归档备查）**：
+
+1. **旧路径退役表现 = `HTTP 200 + code 40400`**（而非 HTTP 404）：旧路由已无控制器，请求落到站点静态通配 `:slug/*path`，由「首段 `api`」双保险统一 40400（平台业务错误恒 HTTP 200）。「数据不可得」口径成立，但断言须按业务码而非状态码。
+2. **P14 边界①（授权粒度止于站点）已闭合**：`smoke:ext` 用**同站点第二个未授权展示应用**实测 40400。
+
+**生成规范修订（R124 改）**：展示应用页面取数用**同源相对路径** `./api/app/<appCode>/...`（页面位于 `disp/{id}/` 下，天然的挂载点）；站点**根目录页面**取数须用绝对路径 `/api/open/{slug}/disp/{id}/api/app/{appCode}/...`（相对路径会落到站点根 `api/app/...` = 已退役旧形态）；站点 README 三模板「数据应用取数」节与 `create_display_app` / `authorize_data_app` 文案同步改写（工具链变更 → `smoke:ai` 必跑）。
+
+**存量迁移**：P14 与本期间隔极短、存量展示页极少；按「预期破坏窗口」处理——用户重新生成或手改取数路径（不动用户文件是更优纪律），发布说明明示。
+
+### 31.7 配置组（`src/config/access.config.ts`，env 前缀 `ACCESS_*`）
+
+| 键                             | 默认   | 说明                                         |
+| ------------------------------ | ------ | -------------------------------------------- |
+| `access.maxCredentialsPerUser` | 20     | 每用户凭证数上限（按 active 计；超限 50020） |
+| `access.quotaPerMinute`        | 120    | 每凭证请求数/分                              |
+| `access.quotaPerDay`           | 50000  | 每凭证请求数/日                              |
+| `access.rowsPerDay`            | 100000 | 每凭证返回行数/日                            |
+| `access.auditRetentionDays`    | 90     | `acc_audit` 清理窗口                         |
+| `access.auditFlushMs`          | 5000   | 审计缓冲 flush 间隔                          |
+
+### 31.8 错误码（§18.3 段续，本期 +3）
+
+| 码    | 含义                                                | 场景                                                               |
+| ----- | --------------------------------------------------- | ------------------------------------------------------------------ |
+| 50019 | 凭证缺失 / 无效 / 已吊销 / 已过期                   | 对外四端点（**HTTP 401** + `WWW-Authenticate`；body `code=50019`） |
+| 50020 | 凭证数达上限                                        | 管理侧创建                                                         |
+| 50021 | 授权范围越界（scope 引用未暴露 / 不存在的表或字段） | 管理侧创建 / 编辑 scope                                            |
+
+复用：40001 / 40400 / 42900 / 50001 / 50009。**50xxx 段用至 50021，下一可用 50022。**
+
+### 31.9 演进预留（本期不做，架构不堵路）
+
+1. **MCP 适配器（下期，D129/D130）**：`access/mcp/` 加协议适配器并复用 `ExtAuthGuard` / `QuotaInterceptor` / `AuditInterceptor`；`@modelcontextprotocol/sdk` 特批已授予、届时引入（本期不安装，不手写 JSON-RPC 传输层）。
+2. **OAuth2 client_credentials**：`acc_credential` 加 `type` 列即可（默认 `api_key`），校验链不变。
+3. **行级 `rowFilter`**：`scope` JSON 已留键；实现时需求值器白名单（防注入），单独立项。
+4. **轮换双活窗口**：v1 轮换即时生效；双活需第二有效 secret 槽（加列）。
+5. **多应用凭证**：若 D126 将来放宽为一对多，拆 scope 出 `acc_grant` 表即可，凭证行不动。
+6. **审计维度扩展**：`acc_audit` 已含 `tableName` 与 `paramsSummary`，按需加列即可。
+
+### 31.10 资产登记
+
+`AccessFacade.writeAudit` / `quota.service` / `audit.service` / `ext-contract.service` / `ext-path.util` / `access 前端资产` —— 明细见 §9 公共资产表。
