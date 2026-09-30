@@ -552,6 +552,12 @@ export interface AppPageSchema {
     fields?: string[]
     columns?: string[]
     rowActions?: string[]
+    /**
+     * form 区块展示形态（2026-09-30 新增）：
+     * `inline` = 内嵌区块（历史行为）；`dialog` = 表格卡片头部「新建」按钮 + 弹窗（**缺省**）。
+     * 仅 admin 页生效；display 页禁 form（R102）。
+     */
+    placement?: 'inline' | 'dialog'
   }>
   dataSources: Record<
     string,

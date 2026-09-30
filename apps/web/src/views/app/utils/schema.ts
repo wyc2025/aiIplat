@@ -114,7 +114,8 @@ export function pageSchemaTemplate(table: string, label: string): Record<string,
         columns: [],
         rowActions: ['edit', 'delete'],
       },
-      { type: 'form', bind: `create_${table}`, title: `新建${label}`, fields: [] },
+      // 新建表单默认走弹窗（2026-09-30）：渲染为表头「新建」按钮，与「编辑」体验一致
+      { type: 'form', bind: `create_${table}`, title: `新建${label}`, fields: [], placement: 'dialog' },
     ],
     dataSources: { mainList: { op: 'list', table, size: 20 } },
     actions: {

@@ -270,6 +270,13 @@ export function validatePageSchema(schema: unknown, ctx: PageSchemaContext): Rec
     if (typeof block.bind !== 'string' || block.bind.length === 0) {
       fail(`${path}.bind`, 'bind 必须是非空字符串')
     }
+    // form 区块展示形态（2026-09-30 新增）：inline = 内嵌区块；dialog = 表头「新建」弹窗（缺省）
+    if (block.placement !== undefined) {
+      if (block.type !== 'form') fail(`${path}.placement`, 'placement 仅 form 区块可用')
+      if (block.placement !== 'inline' && block.placement !== 'dialog') {
+        fail(`${path}.placement`, 'placement 仅允许 inline / dialog')
+      }
+    }
     if (block.type === 'form') {
       if (!actionNames.includes(block.bind)) fail(`${path}.bind`, `动作不存在：${block.bind}`)
     } else if (!dsNames.includes(block.bind)) {

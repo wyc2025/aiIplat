@@ -86,7 +86,7 @@ export function buildAdminPageSchema(
     layout: [
       { type: 'filterBar', bind: 'mainList', fields: filterFields },
       { type: 'table', bind: 'mainList', columns: columnFields, rowActions: ['edit', 'delete'] },
-      { type: 'form', bind: createAction, title: `新建${main.label || title}`, fields: formFields },
+      { type: 'form', bind: createAction, title: `新建${main.label || title}`, fields: formFields, placement: 'dialog' },
     ],
     dataSources,
     actions: {

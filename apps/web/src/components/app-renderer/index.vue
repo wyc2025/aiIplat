@@ -133,6 +133,75 @@ function resetForm(bind: string): void {
   formValues[bind] = {}
 }
 
+// ==================== form 区块展示形态（2026-09-30：新建弹窗化） ====================
+
+/**
+ * form 区块展示形态：`inline` = 内嵌区块（历史行为）；其余（含未声明）= `dialog`
+ * —— 新建改为表格卡片头部「新建」按钮 + 弹窗，与「编辑」一致（用户口径，缺省即弹窗，
+ * 存量页面无需改 schema 即生效；需要内嵌的页面在页编辑器里显式选 inline）。
+ */
+function placementOf(block: { placement?: string }): 'inline' | 'dialog' {
+  return block?.placement === 'inline' ? 'inline' : 'dialog'
+}
+
+/** 表格块绑定的数据源对应的逻辑表名 */
+function tableOfDs(dsName: string): string {
+  return schema.value.dataSources[dsName]?.table ?? ''
+}
+
+/** 该表下的 dialog 型「新建」入口（弹窗标题取 form 区块 title） */
+function dialogFormsOf(dsName: string): Array<{ bind: string; title: string }> {
+  const table = tableOfDs(dsName)
+  return schema.value.layout
+    .filter((block) => block.type === 'form' && placementOf(block) === 'dialog' && actionTable(block.bind) === table)
+    .map((block) => ({ bind: block.bind, title: block.title ?? `新建${table}` }))
+}
+
+/** 该表下是否存在 inline 型表单（决定表头是否保留「清空表单」） */
+function hasInlineForm(dsName: string): boolean {
+  const table = tableOfDs(dsName)
+  return schema.value.layout.some(
+    (block) => block.type === 'form' && placementOf(block) === 'inline' && actionTable(block.bind) === table,
+  )
+}
+
+/** 新建弹窗状态 */
+const createDialog = reactive<{ visible: boolean; bind: string; title: string; table: string }>({
+  visible: false,
+  bind: '',
+  title: '',
+  table: '',
+})
+const createSubmitting = ref(false)
+
+/** 打开新建弹窗（每次打开清空表单值） */
+function openCreate(bind: string, title: string, table: string): void {
+  createDialog.bind = bind
+  createDialog.title = title
+  createDialog.table = table
+  formValues[bind] = {}
+  createDialog.visible = true
+}
+
+/** 弹窗内字段列表（该动作目标表的全部字段） */
+function createFields(): string[] {
+  return (tableOf(createDialog.table)?.fields ?? []).map((field) => field.name)
+}
+
+/** 提交新建（复用统一动作入口；成功后关闭并清空） */
+async function submitCreate(): Promise<void> {
+  createSubmitting.value = true
+  try {
+    const ok = await submitAction(createDialog.bind, { ...(formValues[createDialog.bind] ?? {}) })
+    if (ok) {
+      createDialog.visible = false
+      formValues[createDialog.bind] = {}
+    }
+  } finally {
+    createSubmitting.value = false
+  }
+}
+
 onMounted(loadAll)
 
 /**
@@ -401,14 +470,26 @@ function detailRows(bind: string): DataRowView[] {
         >
           <div class="v-block__header">
             <span class="v-block__title">{{ page.name }}</span>
-            <el-button
-              v-if="actionExists(`create_${actionTable(block.bind)}`)"
-              type="primary"
-              size="small"
-              @click="resetForm(`create_${actionTable(block.bind)}`)"
-            >
-              清空表单
-            </el-button>
+            <div class="v-block__actions">
+              <!-- dialog 型表单：新建入口（弹窗，与「编辑」同款） -->
+              <el-button
+                v-for="form in dialogFormsOf(block.bind)"
+                :key="form.bind"
+                type="primary"
+                size="small"
+                @click="openCreate(form.bind, form.title, actionTable(form.bind))"
+              >
+                {{ form.title }}
+              </el-button>
+              <!-- inline 型表单：表单在下方内嵌，这里保留清空 -->
+              <el-button
+                v-if="hasInlineForm(block.bind)"
+                size="small"
+                @click="resetForm(`create_${tableOfDs(block.bind)}`)"
+              >
+                清空表单
+              </el-button>
+            </div>
           </div>
           <el-table
             v-loading="dsState[block.bind]?.loading"
@@ -437,7 +518,7 @@ function detailRows(bind: string): DataRowView[] {
                   v-if="(block.rowActions ?? []).includes('edit')"
                   link
                   type="primary"
-                  @click="openEdit(row as DataRowView, actionTable(block.bind))"
+                  @click="openEdit(row as DataRowView, tableOfDs(block.bind))"
                 >
                   编辑
                 </el-button>
@@ -445,7 +526,7 @@ function detailRows(bind: string): DataRowView[] {
                   v-if="(block.rowActions ?? []).includes('delete')"
                   link
                   type="danger"
-                  @click="removeRow(row as DataRowView, actionTable(block.bind))"
+                  @click="removeRow(row as DataRowView, tableOfDs(block.bind))"
                 >
                   删除
                 </el-button>
@@ -475,9 +556,9 @@ function detailRows(bind: string): DataRowView[] {
           </el-table>
         </el-card>
 
-        <!-- form（新建） -->
+        <!-- form（新建）：仅 inline 型内嵌渲染；dialog 型由表头「新建」按钮弹出 -->
         <el-card
-          v-else-if="block.type === 'form'"
+          v-else-if="block.type === 'form' && placementOf(block) === 'inline'"
           shadow="never"
           class="v-block"
         >
@@ -539,6 +620,42 @@ function detailRows(bind: string): DataRowView[] {
       </template>
     </template>
 
+    <!-- 新建弹窗（form 区块 placement=dialog；字段控件与「编辑」同款 FieldInput） -->
+    <el-dialog
+      v-model="createDialog.visible"
+      :title="createDialog.title"
+      width="560px"
+    >
+      <el-form label-width="100px">
+        <el-form-item
+          v-for="name in createFields()"
+          :key="name"
+          :label="fieldOf(name)?.label ?? name"
+          :required="fieldOf(name)?.required"
+        >
+          <FieldInput
+            v-if="fieldOf(name)"
+            v-model="formOf(createDialog.bind)[name]"
+            :app-code="appCode"
+            :field="fieldOf(name)!"
+            :options="refOptions(name)"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="createDialog.visible = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="createSubmitting"
+          @click="submitCreate"
+        >
+          提交
+        </el-button>
+      </template>
+    </el-dialog>
+
     <!-- 编辑弹窗 -->
     <el-dialog
       v-model="edit.visible"
@@ -591,6 +708,11 @@ function detailRows(bind: string): DataRowView[] {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
+}
+.v-block__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .v-block__title {
   font-weight: 600;

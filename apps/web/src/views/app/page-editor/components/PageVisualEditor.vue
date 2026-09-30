@@ -39,6 +39,8 @@ interface BlockEdit {
   rowActions: string[]
   rowLinkPage: string
   rowIdParam: string
+  /** form 区块展示形态（2026-09-30）：dialog 弹窗（缺省）/ inline 内嵌；display 页无 form 不涉及 */
+  placement: 'inline' | 'dialog'
 }
 
 interface SourceEdit {
@@ -148,6 +150,7 @@ function fromSchema(raw: Record<string, unknown>): void {
       rowActions: ((block.rowActions as string[]) ?? []).filter((item) => item),
       rowLinkPage: rowLink.page ?? '',
       rowIdParam: rowLink.rowIdParam ?? 'rowId',
+      placement: block.placement === 'inline' ? 'inline' : 'dialog',
     }
   })
   const ds = source.dataSources ?? {}
@@ -181,6 +184,8 @@ function getSchema(): Record<string, unknown> {
       }
     } else {
       base.fields = block.rows.filter((row) => row.name).map(specOf)
+      // form 区块展示形态（2026-09-30）：dialog = 表头「新建」弹窗 / inline = 内嵌区块
+      if (!isDisplay.value && block.type === 'form') base.placement = block.placement
     }
     return base
   })
@@ -216,6 +221,7 @@ function addBlock(type: BlockType): void {
     rowActions: type === 'table' && !isDisplay.value ? ['edit', 'delete'] : [],
     rowLinkPage: '',
     rowIdParam: 'rowId',
+    placement: 'dialog',
   })
 }
 
@@ -558,6 +564,28 @@ const previewDisplaySchema = computed<Record<string, unknown>>(() => {
           >
             删除
           </el-button>
+        </div>
+
+        <!-- admin form：展示形态（2026-09-30） -->
+        <div
+          v-if="block.type === 'form' && !isDisplay"
+          class="v-visual__row"
+        >
+          <span class="v-visual__label">展示形态</span>
+          <el-select
+            v-model="block.placement"
+            size="small"
+            style="width: 170px"
+          >
+            <el-option
+              label="弹窗（表头「新建」）"
+              value="dialog"
+            />
+            <el-option
+              label="内嵌区块"
+              value="inline"
+            />
+          </el-select>
         </div>
 
         <!-- admin table：行内动作（display 禁） -->
