@@ -402,7 +402,8 @@ const menuTree: MenuSeed[] = [
   // P11：应用中心（登录用户均可访问；子菜单「我的应用」+ 后端按用户 active 应用实时追加的
   // 「应用 ▸ 功能页」动态段 —— 动态段不落 sys_menu，R96；P13 增「应用市场」页
   // 与 admin 专属「市场审核」页（market:review，**须从 common 角色授予中排除**）；
-  // P14 增「展示应用」页（D112：静态展示页容器 + 站点挂靠 + 数据授权）；
+  // P14 曾增「展示应用」页（D112：静态展示页容器 + 站点挂靠 + 数据授权），
+  // **P16 起该页并入「我的应用」同页 Tab、菜单下线**（`main()` 内有幂等清理，见「2b」）；
   // P15 增「接入凭证」页（D119~D128：对外 API Key 管理，登录态自服务、无 perms））
   {
     name: '应用中心',
@@ -426,14 +427,6 @@ const menuTree: MenuSeed[] = [
         component: 'market/index',
         icon: 'Shop',
         sort: 2,
-      },
-      {
-        name: '展示应用',
-        type: 2,
-        path: 'app-center/display',
-        component: 'display/index',
-        icon: 'Picture',
-        sort: 3,
       },
       {
         name: '接入凭证',
@@ -505,6 +498,19 @@ async function main() {
   // 2. 菜单树
   const createdMenuIds: bigint[] = []
   await seedMenus(menuTree, BigInt(0), createdMenuIds)
+
+  // 2b. 菜单下线清理（P16）：「展示应用」页已并入「我的应用 ▸ 展示应用」Tab。
+  //     `seedMenus` 按 (parentId + name) 幂等创建、**只增不删**，故旧环境残留的
+  //     `/app-center/display` 菜单记录需显式移除（连同角色关联），保证新老环境菜单一致。
+  const retiredDisplayMenu = await prisma.sysMenu.findFirst({
+    where: { path: 'app-center/display' },
+    select: { id: true },
+  })
+  if (retiredDisplayMenu) {
+    await prisma.sysRoleMenu.deleteMany({ where: { menuId: retiredDisplayMenu.id } })
+    await prisma.sysMenu.delete({ where: { id: retiredDisplayMenu.id } })
+    console.log('已下线菜单「展示应用」（并入我的应用 ▸ 展示应用 Tab）')
+  }
 
   // 3. common 角色关联「首页工作台」+「AI 助手」目录下三页（AI 管理三页不给 common）
   const dashboardMenu = await prisma.sysMenu.findFirst({

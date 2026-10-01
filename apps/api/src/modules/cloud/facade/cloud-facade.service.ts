@@ -1057,6 +1057,25 @@ export class CloudFacade {
   }
 
   /**
+   * 按「相对用户云盘根」的路径解析**目录** id（展示应用卡片「打开云盘目录」直达用）。
+   *
+   * 与 `resolvePublicPath` 的关键差异：**不做公开性上溯**——调用方（display 域）要的是目录节点本身，
+   * 与站点是否公开无关；而展示应用目录通常是继承态（`is_public=0`），走公开解析会被判 null。
+   * 未命中 / 非目录 / 路径非法 → `null`（调用方降级为「目录尚未创建」，不抛异常、不泄漏内部错误码）。
+   */
+  async resolveUserDirId(userId: bigint, path: string): Promise<bigint | null> {
+    let segments: string[]
+    try {
+      segments = this.normalizeUserPath(path)
+    } catch {
+      return null
+    }
+    if (segments.length === 0) return null
+    const entry = await this.findEntryByBase(userId, USER_ROOT_ID, segments)
+    return entry && entry.isDir === 1 ? entry.id : null
+  }
+
+  /**
    * 批量判定文件是否仍「有效」（本人 + 未删除 + 非目录，P10 T96 / D82 失效降级）。
    * 供 ai 域标注附件 invalid（源文件已删除）：只查行不读盘，零成本；返回有效 fileId 字符串集合。
    */

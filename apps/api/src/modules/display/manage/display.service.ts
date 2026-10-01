@@ -41,6 +41,15 @@ export interface DisplayView {
   grantCount: number
   grants: Array<{ appId: string; appCode: string }>
   createdAt: Date
+  /**
+   * 展示应用**云盘目录**节点 id（卡片「打开云盘目录」直达用）。
+   * `null` 有两种含义：未挂靠（文件在云盘暂存区），或挂靠后目录尚未创建
+   * （挂靠本身不建目录，写文件时才 `mkdir -p`，见 §30.3）。仅 `list()` 填充，
+   * 创建 / 编辑 / 授权等单条响应保持 null（前端列表会整体刷新）。
+   */
+  folderId: string | null
+  /** 挂靠站点**根目录** id（未挂靠 null）：目录尚未创建时前端退回跳到站点根 */
+  siteRootFolderId: string | null
 }
 
 /**
@@ -86,7 +95,7 @@ export class DisplayService {
       [...new Set(grants.map((grant) => grant.appId))],
     )
     const codeById = new Map(appCodes.map((item) => [item.id, item.code]))
-    return displays.map((display) => {
+    const views = displays.map((display) => {
       const site = display.siteId === null ? null : (siteById.get(display.siteId.toString()) ?? null)
       const own = grants.filter((grant) => grant.displayId === display.id)
       return this.toView(
@@ -98,6 +107,19 @@ export class DisplayService {
         })),
       )
     })
+    // 卡片「打开云盘目录」按钮：仅**已挂靠**的展示应用需要（未挂靠者在云盘暂存区，无站点目录可跳）；
+    // 目录 id 经 CloudFacade 按 writePath 机械解析——目录尚未创建时为 null，前端退回跳站点根
+    return Promise.all(
+      views.map(async (view) => {
+        if (view.siteId === null) return view
+        const folderId = await this.cloudFacade.resolveUserDirId(userId, view.writePath)
+        return {
+          ...view,
+          folderId: folderId === null ? null : folderId.toString(),
+          siteRootFolderId: siteById.get(view.siteId)?.rootFolderId.toString() ?? null,
+        }
+      }),
+    )
   }
 
   // ==================== 创建 / 挂靠 / 删除 ====================
@@ -511,7 +533,9 @@ export class DisplayService {
     return {
       id: display.id.toString(),
       name: display.name,
-      siteId: display.siteId === null ? null : display.siteId.toString(),
+      // 站点已删（`disp_display.site_id` 是逻辑外键、无物理 FK，删站不清理）→ 视为**未挂靠**：
+      // 目录已随站点文件进回收站，前端按「暂存区」态展示，避免出现指向不存在站点的入口按钮
+      siteId: display.siteId === null || site === null ? null : display.siteId.toString(),
       siteSlug: site?.slug ?? null,
       siteTitle: site?.title ?? null,
       folderPath: display.folderPath,
@@ -521,6 +545,9 @@ export class DisplayService {
       grantCount: grants.length,
       grants,
       createdAt: display.createdAt,
+      // 默认 null（单条响应不解析目录）；`list()` 会按挂靠态填充真实目录 id
+      folderId: null,
+      siteRootFolderId: null,
     }
   }
 
