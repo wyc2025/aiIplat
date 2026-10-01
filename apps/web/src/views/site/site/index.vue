@@ -274,6 +274,7 @@ import { Plus, Refresh } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
 import ProTable from '@/components/ProTable/index.vue'
 import { formatTime } from '@/utils/format'
+import { listDisplays, type DisplayItem } from '@/api/display'
 import { createSite, updateSite, deleteSite } from '@/api/site/site'
 import { useSiteStore } from '@/stores/site'
 import type { SiteSiteInfo } from '@/types/api'
@@ -307,7 +308,20 @@ const editForm = reactive({ slug: '', title: '', description: '' })
 const { copy: copyToClipboard } = useClipboard({ legacy: true })
 
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{2,31}$/
-const SLUG_BLACKLIST = ['api', 'www', 'admin', 'manage', 'system', 'open', 'static', 'assets', 'public', 'login', 's', 'site']
+const SLUG_BLACKLIST = [
+  'api',
+  'www',
+  'admin',
+  'manage',
+  'system',
+  'open',
+  'static',
+  'assets',
+  'public',
+  'login',
+  's',
+  'site',
+]
 const slugValidator = (_rule: unknown, value: string, callback: (err?: Error) => void) => {
   if (!SLUG_PATTERN.test(value)) {
     callback(new Error('需为 3~32 位小写字母/数字/连字符，且以字母或数字开头'))
@@ -410,13 +424,31 @@ function onManage(row: SiteSiteInfo) {
   router.push('/site/setting')
 }
 
-/** 删站二次确认（R50：逐条列明影响，尤其是「文件可还原 / 文章评论不可恢复」的差异） */
+/**
+ * 删站二次确认（R50：逐条列明影响，尤其是「文件可还原 / 文章评论不可恢复」的差异）。
+ *
+ * P16 追加：**先查本站挂靠的展示应用并逐一点名**——它们的目录在站点目录内（`disp/{id}/`），
+ * 会随站点文件一并进回收站，且挂靠关系即刻失效。属主自服务数据，查询失败不阻断删除（降级为不点名）。
+ */
 async function onRemove(row: SiteSiteInfo) {
+  let affiliated: DisplayItem[] = []
+  try {
+    affiliated = (await listDisplays()).filter((item) => item.siteId === String(row.id))
+  } catch {
+    affiliated = []
+  }
+  const displayNote =
+    affiliated.length > 0
+      ? `④ 本站挂靠的 ${affiliated.length} 个展示应用（${affiliated.map((item) => item.name).join('、')}）` +
+        '：目录随站点文件一并移入回收站，挂靠关系失效——可重新挂靠到其他站点，如需保留页面文件请先从回收站还原。'
+      : '④ 本站当前没有挂靠的展示应用。'
+
   const confirmed = await confirmDialog(
     `确认删除站点「${row.title}（${row.slug}）」？` +
       '① 该站的评论将物理删除、文章将从本站下架（文章/栏目/标签本体保留在内容池，可再发表）；' +
       '② 站点文件（含 media/）移入云盘回收站，可还原为普通文件夹；' +
-      `③ 站点标识 ${row.slug} 立即释放，他人可再次注册。`,
+      `③ 站点标识 ${row.slug} 立即释放，他人可再次注册；` +
+      displayNote,
     '删除站点',
     { type: 'warning', confirmButtonText: '确认删除', confirmButtonClass: 'el-button--danger' },
   )
@@ -424,7 +456,9 @@ async function onRemove(row: SiteSiteInfo) {
   try {
     const res = await deleteSite(row.id)
     ElMessage.success(
-      `站点已删除（${res.unpublishedArticles} 篇文章已从本站下架、${res.deletedComments} 条评论已删除，站点文件已移入回收站）`,
+      `站点已删除（${res.unpublishedArticles} 篇文章已从本站下架、${res.deletedComments} 条评论已删除，站点文件已移入回收站` +
+        (affiliated.length > 0 ? `；${affiliated.length} 个展示应用已随目录移入回收站` : '') +
+        '）',
     )
     await store.load()
   } catch {

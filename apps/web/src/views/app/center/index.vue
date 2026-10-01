@@ -18,12 +18,17 @@ import { listMySubmissions, submitToMarket } from '@/api/market'
 import { confirmDialog } from '@/utils/confirm'
 import { formatTime } from '@/utils/format'
 import type { AppDefItem } from '@/types/api'
+import DisplayCards from './components/DisplayCards.vue'
 
 /**
  * 应用中心 · 我的应用（P11 T106，ARCHITECTURE-P11 §6）：
- * 卡片流 + 空白创建 + 草稿确认入册 + 删除；跳结构编辑器 / 功能页编辑器 / 首个功能页。
+ * 同页两 Tab —— **数据应用**（卡片流 + 空白创建 + 草稿确认入册 + 删除；跳结构 / 功能页编辑器）
+ * 与**展示应用**（站点静态展示页容器，见 `DisplayCards`）。
+ * 两者同属「我的应用」入口，展示应用不再占独立菜单（P14 的 `/app-center/display` 菜单已下线）。
  */
 const router = useRouter()
+/** 当前 Tab：数据应用 / 展示应用 */
+const activeTab = ref<'app' | 'display'>('app')
 const loading = ref(false)
 const loadError = ref(false)
 const list = ref<AppDefItem[]>([])
@@ -179,7 +184,9 @@ async function openMarket(item: AppDefItem): Promise<void> {
 
 async function submitMarket(): Promise<void> {
   if (demoOverflow.value) {
-    ElMessage.warning(`演示数据超出上限（单表 ${DEMO_MAX_ROWS_PER_TABLE} 行），请先清理数据或取消勾选`)
+    ElMessage.warning(
+      `演示数据超出上限（单表 ${DEMO_MAX_ROWS_PER_TABLE} 行），请先清理数据或取消勾选`,
+    )
     return
   }
   marketDialog.submitting = true
@@ -235,7 +242,9 @@ async function submitCreate(): Promise<void> {
 }
 
 async function confirmDraft(item: AppDefItem): Promise<void> {
-  if (!(await confirmDialog(`确认把「${item.name}」入册？入册后将占用一个正式应用额度。`, '确认入册'))) {
+  if (
+    !(await confirmDialog(`确认把「${item.name}」入册？入册后将占用一个正式应用额度。`, '确认入册'))
+  ) {
     return
   }
   await confirmApp(item.appCode)
@@ -283,6 +292,7 @@ function goPages(item: AppDefItem): void {
         </p>
       </div>
       <el-button
+        v-if="activeTab === 'app'"
         type="primary"
         @click="openCreate"
       >
@@ -290,134 +300,149 @@ function goPages(item: AppDefItem): void {
       </el-button>
     </div>
 
-    <div
-      v-loading="loading"
-      class="v-app-center__body"
+    <el-tabs
+      v-model="activeTab"
+      class="v-app-center__tabs"
     >
-      <el-result
-        v-if="loadError"
-        icon="error"
-        title="加载失败"
-        sub-title="请稍后重试"
+      <el-tab-pane
+        label="数据应用"
+        name="app"
       >
-        <template #extra>
-          <el-button
-            type="primary"
-            @click="load"
+        <div
+          v-loading="loading"
+          class="v-app-center__body"
+        >
+          <el-result
+            v-if="loadError"
+            icon="error"
+            title="加载失败"
+            sub-title="请稍后重试"
           >
-            重试
-          </el-button>
-        </template>
-      </el-result>
+            <template #extra>
+              <el-button
+                type="primary"
+                @click="load"
+              >
+                重试
+              </el-button>
+            </template>
+          </el-result>
 
-      <el-empty
-        v-else-if="list.length === 0 && !loading"
-        description="还没有应用，先新建一个吧"
-      >
-        <el-button
-          type="primary"
-          @click="openCreate"
-        >
-          新建应用
-        </el-button>
-      </el-empty>
+          <el-empty
+            v-else-if="list.length === 0 && !loading"
+            description="还没有应用，先新建一个吧"
+          >
+            <el-button
+              type="primary"
+              @click="openCreate"
+            >
+              新建应用
+            </el-button>
+          </el-empty>
 
-      <div
-        v-else
-        class="v-app-grid"
-      >
-        <el-card
-          v-for="item in list"
-          :key="item.appCode"
-          shadow="hover"
-          class="v-app-card"
-        >
-          <div class="v-app-card__head">
-            <span class="v-app-card__name">{{ item.name }}</span>
-            <el-tag
-              :type="item.status === 'active' ? 'success' : 'warning'"
-              size="small"
+          <div
+            v-else
+            class="v-app-grid"
+          >
+            <el-card
+              v-for="item in list"
+              :key="item.appCode"
+              shadow="hover"
+              class="v-app-card"
             >
-              {{ item.status === 'active' ? '已入册' : '草稿' }}
-            </el-tag>
-          </div>
-          <p class="v-app-card__desc">
-            {{ item.description || '（无描述）' }}
-          </p>
-          <div class="v-app-card__meta">
-            <span>code：{{ item.appCode }}</span>
-            <span>表 {{ item.tableCount }} · 行 {{ item.rowCount }} · 页 {{ item.pageCount }}</span>
-            <span>更新：{{ formatTime(item.updatedAt) }}</span>
-          </div>
-          <div class="v-app-card__actions">
-            <el-button
-              size="small"
-              @click="goSchema(item)"
-            >
-              结构
-            </el-button>
-            <el-button
-              size="small"
-              @click="goPages(item)"
-            >
-              功能页
-            </el-button>
-            <el-button
-              size="small"
-              type="success"
-              plain
-              @click="openPub(item)"
-            >
-              公开
-            </el-button>
-            <!-- P13 T121：发布到市场（未提交过显示主按钮；已有活跃条目置灰提示） -->
-            <el-tooltip
-              v-if="item.status === 'active' && activeListing[item.appCode]"
-              :content="
-                activeListing[item.appCode] === 'approved'
-                  ? '已在市场在架（可重新提交需先下架）'
-                  : '已提交，等待审核'
-              "
-            >
-              <span>
+              <div class="v-app-card__head">
+                <span class="v-app-card__name">{{ item.name }}</span>
+                <el-tag
+                  :type="item.status === 'active' ? 'success' : 'warning'"
+                  size="small"
+                >
+                  {{ item.status === 'active' ? '已入册' : '草稿' }}
+                </el-tag>
+              </div>
+              <p class="v-app-card__desc">
+                {{ item.description || '（无描述）' }}
+              </p>
+              <div class="v-app-card__meta">
+                <span>code：{{ item.appCode }}</span>
+                <span>表 {{ item.tableCount }} · 行 {{ item.rowCount }} · 页 {{ item.pageCount }}</span>
+                <span>更新：{{ formatTime(item.updatedAt) }}</span>
+              </div>
+              <div class="v-app-card__actions">
                 <el-button
                   size="small"
-                  plain
-                  disabled
+                  @click="goSchema(item)"
                 >
-                  已提交市场
+                  结构
                 </el-button>
-              </span>
-            </el-tooltip>
-            <el-button
-              v-else-if="item.status === 'active'"
-              size="small"
-              type="primary"
-              plain
-              @click="openMarket(item)"
-            >
-              发布到市场
-            </el-button>
-            <el-button
-              v-if="item.status === 'draft'"
-              size="small"
-              type="primary"
-              @click="confirmDraft(item)"
-            >
-              确认入册
-            </el-button>
-            <el-button
-              size="small"
-              type="danger"
-              text
-              @click="removeApp(item)"
-            >
-              删除
-            </el-button>
+                <el-button
+                  size="small"
+                  @click="goPages(item)"
+                >
+                  功能页
+                </el-button>
+                <el-button
+                  size="small"
+                  type="success"
+                  plain
+                  @click="openPub(item)"
+                >
+                  公开
+                </el-button>
+                <!-- P13 T121：发布到市场（未提交过显示主按钮；已有活跃条目置灰提示） -->
+                <el-tooltip
+                  v-if="item.status === 'active' && activeListing[item.appCode]"
+                  :content="
+                    activeListing[item.appCode] === 'approved'
+                      ? '已在市场在架（可重新提交需先下架）'
+                      : '已提交，等待审核'
+                  "
+                >
+                  <span>
+                    <el-button
+                      size="small"
+                      plain
+                      disabled
+                    > 已提交市场 </el-button>
+                  </span>
+                </el-tooltip>
+                <el-button
+                  v-else-if="item.status === 'active'"
+                  size="small"
+                  type="primary"
+                  plain
+                  @click="openMarket(item)"
+                >
+                  发布到市场
+                </el-button>
+                <el-button
+                  v-if="item.status === 'draft'"
+                  size="small"
+                  type="primary"
+                  @click="confirmDraft(item)"
+                >
+                  确认入册
+                </el-button>
+                <el-button
+                  size="small"
+                  type="danger"
+                  text
+                  @click="removeApp(item)"
+                >
+                  删除
+                </el-button>
+              </div>
+            </el-card>
           </div>
-        </el-card>
-      </div>
-    </div>
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane
+        label="展示应用"
+        name="display"
+      >
+        <DisplayCards />
+      </el-tab-pane>
+    </el-tabs>
 
     <el-dialog
       v-model="dialogVisible"
@@ -559,7 +584,8 @@ function goPages(item: AppDefItem): void {
         <el-form label-width="110px">
           <el-form-item label="附带演示数据">
             <el-switch v-model="marketDialog.withDemo" />
-            <span class="pub-hint">勾选后把现有数据一并提交（每表 ≤ {{ DEMO_MAX_ROWS_PER_TABLE }} 行；附件字段不随复制迁移）</span>
+            <span class="pub-hint">勾选后把现有数据一并提交（每表 ≤
+              {{ DEMO_MAX_ROWS_PER_TABLE }} 行；附件字段不随复制迁移）</span>
           </el-form-item>
           <el-form-item label="数据行预览">
             <div
@@ -617,6 +643,10 @@ function goPages(item: AppDefItem): void {
 </template>
 
 <style scoped>
+.v-app-center__tabs {
+  margin-top: -8px;
+}
+
 .v-app-center__header {
   display: flex;
   align-items: flex-start;

@@ -21,6 +21,13 @@ export interface DisplayItem {
   grantCount: number
   grants: Array<{ appId: string; appCode: string }>
   createdAt: string
+  /**
+   * 展示应用云盘目录节点 id（**仅列表接口返回**）：未挂靠（暂存区）或挂靠后目录尚未创建时为 null。
+   * 卡片「打开云盘目录」按钮经 `?dir={folderId}` 直达该目录。
+   */
+  folderId: string | null
+  /** 挂靠站点根目录 id（仅列表返回；未挂靠为 null）——目录尚未创建时退回跳站点根 */
+  siteRootFolderId: string | null
 }
 
 /** 我的展示应用列表（含挂靠站点与授权清单） */
