@@ -1526,6 +1526,11 @@ system 动态追加（不计手册 2000 字帽，上限 20 条，R84）：
 ### 21.3 请求/响应要点
 
 - **创建展示应用**：`POST /api/display` → `{id, name, siteId|null, siteSlug, siteTitle, folderPath, writePath, urlPreview, grantCount, grants, createdAt}`；`writePath` = 写页面文件的云盘路径（挂靠 = `{slug}/disp/{id}`，未挂靠 = 暂存区路径）；`urlPreview` = 挂靠后开放层入口 `/api/open/{slug}/disp/{id}/`（未挂靠为 null）。
+- **列表追加「云盘目录定位」两字段（P16）**：`GET /api/display` 响应补 `folderId` 与 `siteRootFolderId`，供「我的应用 ▸ 展示应用」卡片的**打开云盘目录**按钮直达：
+  - `folderId`：展示应用云盘目录节点 id（即 `{slug}/disp/{id}` 的 `cloud_file.id`）；**未挂靠**或**目录尚未创建**（挂靠本身不建目录，写文件时才 `mkdir -p`）为 `null`；
+  - `siteRootFolderId`：挂靠站点根目录 id（未挂靠 `null`）——`folderId` 为 `null` 时前端退回跳站点根。
+    两者**仅列表接口**返回（创建/编辑/授权等单条响应为 `null`）；前端跳转范式 `/cloud/file?dir={folderId}`。
+    另：站点被删后（`disp_display.site_id` 为逻辑外键、删站不清理该关系），该展示应用按**未挂靠**返回（`siteId` / `siteSlug` / `folderId` / `siteRootFolderId` 均 `null`），其目录已随站点文件进回收站。
 - **换挂靠**：`PUT /api/display/:id/affiliate` → 事务内完成目录移动 + site_id 更新；响应附 `moved`；中断全回滚（R127）。
 - **授权/撤权**：`POST /api/display/:id/grants` / `DELETE .../grants/:appCode`；授权变更立即触发该 app 取数面缓存 DEL（写后失效沿用）。
 - **取数面响应**：结构 = §19 公开面对应端点响应体（`schema` 为 `{app:{name,description}, tables:[{name,label,fields:[…]}]}`；列表 `{list,total,pageNo,pageSize}`、单行 `{op:'get',row}`）。
