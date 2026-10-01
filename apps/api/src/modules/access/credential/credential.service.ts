@@ -104,23 +104,17 @@ export class CredentialService {
     }
     // ③ scope 校验（越界 50021）
     const scope = this.buildScope(dto.scope, app.tables)
-    // ④ 签发（secret 只此一次出现在响应里）
-    const issued = issueCredential()
-    const row = await this.prisma.accCredential.create({
-      data: {
-        ownerId: userId,
-        appId: BigInt(app.appId),
-        name: dto.name.trim(),
-        keyId: issued.keyId,
-        secretHash: issued.secretHash,
-        secretPrefix: issued.secretPrefix,
-        scope: scope as unknown as Prisma.InputJsonValue,
-        expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
-      },
+    // ④ 签发 + 落库（keyId 唯一冲突自动换号重试，见 insertCredential）
+    const { row, apiKey } = await this.insertCredential({
+      ownerId: userId,
+      appId: BigInt(app.appId),
+      name: dto.name.trim(),
+      scope: scope as unknown as Prisma.InputJsonValue,
+      expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
     })
     return {
       ...this.toView(row, { code: app.appCode, name: app.name }),
-      apiKey: issued.apiKey,
+      apiKey,
       secretOnce: true,
     }
   }
@@ -132,10 +126,9 @@ export class CredentialService {
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     })
     if (rows.length === 0) return []
-    const apps = await this.appFacade.appBriefByIds(
-      userId,
-      [...new Set(rows.map((row) => row.appId))],
-    )
+    const apps = await this.appFacade.appBriefByIds(userId, [
+      ...new Set(rows.map((row) => row.appId)),
+    ])
     const byId = new Map(apps.map((app) => [app.id, app]))
     return Promise.all(
       rows.map(async (row) => ({
@@ -231,6 +224,44 @@ export class CredentialService {
   }
 
   // ==================== 内部 ====================
+
+  /**
+   * 签发并落库（返回「凭证行 + 一次性 apiKey」，R130）。
+   *
+   * **keyId 冲突处理（P15 走查 C1）**：`ik_` keyId 为 16 字节 base62（≈62^16 空间），唯一冲突
+   * 概率理论不可达；但 `uk_cred_keyid` 是硬约束，且验收 #1 明确要求「重复 keyId 冲突提示」——
+   * 与其在不可达分支抛 50000「服务器内部错误」，此处**换新 keyId 自动重试一次**，
+   * 重试仍冲突才抛原始错误（用户侧看不到任何冲突痕迹，且不留「冲突提示文案」这种
+   * 只能靠人工构造才能验到的死分支）。
+   */
+  private async insertCredential(
+    base: Omit<Prisma.AccCredentialUncheckedCreateInput, 'keyId' | 'secretHash' | 'secretPrefix'>,
+  ): Promise<{ row: AccCredential; apiKey: string }> {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const issued = issueCredential()
+      try {
+        const row = await this.prisma.accCredential.create({
+          data: {
+            ...base,
+            keyId: issued.keyId,
+            secretHash: issued.secretHash,
+            secretPrefix: issued.secretPrefix,
+          },
+        })
+        return { row, apiKey: issued.apiKey }
+      } catch (error) {
+        if (!this.isKeyIdConflict(error) || attempt === 1) throw error
+        this.logger.warn('凭证 keyId 冲突（理论不可达），已换新 keyId 重试')
+      }
+    }
+    // 理论不可达（两次签发同一 keyId）
+    throw new BusinessException(ErrorCode.InternalError, '凭证创建失败，请重试')
+  }
+
+  /** 是否命中 `uk_cred_keyid` 唯一约束冲突（Prisma P2002） */
+  private isKeyIdConflict(error: unknown): boolean {
+    return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002'
+  }
 
   /** 属主校验（非属主 / 不存在一律 50001，不暴露他人凭证存在性） */
   private async requireOwned(userId: bigint, id: bigint): Promise<AccCredential> {

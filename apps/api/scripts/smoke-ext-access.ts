@@ -176,6 +176,8 @@ async function main(): Promise<void> {
   const slug = `smoke-ext-${stamp}`
   let appCode = ''
   const displayIds: bigint[] = []
+  /** 本脚本创建的凭证（清理时吊销；否则多次跑会累积到 `access.maxCredentialsPerUser` 上限） */
+  const credIds: string[] = []
   let siteId: bigint | null = null
 
   try {
@@ -215,7 +217,11 @@ async function main(): Promise<void> {
     // scope 外的一张表（验证越权 40400）
     await ok(`/api/app/${appCode}/tables`, {
       method: 'POST',
-      json: { name: 'note', label: '笔记', fields: [{ name: 'text', label: '内容', type: 'text' }] },
+      json: {
+        name: 'note',
+        label: '笔记',
+        fields: [{ name: 'text', label: '内容', type: 'text' }],
+      },
       token,
     })
     const noteTable = await prisma.appTable.findFirstOrThrow({
@@ -234,7 +240,10 @@ async function main(): Promise<void> {
         appId: appDef.id,
         tableId: table.id,
         rowId: randomUUID(),
-        data: { title: `书${String(offset + index + 1).padStart(3, '0')}`, score: offset + index + 1 },
+        data: {
+          title: `书${String(offset + index + 1).padStart(3, '0')}`,
+          score: offset + index + 1,
+        },
         createdBy: appDef.ownerId,
       }))
     await prisma.appRecord.createMany({ data: seedRows(ROWS, 0) })
@@ -281,20 +290,28 @@ async function main(): Promise<void> {
       },
       token,
     })
-    check('创建返回完整 Key 且 secretOnce=true', created.apiKey.startsWith(`${created.keyId}.`) && created.secretOnce === true)
-    check('scope 落库为「表 + 字段」收窄', created.scope.tables.join() === 'book' && created.scope.fields.book?.join() === 'title')
-
-    const listed = await ok<Array<{ id: string; secretPrefix: string; usageToday: { requests: number } }>>(
-      '/api/access/credentials',
-      { token },
+    credIds.push(created.id)
+    check(
+      '创建返回完整 Key 且 secretOnce=true',
+      created.apiKey.startsWith(`${created.keyId}.`) && created.secretOnce === true,
     )
+    check(
+      'scope 落库为「表 + 字段」收窄',
+      created.scope.tables.join() === 'book' && created.scope.fields.book?.join() === 'title',
+    )
+
+    const listed = await ok<
+      Array<{ id: string; secretPrefix: string; usageToday: { requests: number } }>
+    >('/api/access/credentials', { token })
     const listItem = listed.find((item) => item.id === created.id)
     check(
       '列表只回显前缀（不含 apiKey）',
       !!listItem && listItem.secretPrefix.length > 0 && !('apiKey' in (listItem as object)),
     )
 
-    const credDetail = await ok<{ keyId: string }>(`/api/access/credentials/${created.id}`, { token })
+    const credDetail = await ok<{ keyId: string }>(`/api/access/credentials/${created.id}`, {
+      token,
+    })
     check(
       '详情含 keyId、不含 apiKey',
       credDetail.keyId === created.keyId && !('apiKey' in (credDetail as object)),
@@ -315,6 +332,46 @@ async function main(): Promise<void> {
       json: { appCode, name: `越界${stamp}`, scope: { tables: ['no_such_table'] } },
     })
     check('scope 引用未暴露表 → 50021', overflow.body?.code === 50021)
+
+    // P15 走查 C2：scope 字段通配 `*` 亦须被拒（R133 只允许暴露字段的字面名）
+    const wildcard = await call('/api/access/credentials', {
+      method: 'POST',
+      token,
+      json: {
+        appCode,
+        name: `通配${stamp}`,
+        scope: { tables: ['book'], fields: { book: ['*'] } },
+      },
+    })
+    check(
+      'scope 字段通配「*」→ 50021',
+      wildcard.body?.code === 50021,
+      `code=${wildcard.body?.code} msg=${wildcard.body?.message ?? ''}`,
+    )
+
+    // P15 走查 C1：keyId 唯一约束。
+    // keyId 是服务端签发的 16 字节 base62（无法由调用方指定），故「重复 keyId」只能从 DB 侧取证：
+    // 直接插入一条占用同一 keyId 的记录，断言 `uk_cred_keyid` 拒绝（P2002）；
+    // 应用侧行为由 `CredentialService.insertCredential` 保证——冲突时换新 keyId 自动重试一次，
+    // 不会把「唯一冲突」暴露成 50000 内部错误。
+    let dupRejected = false
+    try {
+      await prisma.accCredential.create({
+        data: {
+          ownerId: appDef.ownerId,
+          appId: appDef.id,
+          name: `dup-${stamp}`,
+          keyId: created.keyId,
+          secretHash: 'x'.repeat(64),
+          secretPrefix: 'xx',
+          scope: { tables: ['book'] },
+        },
+      })
+    } catch (error) {
+      const text = String(error)
+      dupRejected = text.includes('P2002') || text.includes('Unique constraint')
+    }
+    check('uk_cred_keyid 唯一约束生效（同 keyId 插入被拒）', dupRejected)
     console.log('')
 
     // ==================== 2. 对外取数四端点 ====================
@@ -324,8 +381,14 @@ async function main(): Promise<void> {
       | { app: { name: string }; tables: Array<{ name: string; fields: Array<{ name: string }> }> }
       | undefined
     check('schema 200 且 HTTP 语义正常', schema.status === 200 && schema.body?.code === 0)
-    check('schema 只含 scope 内表（book，无 note）', schemaData?.tables.length === 1 && schemaData.tables[0].name === 'book')
-    check('schema 字段按 scope 收窄（仅 title）', schemaData?.tables[0].fields.every((field) => field.name === 'title') === true)
+    check(
+      'schema 只含 scope 内表（book，无 note）',
+      schemaData?.tables.length === 1 && schemaData.tables[0].name === 'book',
+    )
+    check(
+      'schema 字段按 scope 收窄（仅 title）',
+      schemaData?.tables[0].fields.every((field) => field.name === 'title') === true,
+    )
 
     // ① 默认排序（rowId ASC；rowId 是随机 UUID，**非单调**）→ keyset 保证「不重」；
     //    「不漏」在非单调排序键 + 边拉边写场景下任何分页方案都无法保证（见 P15 回执说明）
@@ -337,9 +400,12 @@ async function main(): Promise<void> {
     for (;;) {
       const query = new URLSearchParams({ size: String(PAGE_SIZE) })
       if (cursor) query.set('after', cursor)
-      const page = await call(`/api/ext/v1/app/${appCode}/tables/book/records?${query.toString()}`, {
-        apiKey: created.apiKey,
-      })
+      const page = await call(
+        `/api/ext/v1/app/${appCode}/tables/book/records?${query.toString()}`,
+        {
+          apiKey: created.apiKey,
+        },
+      )
       if (page.body?.code !== 0) {
         check('列表请求成功', false, `code=${page.body?.code}`)
         break
@@ -359,7 +425,10 @@ async function main(): Promise<void> {
       if (!cursor) break
       if (pages > 10) break
     }
-    check(`游标翻页不重复（读 ${readCount} 行 → ${seenRows.size} 唯一 rowId）`, seenRows.size === readCount)
+    check(
+      `游标翻页不重复（读 ${readCount} 行 → ${seenRows.size} 唯一 rowId）`,
+      seenRows.size === readCount,
+    )
     check('行数据字段按 scope 收窄（无 score）', !leakedField)
 
     // ② 单调排序键（createdAt ASC）+ 边拉边写 → 完整的「不重不漏」
@@ -369,9 +438,12 @@ async function main(): Promise<void> {
     for (;;) {
       const query = new URLSearchParams({ size: String(PAGE_SIZE), sort: 'createdAt:asc' })
       if (monotonicCursor) query.set('after', monotonicCursor)
-      const page = await call(`/api/ext/v1/app/${appCode}/tables/book/records?${query.toString()}`, {
-        apiKey: created.apiKey,
-      })
+      const page = await call(
+        `/api/ext/v1/app/${appCode}/tables/book/records?${query.toString()}`,
+        {
+          apiKey: created.apiKey,
+        },
+      )
       if (page.body?.code !== 0) {
         check('单调排序翻页请求成功', false, `code=${page.body?.code}`)
         break
@@ -395,7 +467,10 @@ async function main(): Promise<void> {
     const detail = await call(`/api/ext/v1/app/${appCode}/tables/book/records/${firstRowId}`, {
       apiKey: created.apiKey,
     })
-    check('详情 200 且 rowId 一致', detail.body?.code === 0 && (detail.body.data as { rowId?: string })?.rowId === firstRowId)
+    check(
+      '详情 200 且 rowId 一致',
+      detail.body?.code === 0 && (detail.body.data as { rowId?: string })?.rowId === firstRowId,
+    )
 
     const forbidden = await call(`/api/ext/v1/app/${appCode}/tables/note/records`, {
       apiKey: created.apiKey,
@@ -421,7 +496,9 @@ async function main(): Promise<void> {
       `status=${noKey.status} code=${noKey.body?.code}`,
     )
 
-    const wrongApp = await call('/api/ext/v1/app/no-such-app-code/schema', { apiKey: created.apiKey })
+    const wrongApp = await call('/api/ext/v1/app/no-such-app-code/schema', {
+      apiKey: created.apiKey,
+    })
     check('appCode 与凭证绑定应用不一致 → 40400', wrongApp.body?.code === 40400)
 
     await ok(`/api/app/${appCode}/publish`, { method: 'PUT', json: { isPublic: 0 }, token })
@@ -452,8 +529,14 @@ async function main(): Promise<void> {
 
     // ==================== 4. 开放层路径收窄（D123）====================
     console.log('4. 开放层取数粒度（展示应用级）')
-    const openGranted = await call(`/api/open/${slug}/disp/${displayA.id}/api/app/${appCode}/schema`)
-    check('被授权的展示应用 → code 0', openGranted.body?.code === 0, `code=${openGranted.body?.code}`)
+    const openGranted = await call(
+      `/api/open/${slug}/disp/${displayA.id}/api/app/${appCode}/schema`,
+    )
+    check(
+      '被授权的展示应用 → code 0',
+      openGranted.body?.code === 0,
+      `code=${openGranted.body?.code}`,
+    )
 
     const openDenied = await call(`/api/open/${slug}/disp/${displayB.id}/api/app/${appCode}/schema`)
     check(
@@ -481,8 +564,14 @@ async function main(): Promise<void> {
     }>('/api/access/audits?pageSize=50', { token })
     const credRows = audits.list.filter((item) => item.principal.startsWith('cred:'))
     check('审计落表（cred 主体）', credRows.length > 0, `total=${audits.total}`)
-    check('审计含负例（401 / 40400）', credRows.some((item) => item.resultCode === 401 || item.resultCode === 40400))
-    check('审计含成功取数且记录返回行数', credRows.some((item) => item.resultCode === 0 && item.rows > 0))
+    check(
+      '审计含负例（401 / 40400）',
+      credRows.some((item) => item.resultCode === 401 || item.resultCode === 40400),
+    )
+    check(
+      '审计含成功取数且记录返回行数',
+      credRows.some((item) => item.resultCode === 0 && item.rows > 0),
+    )
 
     const negCases = await prisma.accAudit.count({ where: { resultCode: 50019 } })
     check('401 负例亦落表（含无归属系统流水）', negCases > 0, `count=${negCases}`)
@@ -543,7 +632,11 @@ async function main(): Promise<void> {
         )
 
         const empty = await call(`/api/open/${slug}/disp/${displayB.id}/index.html`)
-        check('同站点另一展示应用（无文件）不可达', empty.body?.code === 40400, `code=${empty.body?.code}`)
+        check(
+          '同站点另一展示应用（无文件）不可达',
+          empty.body?.code === 40400,
+          `code=${empty.body?.code}`,
+        )
       } catch (error) {
         check('展示应用静态文件正例', false, (error as Error).message)
       }
@@ -554,14 +647,138 @@ async function main(): Promise<void> {
           .catch(() => undefined)
       }
     }
+
+    // ==================== 7. 附件流（P15 走查 C3）====================
+    console.log('7. 附件流端到端（引用索引 + 表·字段暴露 三道闸）')
+    {
+      let fileId: string | null = null
+      let orphanId: string | null = null
+      try {
+        // 夹具：云盘根目录传两个文本文件；album 表（attachment 字段）+ 一行仅引用第一个
+        // （云盘根以 parentId = 0 表示，字段非空）
+        const rootDir = await prisma.cloudFile.findFirst({
+          where: { userId: appDef.ownerId, parentId: BigInt(0), isDir: 1, deletedAt: null },
+          select: { id: true },
+        })
+        const rootId = (rootDir?.id ?? BigInt(0)).toString()
+        fileId = (await uploadFile(token, rootId, `smoke-attach-${stamp}.txt`, 'IPLAT-ATTACH-OK'))
+          .id
+        orphanId = (await uploadFile(token, rootId, `smoke-orphan-${stamp}.txt`, 'NOT-REFERENCED'))
+          .id
+
+        await ok(`/api/app/${appCode}/tables`, {
+          method: 'POST',
+          json: {
+            name: 'album',
+            label: '相册',
+            fields: [
+              { name: 'title', label: '标题', type: 'text' },
+              { name: 'cover', label: '封面', type: 'attachment' },
+            ],
+          },
+          token,
+        })
+        const albumTable = await prisma.appTable.findFirstOrThrow({
+          where: { appId: appDef.id, name: 'album', deletedAt: null },
+          select: { id: true },
+        })
+        await ok(`/api/app/${appCode}/tables/${albumTable.id.toString()}/expose`, {
+          method: 'PUT',
+          json: { isExposed: 1 },
+          token,
+        })
+        const albumFields = await prisma.appField.findMany({
+          where: { tableId: albumTable.id, isDeleted: 0 },
+          select: { id: true },
+        })
+        for (const field of albumFields) {
+          await ok(`/api/app/${appCode}/fields/${field.id.toString()}/expose`, {
+            method: 'PUT',
+            json: { isExposed: 1 },
+            token,
+          })
+        }
+        // 凭证 C：scope 仅 album（与附件流取数面语义一致）
+        const credC = await ok<{ id: string; apiKey: string }>('/api/access/credentials', {
+          method: 'POST',
+          json: { appCode, name: `附件${stamp}`, scope: { tables: ['album'] } },
+          token,
+        })
+        credIds.push(credC.id)
+
+        // 引用关系直接落库：写路径属 P11 A 侧执行器 / 导入（非本期对象），
+        // 附件流的准入只看 `app_attachment_ref` + 表·字段暴露，故此处造等价夹具
+        const row = await prisma.appRecord.create({
+          data: {
+            appId: appDef.id,
+            tableId: albumTable.id,
+            rowId: randomUUID(),
+            data: { title: `封面${stamp}`, cover: fileId },
+            createdBy: appDef.ownerId,
+          },
+          select: { id: true },
+        })
+        await prisma.appAttachmentRef.create({
+          data: {
+            appId: appDef.id,
+            tableId: albumTable.id,
+            recordId: row.id,
+            fieldName: 'cover',
+            fileId: BigInt(fileId),
+          },
+        })
+
+        const stream = await call(`/api/ext/v1/app/${appCode}/files/${fileId}/stream`, {
+          apiKey: credC.apiKey,
+        })
+        check(
+          '附件流 200 且内容可达（引用索引 + 表·字段暴露）',
+          stream.status === 200 && stream.text.includes('IPLAT-ATTACH-OK'),
+          `status=${stream.status} len=${stream.text.length}`,
+        )
+        check(
+          '附件流带 ETag / Accept-Ranges（HTTP 语义齐全）',
+          stream.headers.get('etag') !== null &&
+            (stream.headers.get('accept-ranges') ?? '') === 'bytes',
+        )
+
+        const orphan = await call(`/api/ext/v1/app/${appCode}/files/${orphanId}/stream`, {
+          apiKey: credC.apiKey,
+        })
+        check(
+          '未被应用数据引用的文件 → 40400（越权不可读）',
+          orphan.body?.code === 40400,
+          `code=${orphan.body?.code}`,
+        )
+
+        const missing = await call(`/api/ext/v1/app/${appCode}/files/999999999999999999/stream`, {
+          apiKey: credC.apiKey,
+        })
+        check('不存在的文件 → 40400', missing.body?.code === 40400, `code=${missing.body?.code}`)
+      } catch (error) {
+        check('附件流端到端（C3）', false, (error as Error).message)
+      }
+      // 清理：软删上传文件（进回收站，物理清除由既有 cron 负责）
+      for (const id of [fileId, orphanId]) {
+        if (id) {
+          await prisma.cloudFile
+            .update({ where: { id: BigInt(id) }, data: { deletedAt: new Date() } })
+            .catch(() => undefined)
+        }
+      }
+    }
   } finally {
     // ==================== 清理（best-effort）====================
     try {
+      for (const id of credIds) {
+        await call(`/api/access/credentials/${id}/revoke`, { method: 'POST', token })
+      }
       for (const id of displayIds) {
         await call(`/api/display/${id.toString()}`, { method: 'DELETE', token })
       }
       if (appCode) await call(`/api/app/${appCode}`, { method: 'DELETE', token })
-      if (siteId !== null) await call(`/api/site/manage/${siteId.toString()}`, { method: 'DELETE', token })
+      if (siteId !== null)
+        await call(`/api/site/manage/${siteId.toString()}`, { method: 'DELETE', token })
     } catch {
       console.log('（清理阶段出现异常，已忽略）')
     }
