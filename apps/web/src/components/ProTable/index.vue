@@ -44,13 +44,14 @@
         v-bind="tableAttrs"
       >
         <slot />
+        <!--
+          三态空区：加载失败优先（页面空态不得覆盖错误与重试入口）；
+          其次交给页面 `#empty` 插槽（如云盘「拖拽到此处上传」）；
+          最后退回 `emptyText`（默认「暂无数据」）
+        -->
         <template #empty>
-          <el-empty
-            v-if="!loadError"
-            description="暂无数据"
-          />
           <el-result
-            v-else
+            v-if="loadError"
             icon="error"
             title="加载失败"
             sub-title="请稍后重试"
@@ -64,6 +65,12 @@
               </el-button>
             </template>
           </el-result>
+          <slot
+            v-else
+            name="empty"
+          >
+            <el-empty :description="emptyText" />
+          </slot>
         </template>
       </el-table>
     </div>
@@ -99,6 +106,8 @@ interface Props {
   pageSize?: number
   /** 是否显示分页（树形表格传 false） */
   pagination?: boolean
+  /** 空数据文案（页面未提供 `#empty` 插槽时生效；默认「暂无数据」） */
+  emptyText?: string
 }
 
 withDefaults(defineProps<Props>(), {
@@ -108,6 +117,7 @@ withDefaults(defineProps<Props>(), {
   pageNo: 1,
   pageSize: 10,
   pagination: true,
+  emptyText: '暂无数据',
 })
 
 const emit = defineEmits<{
