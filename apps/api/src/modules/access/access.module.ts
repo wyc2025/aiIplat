@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { CredentialModule } from './credential/credential.module'
 import { ExtModule } from './ext/ext.module'
 import { AccessFacadeModule } from './facade/access-facade.module'
+import { McpModule } from './mcp/mcp.module'
 
 /**
  * access 域聚合模块（P15「对外开放接入层」，ARCHITECTURE §31 / ARCHITECTURE-P15 §1）。
@@ -16,12 +17,14 @@ import { AccessFacadeModule } from './facade/access-facade.module'
  *
  * 子模块（随任务落地）：
  * - `credential/`（T134，已落地）：凭证生命周期 `/api/access/credentials/**`；
- * - `ext/`（T135）：对外取数面 `/api/ext/v1/app/:appCode/**` + 契约冻结层；
- * - `quota/` `audit/`（T136）：按 principal 的配额与审计横切；
- * - `facade/`（T136）：`AccessFacade.writeAudit`。
+ * - `ext/`（T135，已落地）：对外取数面 `/api/ext/v1/app/:appCode/**` + 契约冻结层；
+ * - `quota/` `audit/`（T136，已落地）：按 principal 的配额与审计横切；
+ * - `facade/`（T136，已落地）：`AccessFacade.writeAudit`；
+ * - `mcp/`（P15-C T139，已落地）：MCP 适配器 `POST /api/ext/mcp`（Streamable HTTP 无状态，
+ *   复用 ext 的守卫与契约层，工具集三件套冻结 R143）。
  */
 @Module({
-  imports: [CredentialModule, ExtModule, AccessFacadeModule],
+  imports: [CredentialModule, ExtModule, AccessFacadeModule, McpModule],
   exports: [CredentialModule, AccessFacadeModule],
 })
 export class AccessModule {}
