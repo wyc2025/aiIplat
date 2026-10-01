@@ -160,11 +160,12 @@ export class DisplayService {
     if (target && display.siteId !== null && target.id === display.siteId) {
       throw new BusinessException(ErrorCode.ParamInvalid, '该展示应用已挂靠此站点')
     }
+    // 原站点已删（`disp_display.site_id` 是逻辑外键、删站不清理该关系）→ **视为未挂靠**，与列表口径一致
+    // （API §21.3）。原先此处直接报错「请先重新挂靠」会把用户锁死——挂靠动作本身正是唯一出路。
+    // 此时 `from` 落到暂存区基点，而页面文件实际在已删站点的目录里（已随删站进回收站）→
+    // `moveDir` 因源不存在而跳过移动（既有语义），只更新挂靠关系；如需保留原文件，先从回收站还原。
     const currentSite =
       display.siteId === null ? null : await this.siteFacade.getSiteInfo(userId, display.siteId)
-    if (display.siteId !== null && !currentSite) {
-      throw new BusinessException(ErrorCode.DisplayNotFound, '展示应用挂靠的站点已不存在，请先重新挂靠')
-    }
 
     // 移动基点 = 用户云盘根；from/to 均为「父目录」，目录名（id）保持不变
     const from = currentSite
