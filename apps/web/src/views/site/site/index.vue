@@ -439,9 +439,9 @@ async function onRemove(row: SiteSiteInfo) {
   }
   const displayNote =
     affiliated.length > 0
-      ? `④ 本站挂靠的 ${affiliated.length} 个展示应用（${affiliated.map((item) => item.name).join('、')}）` +
-        '：目录随站点文件一并移入回收站，挂靠关系失效——可重新挂靠到其他站点，如需保留页面文件请先从回收站还原。'
-      : '④ 本站当前没有挂靠的展示应用。'
+      ? `④ 本站挂着 ${affiliated.length} 个展示应用（${affiliated.map((item) => item.name).join('、')}）：` +
+        '站点删除后它们会从站点上消失、页面文件随站点文件一并移入回收站；如需继续使用，请先从回收站还原文件，再重新挂到其他站点。'
+      : '④ 本站没有挂着展示应用。'
 
   const confirmed = await confirmDialog(
     `确认删除站点「${row.title}（${row.slug}）」？` +
@@ -457,7 +457,7 @@ async function onRemove(row: SiteSiteInfo) {
     const res = await deleteSite(row.id)
     ElMessage.success(
       `站点已删除（${res.unpublishedArticles} 篇文章已从本站下架、${res.deletedComments} 条评论已删除，站点文件已移入回收站` +
-        (affiliated.length > 0 ? `；${affiliated.length} 个展示应用已随目录移入回收站` : '') +
+        (affiliated.length > 0 ? `；${affiliated.length} 个展示应用的页面文件已移入回收站` : '') +
         '）',
     )
     await store.load()

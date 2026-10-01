@@ -118,7 +118,7 @@ defineExpose({ reload: load })
 function openCloudDir(item: DisplayItem): void {
   const dir = item.folderId ?? item.siteRootFolderId
   if (dir === null) {
-    ElMessage.warning('站点目录尚未创建（写入第一个页面文件后自动创建）')
+    ElMessage.warning('这个展示页的文件目录还没有创建：在对话里写入第一个页面文件后会出现')
     return
   }
   void router.push({ path: '/cloud/file', query: { dir } })
@@ -146,8 +146,8 @@ async function submitCreate(): Promise<void> {
     })
     ElMessage.success(
       created.siteSlug
-        ? `已创建并挂靠站点「${created.siteSlug}」：文件写到 ${created.writePath}/`
-        : `已创建（云盘暂存区）：文件写到 ${created.writePath}/`,
+        ? `已创建，并挂到站点「${created.siteTitle ?? created.siteSlug}」；写入页面文件后即可访问`
+        : '已创建，页面文件暂存在云盘；挂到站点后即可对外访问',
     )
     createDialog.visible = false
     await load()
@@ -172,7 +172,9 @@ async function submitAffiliate(): Promise<void> {
   try {
     await affiliateDisplay(affiliateDialog.id, affiliateDialog.siteSlug || null)
     ElMessage.success(
-      affiliateDialog.siteSlug ? '已挂靠（目录已移动）' : '已取消挂靠（回到暂存区）',
+      affiliateDialog.siteSlug
+        ? '已挂到该站点，新的访问地址马上可用'
+        : '已从站点取下，页面文件回到云盘',
     )
     affiliateDialog.visible = false
     await load()
@@ -227,13 +229,13 @@ async function submitGrant(): Promise<void> {
 
 async function removeDisplay(item: DisplayItem): Promise<void> {
   const ok = await confirmDialog(
-    `删除展示应用「${item.name}」？授权关系一并清除（目录保留在云盘）`,
+    `删除展示应用「${item.name}」？删除后它会从站点上取下、已授权的数据应用一并解除；页面文件仍保留在云盘，需要时可再建一个挂上去。`,
     '删除确认',
   )
   if (!ok) return
   try {
     await deleteDisplay(item.id)
-    ElMessage.success('已删除')
+    ElMessage.success('已删除（页面文件仍保留在云盘）')
     await load()
   } catch {
     // 请求层已提示
@@ -245,10 +247,18 @@ async function copyUrl(item: DisplayItem): Promise<void> {
   if (!url) return
   try {
     await navigator.clipboard.writeText(url)
-    ElMessage.success('入口地址已复制')
+    ElMessage.success('访问链接已复制，可直接发给他人')
   } catch {
-    ElMessage.error('复制失败，请手动复制')
+    ElMessage.error('复制失败，请手动选择后复制')
   }
+}
+
+/**
+ * 授权项显示**应用名称**（面向用户，不暴露 `appCode` 这类内部标识）。
+ * 名称取自本页已加载的「我的数据应用」清单；应用已被删除时退化显示 code（罕见，避免空标签）。
+ */
+function appNameOf(appCode: string): string {
+  return apps.value.find((app) => app.appCode === appCode)?.name ?? appCode
 }
 </script>
 
@@ -259,7 +269,7 @@ async function copyUrl(item: DisplayItem): Promise<void> {
         type="primary"
         @click="openCreate"
       >
-        新建展示应用
+        新建应用
       </el-button>
       <el-button @click="load">
         刷新
@@ -284,13 +294,13 @@ async function copyUrl(item: DisplayItem): Promise<void> {
 
     <el-empty
       v-else-if="list.length === 0 && !loading"
-      description="还没有展示应用"
+      description="还没有展示应用（挂在站点上的展示页）"
     >
       <el-button
         type="primary"
         @click="openCreate"
       >
-        新建展示应用
+        新建应用
       </el-button>
     </el-empty>
 
@@ -323,11 +333,14 @@ async function copyUrl(item: DisplayItem): Promise<void> {
           </el-tag>
         </div>
 
+        <!-- 状态说明：只讲用户关心的事，不出现目录写路径、接口地址这类实现细节 -->
         <div class="v-disp-card__meta">
-          <span>目录：{{ item.folderPath }}</span>
-          <span v-if="item.urlPreview"> 入口：{{ item.urlPreview }} </span>
-          <span v-else>入口：挂靠站点后可用</span>
-          <span>创建：{{ formatTime(item.createdAt) }}</span>
+          <span v-if="!item.siteSlug">页面文件暂存在云盘，挂到站点后才能对外访问。</span>
+          <span v-else-if="item.folderId">页面文件在站点目录里，可点「打开目录」查看。</span>
+          <span v-else>页面文件还没开始写，写入后会自动出现在站点目录里。</span>
+          <span v-if="item.urlPreview">访问地址已生成，点「复制链接」即可分享。</span>
+          <span v-else>挂到站点后才会生成访问地址。</span>
+          <span>创建于 {{ formatTime(item.createdAt) }}</span>
         </div>
 
         <div class="v-disp-card__grants">
@@ -339,13 +352,13 @@ async function copyUrl(item: DisplayItem): Promise<void> {
               size="small"
               class="v-disp-card__tag"
             >
-              {{ grant.appCode }}
+              {{ appNameOf(grant.appCode) }}
             </el-tag>
           </template>
           <span
             v-else
             class="v-disp-card__hint"
-          > 未授权（站点页读不到数据） </span>
+          > 还没授权：这个展示页目前读不到数据 </span>
         </div>
 
         <div class="v-disp-card__actions">
@@ -356,7 +369,7 @@ async function copyUrl(item: DisplayItem): Promise<void> {
             plain
             @click="openCloudDir(item)"
           >
-            打开云盘目录
+            打开目录
           </el-button>
           <el-button
             v-if="item.urlPreview"
@@ -364,13 +377,13 @@ async function copyUrl(item: DisplayItem): Promise<void> {
             plain
             @click="copyUrl(item)"
           >
-            复制入口地址
+            复制链接
           </el-button>
           <el-button
             size="small"
             @click="openAffiliate(item)"
           >
-            {{ item.siteSlug ? '换挂靠' : '挂靠' }}
+            {{ item.siteSlug ? '更换站点' : '挂到站点' }}
           </el-button>
           <el-button
             size="small"
@@ -404,11 +417,11 @@ async function copyUrl(item: DisplayItem): Promise<void> {
             maxlength="40"
           />
         </el-form-item>
-        <el-form-item label="挂靠站点">
+        <el-form-item label="挂到站点">
           <el-select
             v-model="createDialog.siteSlug"
             clearable
-            placeholder="留空 = 云盘暂存区（稍后可挂靠）"
+            placeholder="暂时不挂，以后再选也行"
             style="width: 100%"
           >
             <el-option
@@ -434,18 +447,18 @@ async function copyUrl(item: DisplayItem): Promise<void> {
       </template>
     </el-dialog>
 
-    <!-- 挂靠 / 换挂靠 / 取消挂靠 -->
+    <!-- 挂到站点 / 改挂 / 从站点取下 -->
     <el-dialog
       v-model="affiliateDialog.visible"
-      :title="`挂靠设置 · ${affiliateDialog.name}`"
+      :title="`挂到站点 · ${affiliateDialog.name}`"
       width="480px"
     >
-      <el-form label-width="90px">
-        <el-form-item label="目标站点">
+      <el-form label-width="100px">
+        <el-form-item label="挂到哪个站点">
           <el-select
             v-model="affiliateDialog.siteSlug"
             clearable
-            placeholder="留空 = 取消挂靠（回到暂存区）"
+            placeholder="不选择 = 从站点上取下"
             style="width: 100%"
           >
             <el-option
@@ -461,7 +474,7 @@ async function copyUrl(item: DisplayItem): Promise<void> {
         type="warning"
         :closable="false"
         show-icon
-        title="挂靠 = 把展示应用目录移动到目标站点目录（同一事务；中断自动回滚）。换站后旧地址即刻 404、新地址即刻可用。"
+        title="挂到站点后，这个展示页就能通过该站点访问：原访问地址立即失效，新访问地址马上可用。不选择站点则从站点上取下（页面文件会回到云盘，不再对外访问）。"
       />
       <template #footer>
         <el-button @click="affiliateDialog.visible = false">
@@ -477,12 +490,15 @@ async function copyUrl(item: DisplayItem): Promise<void> {
       </template>
     </el-dialog>
 
-    <!-- 授权 -->
+    <!-- 授权数据应用 -->
     <el-dialog
       v-model="grantDialog.visible"
       :title="`授权数据应用 · ${grantDialog.name}`"
       width="560px"
     >
+      <p class="v-disp-card__grant-tip">
+        勾选后，这个展示页就能读取对应数据应用里的数据。
+      </p>
       <el-checkbox-group v-model="grantDialog.selected">
         <div
           v-for="app in readyApps"
@@ -490,15 +506,20 @@ async function copyUrl(item: DisplayItem): Promise<void> {
           class="v-disp-card__grant-row"
         >
           <el-checkbox :value="app.appCode">
-            {{ app.name }}（{{ app.appCode }}）
+            {{ app.name }}
           </el-checkbox>
-          <el-tag
+          <el-tooltip
             v-if="app.isPublic !== 1"
-            size="small"
-            type="warning"
+            content="该数据应用还没开启「可被读取」，此时授权也不会生效——请先到数据应用里打开该开关。"
+            placement="top"
           >
-            未开启「可被读取」
-          </el-tag>
+            <el-tag
+              size="small"
+              type="warning"
+            >
+              未开启「可被读取」
+            </el-tag>
+          </el-tooltip>
         </div>
       </el-checkbox-group>
       <el-empty
@@ -524,6 +545,12 @@ async function copyUrl(item: DisplayItem): Promise<void> {
 <style scoped>
 .v-display-cards__bar {
   margin-bottom: 12px;
+}
+
+.v-disp-card__grant-tip {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
 }
 
 /* 卡片流（与「我的应用」数据应用卡片同一视觉语言） */

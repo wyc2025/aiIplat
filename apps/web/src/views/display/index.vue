@@ -19,7 +19,7 @@ import DisplayCards from '../app/center/components/DisplayCards.vue'
       type="info"
       :closable="false"
       show-icon
-      title="「展示应用」已并入「我的应用 ▸ 展示应用」，请从该入口管理；本页仅为兼容旧链接保留。"
+      title="展示应用已经移到「我的应用」页面里，请从那里管理（本页是旧链接入口）。"
       class="v-display-legacy__tip"
     />
     <DisplayCards />

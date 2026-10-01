@@ -288,16 +288,9 @@ function goPages(item: AppDefItem): void {
           我的应用
         </h3>
         <p class="v-app-center__desc">
-          用空白表单或 AI 对话创建数据应用，平台自动生成管理后台。
+          数据应用（表单 + 后台管理）和展示应用（挂在站点上的展示页）都在这里管理。
         </p>
       </div>
-      <el-button
-        v-if="activeTab === 'app'"
-        type="primary"
-        @click="openCreate"
-      >
-        新建应用
-      </el-button>
     </div>
 
     <el-tabs
@@ -308,6 +301,19 @@ function goPages(item: AppDefItem): void {
         label="数据应用"
         name="app"
       >
+        <!-- 工具栏与「展示应用」Tab 同位（各自内容区顶部左侧） -->
+        <div class="v-app-center__bar">
+          <el-button
+            type="primary"
+            @click="openCreate"
+          >
+            新建应用
+          </el-button>
+          <el-button @click="load">
+            刷新
+          </el-button>
+        </div>
+
         <div
           v-loading="loading"
           class="v-app-center__body"
@@ -363,9 +369,8 @@ function goPages(item: AppDefItem): void {
                 {{ item.description || '（无描述）' }}
               </p>
               <div class="v-app-card__meta">
-                <span>code：{{ item.appCode }}</span>
                 <span>表 {{ item.tableCount }} · 行 {{ item.rowCount }} · 页 {{ item.pageCount }}</span>
-                <span>更新：{{ formatTime(item.updatedAt) }}</span>
+                <span>更新于 {{ formatTime(item.updatedAt) }}</span>
               </div>
               <div class="v-app-card__actions">
                 <el-button
@@ -645,6 +650,11 @@ function goPages(item: AppDefItem): void {
 <style scoped>
 .v-app-center__tabs {
   margin-top: -8px;
+}
+
+/* 两个 Tab 的工具栏同位（各自内容区顶部左侧） */
+.v-app-center__bar {
+  margin-bottom: 12px;
 }
 
 .v-app-center__header {
