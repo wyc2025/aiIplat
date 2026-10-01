@@ -3098,7 +3098,7 @@ Authorization: Bearer {keyId}.{secret}
 
 ### 31.9 演进预留（本期不做，架构不堵路）
 
-1. **MCP 适配器（下期，D129/D130）**：`access/mcp/` 加协议适配器并复用 `ExtAuthGuard` / `QuotaInterceptor` / `AuditInterceptor`；`@modelcontextprotocol/sdk` 特批已授予、届时引入（本期不安装，不手写 JSON-RPC 传输层）。
+1. **MCP 适配器（P15-C 已落地，D129~D134）**：`access/mcp/` 协议适配器已交付，复用 `ExtAuthGuard` / 配额 / 审计管线；`@modelcontextprotocol/sdk` + `zod` 已引入。详见 **§32**。
 2. **OAuth2 client_credentials**：`acc_credential` 加 `type` 列即可（默认 `api_key`），校验链不变。
 3. **行级 `rowFilter`**：`scope` JSON 已留键；实现时需求值器白名单（防注入），单独立项。
 4. **轮换双活窗口**：v1 轮换即时生效；双活需第二有效 secret 槽（加列）。
@@ -3108,3 +3108,124 @@ Authorization: Bearer {keyId}.{secret}
 ### 31.10 资产登记
 
 `AccessFacade.writeAudit` / `quota.service` / `audit.service` / `ext-contract.service` / `ext-path.util` / `access 前端资产` —— 明细见 §9 公共资产表。
+
+---
+
+## 32. P15-C：MCP 适配器（协议适配层）
+
+> 在 §31 的对外契约之上加一层**协议适配**（REST 语义 → JSON-RPC 工具语义）：外部 Agent（Claude Desktop / Cursor 等）
+> 以 MCP 客户端身份读取已授权数据应用。**不新立域、不加表、不加错误码、不加配置键**（D129~~D134 / R142~~R146）。
+> 需求基线 `docs/P15C/`；本章为主文档收编，实测校正见 API §23.7。
+
+### 32.1 模块结构（access 域内）
+
+```
+apps/api/src/modules/access/mcp/
+├── mcp.controller.ts        # POST /api/ext/mcp（守卫+配额+审计）；GET/DELETE → 405
+├── mcp-server.factory.ts    # 每请求构建 McpServer + StreamableHTTPServerTransport（无状态）
+├── tool-registry.ts         # 工具注册出口（SDK 泛型类型切断点，见 §32.11）
+├── tools/
+│   ├── tool-deps.ts         # 工具层依赖（principal / appFacade / contract / ctx）
+│   ├── get-schema.tool.ts   # iplat_get_schema
+│   ├── query-records.tool.ts# iplat_query_records
+│   └── get-record.tool.ts   # iplat_get_record
+└── tool-errors.ts           # 业务错误 → isError 文本（含业务码）+ 每请求上下文
+```
+
+工具层与传输层解耦：三个工具是纯函数式注册（接收 `McpToolDeps` 上下文），工厂换 transport 即可产出远期 stdio 形态。
+
+### 32.2 无状态请求生命周期（D131 / R142）
+
+```
+POST /api/ext/mcp
+  → ExtAuthGuard（§31 既有：Bearer 校验 → request.principal；失败 401 + WWW-Authenticate + 50019 + 守卫留痕）
+  → 配额预检 + 计数（+1）+ X-RateLimit-* 回带
+  → factory.create(principal, ctx)：new McpServer({name:'iplat-ext'}) + new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })
+      └─ 应用可见性校验（未软删 + is_public=1，否则 40400）+ 注册三件套工具（principal 经闭包注入）
+  → transport.handleRequest(req, res, body)（响应直写，JSON 形态）
+  → finally：server.close() + 行数记账 + 审计落一条（成功与负例都记）
+```
+
+- 无 `sessionId` → 无会话存储、Redis 零新增键、横向扩容无障碍。
+- `enableJsonResponse` → 无 SSE 长连接、无服务端推送面。
+- **无状态 = 无跨请求状态**：principal 与请求上下文（行数 / 业务码）都在请求内闭环，天然隔离。
+
+### 32.3 认证链（零改动复用）
+
+- 守卫、401 语义、`WWW-Authenticate: Bearer realm="iplat-ext"`、守卫层 401 留痕（`principal=cred:{keyId}`、`ownerId=0`）全部沿用 §31 既有实现。
+- MCP 客户端的标准认证发现行为即 401 + `WWW-Authenticate`，与远期 OAuth 2.1 方向兼容（§31.9）。
+- **例外**：`GET`/`DELETE` 的 405 **不经过守卫**（守卫只挂 `POST`）——405 不触数据逻辑，且 R142 要求「一律 405」；
+  若挂类级，未认证的 GET 会先撞 401 使 405 永不可达（实测确认）。
+- **secret 边界**：secret 不进 `initialize` 响应、不进工具描述、不进审计参数摘要。
+
+### 32.4 工具 → AppFacade 调用链（R146 数据通道零改）
+
+```
+tool 调用（principal = credential）
+  → 凭证行解析 appId（D126 一凭证一应用；MCP 路径不带 appCode）
+  → scope 收窄（§31：表 / 字段 / ops 三纵深，fields 禁通配）
+  → 复用 ext-contract 同一取数实现（R104 约束 + keyset 游标，§31.4）
+  → envelope 输出（structuredContent + content[0].text 双形态）
+```
+
+- **三个工具与 REST v1 端点共用同一取数实现**（协议壳不同，内核同一函数）——游标编解码器是同一份代码，
+  故带出 API §23 的两个可验收性质：**逐字段一致**与 **`nextCursor` 跨协议混用**（`smoke:mcp` 双向实测通过）。
+- 行数配额事后记账：`query_records` 按返回行数、`get_record` 记 1 行（复用 §31.5 的 post-response 计数口径）。
+- 取数一律经 `AppFacade`（内部仍走 `DataService.queryForPublic`），**本层不新开任何数据通路**。
+
+### 32.5 错误映射（R144，分层）
+
+| 层                    | 场景                                                 | 表现                                              |
+| --------------------- | ---------------------------------------------------- | ------------------------------------------------- |
+| HTTP（守卫 / 控制器） | 无 / 伪 / 吊销 / 过期凭证                            | `401` + `WWW-Authenticate` + `50019`              |
+| HTTP（控制器）        | 请求 / 行数配额超限                                  | `429` + `Retry-After` + `X-RateLimit-*` + `42900` |
+| HTTP（控制器）        | 方法不允许（GET / DELETE）                           | `405` + `Allow: POST` + `40001`                   |
+| 工具结果              | 表未暴露 / 越权行 / 应用不可见                       | `isError=true`，text 含 `40400`                   |
+| 工具结果              | 入参形状 / 边界违例（SDK 前置 zod 校验）             | `isError=true`，text 含 `-32602`                  |
+| 工具结果              | 入参语义违例（filter/sort 格式、游标与 sort 不一致） | `isError=true`，text 含 `40001`                   |
+| JSON-RPC              | 未知方法                                             | 标准 `-32601`（SDK 自理）                         |
+
+原则：**认证与配额在 HTTP 层解决**（客户端可自动发现 / 重试），**业务语义在工具结果内解决**（Agent 可读文本自纠）。
+
+### 32.6 配额与审计记账点（R145）
+
+- **请求配额**：controller 层每个 JSON-RPC POST 计 1（`initialize` / `tools/list` / `tools/call` 均计）——防「空握手刷接口」。
+- **行数配额**：仅两个数据工具事后记账（`ctx.rows` 由工具写回，controller 统一提交，R141 同口径）。
+- **审计 event**：`mcp.initialize` / `mcp.tools.list` / `mcp.tools.call`（其余方法 `mcp.{method}`）；
+  `paramsSummary` = 工具名 + 入参摘要（≤512 字截断，**不含响应内容**）；`principal / ownerId / endpoint / resultCode / rows / durationMs / ip` 沿用 `acc_audit` 现有列。
+- 401 由守卫留痕（`ownerId=0`，端点名 `mcp`）；429 在抛异常前记账。
+
+### 32.7 路由注册与静态双保险
+
+- `/api/ext/mcp` 与 `/api/ext/v1/**` 同族（`/api/ext` 前缀），**不经** site 域的静态通配（后者作用域仅 `/api/open/**`）。
+- `smoke:mcp` 已加顺序断言：正例可达（initialize / tools/list）+ **伪路径 `/api/ext/mcp/extra` → 40400**（路由精确，未被通配吞并）。
+- 控制器同时声明 `GET` / `DELETE` → 405 + `Allow: POST`，避免落到全局 404 歧义。
+
+### 32.8 安全注意
+
+- 认证兜底始终是 Bearer 凭证，**不依赖 Origin**；无会话 = 无会话劫持面；无服务端推送 = 无 SSE 长连接资源占用面。
+- 工具描述对外可见（下发客户端）：不含内部实现、URL、secret（`smoke:mcp` 已断言）。
+- 新依赖两个（SDK + zod，见 API §23.7 ④），版本由 `pnpm-lock.yaml` 锁定。
+
+### 32.9 演进预留（本期不做）
+
+- **stdio 自托管**：工具层已与传输层解耦，工厂换 transport 即可；单独立项。
+- **OAuth 2.1**：`acc_credential` 加 `type` 列 + `WWW-Authenticate` 发现机制已兼容（同 §31.9）。
+- **通知 / 订阅能力**：需要有状态会话 + 会话存储，届时**须推翻 D131 无状态口径**（文档先行）。
+- **写操作 / aggregate 工具**：须先修订 R143 工具集冻结口径；aggregate 还需评估执行器超时与行数帽。
+
+### 32.10 资产登记
+
+`mcp.controller` / `mcp-server.factory` / `tool-registry` / `tools/*`（三个工具 + deps）/ `tool-errors` / `scripts/smoke-mcp.ts`（`pnpm smoke:mcp`，36 项）
+—— 明细见 §9 公共资产表。
+
+### 32.11 工程处置：SDK 类型切断点（`tool-registry.ts`）
+
+SDK 的 `McpServer.registerTool` 泛型会对入参做逐键 `ShapeOutput` 展开，并叠加 zod v3/v4 双版本兼容类型；
+实测在 TS 5.8 + zod 3.25 下**任何**调用都触发 `TS2589`（连 `z.array(z.string()).optional()` 都炸，编译堆加到 4 GB 仍失败）。
+这是 SDK 的类型表达问题，非调用方写法问题。
+
+处置：`tool-registry.ts` 内以 `as unknown as` 收敛 `registerTool` 签名（**唯一一处类型切断点**），
+`inputSchema` 因此按 `Record<string, unknown>` 传递——**运行时零差异**（SDK 原方法、zod 校验照常、JSON Schema 照常下发客户端），
+仅不再静态推导 handler 入参形状（各工具文件以显式 `QueryArgs` 类型 + cast 收口）。
+SDK 修好类型后，删除该文件、各工具直接调 `server.registerTool` 即可，工具实现不动。

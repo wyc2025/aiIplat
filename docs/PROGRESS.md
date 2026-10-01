@@ -636,15 +636,15 @@
 > 编号：D119~~D128（+D129/D130 下期预登记）/ R130~~R141 / T132~~T138。
 > 增量：**+1 域（access）+2 表（`acc_credential` / `acc_audit`）/ +11 HTTP 端点（管理侧 7 + 对外 4；开放层 4 端点改路径）/ +3 错误码（50019~50021）/ +1 配置组（`ACCESS_*`）/ 零新依赖 / AI 工具零新增（43 不变）**。
 
-| 编号 | 任务                                                                                                                                                                                                                                                                   | 状态   | 完成日期   |
-| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ---------- |
-| T132 | access 域骨架 + DB：迁移 `20260930120000_add_access_domain`（两表 + `uk_cred_keyid` + 6 索引）+ 错误码 50019~50021 + `access.config.ts`（六键）+ seed 菜单「接入凭证」（应用中心子菜单，common 授权）                                                                  | 已完成 | 2026-09-30 |
-| T133 | 主体化 + 路径收窄：`DisplayFacade.assertCanRead(appId, principal)`（新增 `AccessPrincipal` 类型）+ 新 `:slug/disp/:id/api/app/:appCode/**` 四端点 + 旧站点级路径退役 + 路由双保险（声明顺序 + 静态 `disp/:id/api/` 排除）+ R124 / 站点 README 三模板 / AI 工具文案改写 | 已完成 | 2026-09-30 |
-| T134 | 凭证生命周期：管理侧 6 端点（创建 / 列表 / 详情 / 编辑 / 吊销 / 轮换）+ 密钥工具（keyId / secret / sha256 / 解析）+ 校验链 `verify` + scope 校验（app 域 `exposedSchemaOf` 暴露清单门面 + `appBriefByIds` 摘要）                                                       | 已完成 | 2026-09-30 |
-| T135 | 对外取数四端点：契约冻结层 `ext-contract.service`（envelope / 游标编解码 / keyset 分页 / scope 投影）+ `AppFacade.publicListAll` 全量投影 + 401 真实状态码（网关支持「自带业务码的 HttpException」）                                                                   | 已完成 | 2026-09-30 |
-| T136 | 配额 + 审计：Redis 双窗计数 + 429 / `Retry-After` / `X-RateLimit-*` + 异步缓冲落表（5s 或满 100 条）+ 90 天清理 cron + 审计检索端点 + 匿名层埋点（`AccessFacade.writeAudit`）+ **401 由守卫留痕**                                                                      | 已完成 | 2026-09-30 |
-| T137 | 前端管理面：`views/access/index.vue`（列表 / 新建弹窗 / **密钥一次性展示与复制** / 轮换 / 吊销 / scope 编辑 / 用量 / 审计抽屉）+ `api/access/index.ts`                                                                                                                 | 已完成 | 2026-09-30 |
-| T138 | 收口：`smoke:ext` 新增可重跑资产（31/31）+ `check:ai` 19/19 + `smoke:ai` 8/8 + 双端静态检查 + 文档回写（ARCHITECTURE §31 / API §22 / PLATFORM-GUIDE 腾挪 / §9 资产表与 Redis Key 表 / 本文件）                                                                         | 已完成 | 2026-09-30 |
+| 编号 | 任务                                                                                                                                                                                                                                                                                                                                                                                                        | 状态   | 完成日期   |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ---------- |
+| T132 | access 域骨架 + DB：迁移 `20260930120000_add_access_domain`（两表 + `uk_cred_keyid` + 6 索引）+ 错误码 50019~50021 + `access.config.ts`（六键）+ seed 菜单「接入凭证」（应用中心子菜单，common 授权）                                                                                                                                                                                                       | 已完成 | 2026-09-30 |
+| T133 | 主体化 + 路径收窄：`DisplayFacade.assertCanRead(appId, principal)`（新增 `AccessPrincipal` 类型）+ 新 `:slug/disp/:id/api/app/:appCode/**` 四端点 + 旧站点级路径退役（**退役表现＝HTTP 200 + code 40400**，请求落到站点静态通配后由「首段 `api`」双保险拦下，非 HTTP 404；口径见 API §22.9 / ARCH §31.10）+ 路由双保险（声明顺序 + 静态 `disp/:id/api/` 排除）+ R124 / 站点 README 三模板 / AI 工具文案改写 | 已完成 | 2026-09-30 |
+| T134 | 凭证生命周期：管理侧 6 端点（创建 / 列表 / 详情 / 编辑 / 吊销 / 轮换）+ 密钥工具（keyId / secret / sha256 / 解析）+ 校验链 `verify` + scope 校验（app 域 `exposedSchemaOf` 暴露清单门面 + `appBriefByIds` 摘要）                                                                                                                                                                                            | 已完成 | 2026-09-30 |
+| T135 | 对外取数四端点：契约冻结层 `ext-contract.service`（envelope / 游标编解码 / keyset 分页 / scope 投影）+ `AppFacade.publicListAll` 全量投影 + 401 真实状态码（网关支持「自带业务码的 HttpException」）                                                                                                                                                                                                        | 已完成 | 2026-09-30 |
+| T136 | 配额 + 审计：Redis 双窗计数 + 429 / `Retry-After` / `X-RateLimit-*` + 异步缓冲落表（5s 或满 100 条）+ 90 天清理 cron + 审计检索端点 + 匿名层埋点（`AccessFacade.writeAudit`）+ **401 由守卫留痕**                                                                                                                                                                                                           | 已完成 | 2026-09-30 |
+| T137 | 前端管理面：`views/access/index.vue`（列表 / 新建弹窗 / **密钥一次性展示与复制** / 轮换 / 吊销 / scope 编辑 / 用量 / 审计抽屉）+ `api/access/index.ts`                                                                                                                                                                                                                                                      | 已完成 | 2026-09-30 |
+| T138 | 收口：`smoke:ext` 新增可重跑资产（**41/41**：交付时 35/35，2026-10-01 按 P15 走查 C1~C3 补 6 项）+ `check:ai` 19/19 + `smoke:ai` 8/8 + 双端静态检查 + 文档回写（ARCHITECTURE §31 / API §22 / PLATFORM-GUIDE 腾挪 / §9 资产表与 Redis Key 表 / 本文件）                                                                                                                                                      | 已完成 | 2026-09-30 |
 
 **关键设计点**
 
@@ -655,11 +655,33 @@
 - **单一管道（铁律 5/R139）**：对外与开放层取数**共用** `AppFacade` 五方法（内部仍是 `DataService.queryForPublic`），仅新增 `publicListAll` 全量投影；scope 交集在 access 域完成后以过滤参数下传，**app 域不认识凭证**。
 - **配额与审计横切（R134/R135/R141）**：拦截器集中记账（controller 只报告 `endpoint/table/rows/params` 事实）；**401 必须由守卫留痕**（守卫在拦截器之前执行，拦截器覆盖不到）；行数为**响应后记账**；审计异步缓冲、保留 90 天。
 
+## P15-C 任务拆解（MCP 适配器：协议适配层）
+
+> 来源：`docs/P15C/PRD-P15-C-MCP-ADAPTER.md` + `ARCHITECTURE-P15-C-增补.md` + `API-P15-C-增补.md`（已并入 ARCHITECTURE §32 / API §23）。
+> 编号：D129~D134 / R142~~R146 / T139~~T143。
+> 增量：**+1 HTTP 端点（`POST /api/ext/mcp`；GET/DELETE 405）/ +3 对外 MCP 工具 / 零新表 / 零新错误码（下一可用仍 50022）/ 零新配置键 / 零内部 AI 工具变动（43 不变）/ +2 新依赖（`@modelcontextprotocol/sdk` + `zod`，见下）/ +1 验收资产（`smoke:mcp`，36 项）**。
+
+| 编号 | 任务                                                                                                                                                                                                                | 状态   | 完成日期   |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ---------- |
+| T139 | 依赖安装（`@modelcontextprotocol/sdk` ^1.31 + `zod` ^3.25）+ `access/mcp/` 骨架（工厂 + 控制器 + 注册出口）+ `POST /api/ext/mcp` 无状态装配 + GET/DELETE 405（守卫只挂 POST）+ 路由顺序双保险                       | 已完成 | 2026-10-01 |
+| T140 | 工具三件套：`iplat_get_schema` / `iplat_query_records` / `iplat_get_record`——复用 `ExtContractService` 取数内核与游标编码器、R104 入参约束、`structuredContent` + `content[0].text` 双形态输出                      | 已完成 | 2026-10-01 |
+| T141 | 配额与审计接入：每 JSON-RPC POST 计 1 次请求（含 initialize/tools/list）+ 行数事后记账 + `mcp.initialize` / `mcp.tools.list` / `mcp.tools.call` 落 `acc_audit`（摘要 ≤512 且不含 secret）+ 401 守卫留痕端点名 `mcp` | 已完成 | 2026-10-01 |
+| T142 | `smoke:mcp` 可重跑资产（**36/36**）：405 / 伪路径 40400 / 401 正负例 + 握手与工具集（三件套 + inputSchema 合法）+ **跨协议一致（含 nextCursor 双向混用）** + 工具负例 + 429 配额 + 审计核对                         | 已完成 | 2026-10-01 |
+| T143 | 文档入库：API §23 / ARCHITECTURE §32（含 §31.9 第 1 条由「下期」校正为「已落地」）+ 客户端配置示例（Claude Desktop / Cursor / curl）+ 本文件台账与回执                                                              | 已完成 | 2026-10-01 |
+
+**关键设计点**
+
+- **无状态端点（D131/R142）**：`POST /api/ext/mcp` 每请求独立 `McpServer` + `StreamableHTTPServerTransport`（`sessionIdGenerator: undefined` + `enableJsonResponse`），响应结束即销毁——无会话存储、Redis 零新增键、横向扩容无障碍、无 SSE 长连接；`GET`/`DELETE` → **405 + `Allow: POST`**（无状态本就不支持，明确拒绝优于静默 404），且**守卫只挂 POST**（否则未认证 GET 先撞 401，405 不可达）。
+- **协议壳 + 同一内核（R146 数据通道零改）**：三个工具与 REST v1 端点**共用同一取数实现与同一游标编码器**（`AppFacade` + `ExtContractService`），故带出两个可验收性质——`get_schema` 与 REST schema **逐字段一致**、`nextCursor` 与 REST `after` **跨协议可混用**（`smoke:mcp` 双向实测通过）。
+- **错误分层（R144）**：认证（401 + `WWW-Authenticate` + 50019）与配额（429 + `Retry-After` + `X-RateLimit-*`）在 **HTTP 层**；业务语义在**工具结果内**（`isError=true` + 文本含业务码 40400 / 40001 / SDK 前置校验的 -32602）。
+- **记账口径（R145）**：每个 POST 计 1 次请求配额（防空握手刷接口）；行数仅两个数据工具事后记账；审计 event 三主事件 + `mcp.{method}` 兜底，参数摘要含工具名与入参、**不含响应内容与 secret**。
+- **两处工程处置（详见 API §23.7）**：① **`zod` 必须显式依赖**——SDK 的工具入参只接受 zod 形态（`AnySchema = z3.ZodTypeAny | z4.$ZodType`），而 zod 在 SDK 中仅是 `peerDependency`，pnpm 隔离下不声明则 `inputSchema` 无法交付（新依赖实际 **+2**，建议登记 D135 或修订 D130）；② **`mcp/tool-registry.ts` 类型切断点**——SDK `registerTool` 泛型在 TS 5.8 下必触发 TS2589（4 GB 编译堆仍失败），该文件内以 `as unknown as` 收敛签名，**运行时零差异**，SDK 修好后可删。
+
 ## 进行中
 
-**无进行中任务**（P14 T124~~T131 与 P15 T132~~T138 均已全部完成并通过验证，见「P14 / P15 任务拆解」与文末回执）。
+**无进行中任务**（P14 T124~~T131、P15 T132~~T138、**P15-C T139~~T143** 均已全部完成并通过验证，见各期任务拆解与文末回执）。
 P12 尾巴（T122）已销项：铁律 3 / ARCH §6.2 文本修订、里程碑与工具数口径、走查待补取证 3 项（含发现并修复的 PublicRenderer 缺陷）。
-下一期候选（均待用户立项）：**MCP 适配器**（D129/D130 已预登记：平台远程托管 + `@modelcontextprotocol/sdk` 特批）、市场版本更新机制、行级 `rowFilter` 授权、OAuth2 client_credentials、站点内嵌应用数据语义（遗留 31）、P10 走查遗留的上游失败加固三项。
+下一期候选（均待用户立项）：市场版本更新机制、行级 `rowFilter` 授权、OAuth2 client_credentials、站点内嵌应用数据语义（遗留 31）、P10 走查遗留的上游失败加固三项、**MCP 二期**（stdio 自托管 / 写工具 / aggregate——须先修订 R143 与 D131）。
 
 ## 遗留问题
 
@@ -751,7 +773,18 @@ P12 尾巴（T122）已销项：铁律 3 / ARCH §6.2 文本修订、里程碑�
     - **待需求方拍板 10 项（Q1~Q10）**：只读/写（建议纯只读）、凭证选型（建议先 API Key）、配额口径（建议请求数 + 行数）、审计范围与保留（建议元数据 + 参数摘要，90 天）、MCP 托管形态（建议先远程托管）、**展示页取数是否收窄**（建议 `displayId` 入路径必做、token 化列为可选）、契约冻结强度（建议对外字段解耦 + 版本号）、授权粒度（建议表 + 字段 + 操作，行级预留）、一凭证多应用（建议多授权）、**跨属主授权**（建议维持不允许）。
     - **拍板结论（2026-09-30，需求方逐项确认）**：D119 纯只读 / D120 API Key 先行（`acc_credential.type` 预留 `oauth_token`）/ D121 配额＝请求数 + 行数（日·分双窗，按凭证而非 IP）/ D122 审计＝元数据 + 参数摘要（90 天，独立 `acc_audit`）/ **D123 展示页取数收窄至展示应用级**（`:slug/disp/:id/api/app/:appCode/**`，旧站点级路径退役，Q6 取 (a)）/ D124 对外契约独立 + `/v1/` 版本号 / D125 `scope`＝表 + 字段 + 操作（仅收窄暴露三开关并集，`rowFilter` 预留）/ D126 **凭证即授权**（不建 `acc_grant`，一凭证一应用）/ D127 跨属主维持不允许 / D128 A+B 合期、C 另立。全文见 `docs/P15/PRD-P15-OPEN-ACCESS.md` §2。
     - **须修订对象**：D115 / R125（升格为「主体化授权链」）、R124（取数相对路径＝D123 的 `:slug/disp/:id/api/app/:appCode/**`）、API.md §22（新增「对外开放接入」，见 `API-P15-增补.md`）、ARCHITECTURE.md §31（见 `ARCHITECTURE-P15-增补.md`）、PLATFORM-GUIDE.md、本文件。
-    - **交付回执（2026-09-30，T132~~T138 全部完成）**：见「P15 任务拆解」与文末 P15 回执——`smoke:ext` **31/31**（含 P14 边界①闭合实测）、`check:ai` **19/19**、`smoke:ai` **8/8**（销项 P14 遗留②）、双端静态检查与生产构建零错；实现细节见 ARCHITECTURE §31 / API §22。**MCP 适配器（原 P15-C）下期另立**（D129/D130 已预登记：平台远程托管 + 铁律 7 特批 `@modelcontextprotocol/sdk`）。
+
+37. （2026-10-01 登记，**待需求方追认：P15-C 两处口径**）**MCP 适配器交付后的两点登记建议**——二者均非缺陷，而是「需求基线与实现实测」的差异，需需求方追认：
+    - **① 依赖口径：新依赖实际为 +2**。D130 只特批 `@modelcontextprotocol/sdk`，但 SDK 的工具入参**只接受 zod 形态**（`AnySchema = z3.ZodTypeAny | z4.$ZodType`，不支持 JSON Schema / Standard Schema），而 `zod` 在 SDK 中仅是 `peerDependency`——pnpm 隔离下不显式声明则任何工具的 `inputSchema` 都无法交付（省略则客户端 LLM 不知参数结构，违反验收 #2）。故已与 SDK 同批引入 `zod ^3.25`（实际版本由 `pnpm-lock.yaml` 锁定为 3.25.76）。**建议：登记 D135「SDK 工具入参依赖 zod，随 SDK 同批引入」，或把 D130 的「唯一新依赖」修订为「SDK + zod 两项」**。取证：`apps/api/package.json`、API §23.7 ④。
+    - **② SDK 类型缺陷的工程处置**：`McpServer.registerTool` 泛型在 TS 5.8 + zod 3.25 下**必然**触发 `TS2589`（连 `z.array(z.string()).optional()` 这种最浅链式类型都炸，编译堆加至 4 GB 仍失败）。处置为 `apps/api/src/modules/access/mcp/tool-registry.ts` 内**单点** `as unknown as` 收敛签名（运行时零差异：SDK 原方法、zod 校验、JSON Schema 下发全部照常）。**建议不修订任何决策 / 规则**（属实现层权宜），仅在 ARCH §32.11 留档；SDK 后续修复类型后删除该文件即可。取证：ARCHITECTURE.md §32.11、API §23.7 ⑤。
+    - **关联（文档校正，无需另行拍板，但请知悉）**：需求基线三处措辞已按实测校正并收编——`iplat_get_schema` 返回 `{ app, tables }`（验收 #3 要求与 REST 逐字段一致，故不加 `appCode`）、`50021` 不在 MCP 错误面（属凭证 scope 管理侧）、zod 边界违例表现为工具结果 `-32602`。详见 API §23.7 ①~③。
+
+38. （2026-10-01 登记，**待需求方评估：附件流未纳入凭证 scope 收窄**）**对外附件流端点不做 `scope` 校验**（REST `GET /api/ext/v1/app/:appCode/files/:fileId/stream` 与 MCP 侧同源）——准入只看「引用索引（`app_attachment_ref`）+ 表·字段暴露」，实现见 `apps/api/src/modules/app/pub/pub-data.service.ts` 的 `attachmentStream`；与同组 `records` / `detail` 端点的 `assertTableInScope`（scope 交集）口径**不一致**。
+    - **后果**：凭证 `scope` 只含 A 表时，只要 B 表与其附件字段已暴露、且 B 表某行引用了该文件，仍可下载该附件（跨 scope 读到文件流）。
+    - **实际风险低**：`fileId` 为 UUID 级、不可猜，且只在已授权取数结果中出现；但这与「scope 即授权边界」的设计口径不符。
+    - **取证**：`smoke:ext` 第 7 段（走查 C3）为规避该边界，特意让凭证 C 的 scope 含 `album` 表；`attachmentStream` 源码未引用 scope。
+    - **建议**：① 若收窄——在 `publicAttachment` 链路上按「引用表 + 字段」做 scope 交集判定（与 records 同源），并补一条 smoke 用例；② 若维持——在 API §22.2 明示「附件流按暴露三开关判定，不受 scope 收窄」，把口径写实。
+    - **交付回执（2026-09-30，T132~~T138 全部完成）**：见「P15 任务拆解」与文末 P15 回执——`smoke:ext` **41/41**（含 P14 边界①闭合实测；交付时 35/35，2026-10-01 按走查 C1~C3 补 6 项）、`check:ai` **19/19**、`smoke:ai` **8/8**（销项 P14 遗留②）、双端静态检查与生产构建零错；实现细节见 ARCHITECTURE §31 / API §22。**MCP 适配器原计划下期另立，已于 2026-10-01 作为 P15-C 交付**（T139~~T143，见「P15-C 任务拆解」与文末回执）。
 
 ## 完成记录
 
@@ -1750,6 +1783,20 @@ P12 尾巴（T122）已销项：铁律 3 / ARCH §6.2 文本修订、里程碑�
 
 ---
 
+> 2026-10-01：**P15-C MCP 适配器（T139~~T143）全部完成**（ARCHITECTURE §32 / API §23 已并入；ARCH §31.9 第 1 条由「下期」校正为「已落地」）。增量：**+1 HTTP 端点（`POST /api/ext/mcp`；GET/DELETE 405）/ +3 对外 MCP 工具（`iplat_` 前缀冻结）/ 零新表 / 零新错误码（下一可用仍 50022）/ 零新配置键 / 零内部 AI 工具变动（43 不变）/ +2 新依赖（`@modelcontextprotocol/sdk` ^1.31 + `zod` ^3.25）/ +1 验收资产（`smoke:mcp`，36 项）**。
+> **落地**：① **无状态端点**（每请求独立 `McpServer` + `StreamableHTTPServerTransport`，`sessionIdGenerator: undefined` + `enableJsonResponse`，响应结束即销毁）——无会话存储、Redis 零新增键、无 SSE 长连接；`GET`/`DELETE` → **405 + `Allow: POST`**（守卫只挂 POST，否则未认证 GET 先撞 401、405 不可达）；② **工具三件套**——`iplat_get_schema` / `iplat_query_records` / `iplat_get_record`，与 REST v1 端点**共用同一取数实现与同一游标编码器**（`AppFacade` + `ExtContractService`），输出 `structuredContent` + `content[0].text` 双形态；③ **配额与审计**——每 JSON-RPC POST 计 1 次请求（含 initialize / tools/list）、行数事后记账、`mcp.initialize` / `mcp.tools.list` / `mcp.tools.call` 落 `acc_audit`（摘要 ≤512 且不含 secret）、401 由守卫留痕（端点名 `mcp`）；④ **客户端可用**——API §23.6 给出 Claude Desktop（mcp-remote）/ Cursor / curl 三种配置。
+> **验证证据（本轮实测）**：① **`pnpm smoke:mcp` 36/36**（新增可重跑资产 `scripts/smoke-mcp.ts`）——端点传输 6（405 + Allow / 伪路径 40400 / 无·伪凭证 401 + `WWW-Authenticate` + 50019）、握手与工具集 6（initialize + `capabilities.tools` / `X-RateLimit-*` / 恰好三件套 / inputSchema 合法 / 描述不含内部信息）、**跨协议一致 9**（schema 逐字段一致 / 双形态同内容 / records 同参同结果 / **游标双向混用** / 末页 `nextCursor=null` / 详情一致 / 行数记账）、工具负例 4（越权表 40400 / 行不存在 40400 / size 超限 -32602 / filter 格式 40001）、配额 3（**实测 121 次探测触发 429 + `Retry-After` + `X-RateLimit-*` + 42900**）、审计 8（三主事件齐备 / 摘要含工具名且 ≤512 且不含 secret / 行数记账 / 42900 落表 / 401 守卫留痕 `ownerId=0`）；② 回归 **`check:ai` 19/19 + `smoke:ai` 8/8 + `smoke:ext` 35/35**（验收 #8 全绿）；③ api `tsc` 零错。
+> **实测发现并修正 4 处（静态检查查不出，均由端到端冒烟 / 实测捕获）**：**(a) 405 不可达**——守卫挂类级时未认证的 GET 先撞 401（修复：守卫下移至 POST）；**(b) zod 边界违例的表现形态**——SDK 不抛 JSON-RPC `error` 帧，而是包成工具结果 `isError=true` + 文本含 `-32602`（断言按实测校正）；**(c) 429 响应缺 `X-RateLimit-*`**（验收 #6 要求；修复：MCP 控制器在超限分支也回带剩余量）；**(d) 审计检索窗口**——配额探测的 121 条流水会把早前事件挤出默认窗口（脚本改为按凭证过滤）。
+> **待需求方追认两项**（「遗留问题」37）：① 新依赖实际 **+2**——SDK 的工具入参只接受 zod 形态（`AnySchema = z3.ZodTypeAny | z4.$ZodType`），而 zod 在 SDK 中仅 `peerDependency`，pnpm 隔离下必须显式声明，否则工具无法交付 `inputSchema`（建议登记 **D135** 或修订 D130 的依赖口径）；② SDK `registerTool` 泛型的 **TS2589** 处置（`mcp/tool-registry.ts` 单点类型切断，运行时零差异；建议不修订决策，仅 ARCH §32.11 留档）。另有三处需求基线措辞已按实测校正收编（API §23.7 ①~③：`get_schema` 返回 `{ app, tables }`、`50021` 不在 MCP 错误面、zod 边界违例表现形态）。
+
+> 2026-10-01：**P15 走查（`docs/P15/走查报告-P15.md`）全部销项**——卫生项 **S-1/S-2** 与 3 项待澄清 **C1~C3** 均已闭环，`smoke:ext` 由 35/35 扩至 **41/41**。
+> **S-1/S-2（走查标注「CodeBuddy 顺手修」）**：① T138 行冒烟数 `31/31` → `41/41`（本文件三处：任务表 / 遗留 36 回执 / P15 回执）；② T133 行补明「旧站点级路径退役表现＝**HTTP 200 + code 40400**」（请求落到站点静态通配后由「首段 `api`」双保险拦下，非 HTTP 404），与 API §22.9 / ARCH §31.10 口径对齐。
+> **C1 重复 keyId 冲突提示**：`ik_` keyId 为 16 字节 base62（服务端签发、调用方无法指定），冲突分支**无法端到端构造**，故闭环取两条证据：① **DB 侧**——`smoke:ext` 直接插入占用同 keyId 的记录，断言 `uk_cred_keyid` 拒绝（P2002）；② **应用侧修复**——`CredentialService.create` 改经 `insertCredential` 落库，命中 P2002 时**换新 keyId 自动重试一次**（重试仍冲突才抛错），不再把唯一冲突暴露为 50000 内部错误。取证：`credential.service.ts` 的 `insertCredential` / `isKeyIdConflict`。
+> **C2 scope 字段通配**：`smoke:ext` 新增「`scope.fields.book = ['*']` → 50021」用例（R133 只允许暴露字段的字面名），实测通过。
+> **C3 附件流端到端**：`smoke:ext` 新增第 7 段 4 条——上传两个文件（一个被 `album.cover` 引用、一个孤立）+ album 表与字段暴露 + 凭证 C（scope = album），断言「附件流 200 且内容可达」「ETag / Accept-Ranges 齐全」「未被引用的文件 → 40400」「不存在的文件 → 40400」。
+> **顺带修复的既有隐患**：`smoke:ext` 此前创建的凭证从不清理，多次运行会累积到 `access.maxCredentialsPerUser`（默认 20）上限后失败；现于 finally 中统一吊销。
+> **全量回归（2026-10-01 实测）**：`smoke:ext` **41/41**、`smoke:mcp` **36/36**、`check:ai` **19/19**、`smoke:ai` **8/8**；api `tsc` / ESLint 零错。
+
 ## 更新规则（AI 必读）
 
 1. 每完成一个任务：把状态改为"已完成"、填日期、在"完成记录"追加一行简述
@@ -1809,7 +1856,7 @@ P12 尾巴（T122）已销项：铁律 3 / ARCH §6.2 文本修订、里程碑�
 
 > 2026-09-30（晚）：**P15 对外开放接入层（T132~~T138）全部完成**（ARCHITECTURE §31 / API §22 已并入）。增量：**+1 域（access）+2 表（`acc_credential` / `acc_audit`，迁移 `20260930120000_add_access_domain` 已应用）/ +11 HTTP 端点（管理侧 7 + 对外 4；开放层 4 端点改路径）/ +3 错误码（50019~50021）/ +1 配置组（`ACCESS_*`）/ 零新依赖 / AI 工具零新增（43 不变）**。
 > **落地**：① **地基收敛**——`DisplayFacade.assertCanRead(appId, principal)` 主体化（新增 `AccessPrincipal` 类型）、开放层取数路径收窄为 `:slug/disp/:id/api/app/:appCode/**`、旧站点级路径退役、路由双保险（声明顺序 + 静态 `disp/:id/api/` 排除）；② **新域 access**——凭证生命周期六端点（`ik_`+base62 keyId / sha256 存储 / 密钥一次性返回 / 吊销·轮换即时生效）、对外四端点 `/api/ext/v1/**`（契约冻结层 + 游标分页 + scope 交集）、按 principal 的配额（请求数分·日双窗 + 返回行数日窗）、接入审计（异步缓冲 5s/100 条落表 + 90 天清理 + 属主检索）、`AccessFacade.writeAudit` 承接匿名层埋点；③ **前端**「接入凭证」页（列表 / 新建 / **密钥一次性展示与复制** / 轮换 / 吊销 / scope 编辑 / 用量 / 审计抽屉）+ seed 菜单一条；④ **文案链**——站点 README 三模板取数节与 `create_display_app` / `authorize_data_app` 文案改为同源相对路径 `./api/app/<appCode>/...`（站点根页面用绝对路径）。
-> **验证证据（本轮实测）**：① **`pnpm smoke:ext` 35/35**（本期新增可重跑资产 `scripts/smoke-ext-access.ts`）——凭证生命周期 6（secret 仅一次 / scope 越界 50021）、对外取数 9（schema·列表·详情 / scope 字段收窄 / 越权表 40400 / 游标与 sort 不一致 40001 / **默认排序不重复** / **单调键下边拉边写不重不漏 65 行**）、错误语义 8（无凭证 **HTTP 401 + `WWW-Authenticate` + 50019** / appCode 不匹配 40400 / `is_public=0` 40400 / 轮换后旧 secret 立即 401 / 吊销后立即 401 / 已吊销不可轮换 40001）、开放层粒度 3（被授权展示应用 200 / **同站点另一未授权展示应用 40400（P14 边界①闭合）** / 旧路径 40400）、审计 5（cred 主体落表 / 负例落表 / 成功记录返回行数 / 401 系统流水 / 匿名层 display 主体落表）、**静态文件正例 4**（目录按需创建 / 静态入口 200 且含页面标记 / 页面内同源相对路径取数 / 无文件展示应用 40400）；② `check:ai` **19/19**（三段字数 **通用版 964/1000、能力清单 978/1200、合注 1993/2000**——「接入凭证」并入应用中心条目，腾挪 18 字后净增 5 字）；③ `pnpm smoke:ai` **8/8**（F/I/J/K/L/M/N/O，**销项 P14 遗留②**）；④ 双端 `tsc` / `vue-tsc` / ESLint 零错；⑤ `seed` 已跑（新增菜单「接入凭证」1 条）；⑥ 迁移已应用 + Prisma client 已生成。
+> **验证证据（本轮实测）**：① **`pnpm smoke:ext` 41/41**（本期新增可重跑资产 `scripts/smoke-ext-access.ts`；交付时 35/35，2026-10-01 按走查 C1~C3 补 6 项）——凭证生命周期 6（secret 仅一次 / scope 越界 50021）、对外取数 9（schema·列表·详情 / scope 字段收窄 / 越权表 40400 / 游标与 sort 不一致 40001 / **默认排序不重复** / **单调键下边拉边写不重不漏 65 行**）、错误语义 8（无凭证 **HTTP 401 + `WWW-Authenticate` + 50019** / appCode 不匹配 40400 / `is_public=0` 40400 / 轮换后旧 secret 立即 401 / 吊销后立即 401 / 已吊销不可轮换 40001）、开放层粒度 3（被授权展示应用 200 / **同站点另一未授权展示应用 40400（P14 边界①闭合）** / 旧路径 40400）、审计 5（cred 主体落表 / 负例落表 / 成功记录返回行数 / 401 系统流水 / 匿名层 display 主体落表）、**静态文件正例 4**（目录按需创建 / 静态入口 200 且含页面标记 / 页面内同源相对路径取数 / 无文件展示应用 40400）；② `check:ai` **19/19**（三段字数 **通用版 964/1000、能力清单 978/1200、合注 1993/2000**——「接入凭证」并入应用中心条目，腾挪 18 字后净增 5 字）；③ `pnpm smoke:ai` **8/8**（F/I/J/K/L/M/N/O，**销项 P14 遗留②**）；④ 双端 `tsc` / `vue-tsc` / ESLint 零错；⑤ `seed` 已跑（新增菜单「接入凭证」1 条）；⑥ 迁移已应用 + Prisma client 已生成。
 > **实测发现并修复的 3 个缺陷（静态检查查不出，均由端到端冒烟捕获）**：**(a) 游标值类型漂移**——`Date` 经 base64url(JSON) 往返变 ISO 串、与库内 `Date` 不可比 → 时间字段排序翻页返回**空页**（修复：比较与游标写入共用 `cursorValue` 归一）；**(b) 审计 rows / table 恒空**——对外四端点漏调 `markAudit`（拦截器唯一的「登记点」始终为空）→ 审计只剩 endpoint 兜底值（修复：四端点各补一次 `markAudit`）；**(c) 详情形状未解包**——内部取数执行器返回 `{op,row}`，对外直出导致 `data.rowId` 缺失（修复：契约层只出 `row`）。
 > **本轮登记的边界（详见 ARCHITECTURE §31.4 / §31.6）**：① 「不重不漏」仅在**单调排序键**（如 `sort=createdAt:asc`）下成立；默认 `rowId` 是随机 UUID（非单调），此时只保证「不重」——已在文档与冒烟断言中固化，**不视为缺陷**；② 旧站点级取数路径的实际退役表现是 **HTTP 200 + code 40400**（请求落到站点静态通配后由「首段 api」双保险拦下），而非 HTTP 404；③ 存量展示页按「预期破坏窗口」处理（用户重新生成或手改取数路径，不动用户文件）。
 > **补验（同日，用户重启 API 后实测）**：① **展示应用静态文件正例已补**（冒烟第 6 节，计入 35/35）：`ensureFolder` 按需建 `{站点根}/disp/{id}` → 上传 `index.html` → 匿名 `GET /api/open/:slug/disp/{id}/` 返回 200 且含页面标记 → 页面内同源相对路径取数可用（开放层沿用 P14 `{list,total,pageNo,pageSize}` 形状）→ 同站点另一展示应用（无文件）40400 —— **P14 遗留③ 销项**；② **浏览器人工复验完成**（真实登录 → 「应用中心 ▸ 接入凭证」）：页面与菜单渲染、列表（用量回填 / 已删除应用兜底 / Key 仅显前缀）、**新建弹窗**（应用选择 → 暴露表加载 → 字段级收窄 → 提交）、**密钥一次性展示**（完整 Key 仅此一次；未复制时底部按钮为禁用的「请先复制密钥」→ 复制后解锁为「我已保存，关闭」）、**轮换**（标题「新密钥已生成（仅显示一次）」+「（旧密钥已立即失效）」+ keyId 不变）、**审计抽屉**（主体 `展示应用 #N` / `凭证 #N` 区分、端点 / 表 / 行数 / 耗时 / 结果标签，40400 与 40001 负例如实记录）—— **P14 遗留④ 销项**；复验中发现并修复 1 处 UI 文案缺陷（Alert 内 Markdown 星号原样显示 → 改 `<b>` 强调）；③ `pnpm -C apps/web build`（vite 生产构建）**已通过（28.03s）** —— **P14 遗留① 销项**；④ 仍为演进预留（未实现）：行级 `rowFilter`（D125）/ OAuth2 client_credentials（D120）/ **MCP 适配器（D129/D130，已预登记特批 `@modelcontextprotocol/sdk`）**；⑤ **交付后反馈修复**：新建 / 入册数据应用后「应用中心」动态菜单不刷新（需 F5）——新增 `router/dynamic.ts` 的 `reloadMenus()` 并接入 5 处操作 + 凭证页下拉刷新，浏览器实测菜单即时更新（详见「完成记录」同日条目）。

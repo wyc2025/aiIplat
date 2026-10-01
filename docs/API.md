@@ -1685,7 +1685,7 @@ system 动态追加（不计手册 2000 字帽，上限 20 条，R84）：
 
 ### 22.8 验收实测（T138 回执摘要）
 
-- **`pnpm smoke:ext`（本期新增可重跑资产 `scripts/smoke-ext-access.ts`）35/35 通过**：凭证生命周期 6 项、对外取数 9 项（含游标翻页不重 / 单调键不重不漏 / scope 收窄 / 越权 40400）、错误语义 8 项（401+WWW-Authenticate、非匹配 appCode、`is_public=0`、轮换与吊销即时性）、开放层粒度 3 项（展示应用级收窄 + 旧路径 40400）、审计 5 项（正例 / 负例 / 匿名层埋点 / 属主检索）、静态文件正例 4 项（目录按需创建 / 静态入口含页面标记 / 页面内同源取数 / 无文件应用 40400）。
+- **`pnpm smoke:ext`（本期新增可重跑资产 `scripts/smoke-ext-access.ts`）41/41 通过**（交付时 35/35；2026-10-01 按 P15 走查 C1~C3 补 6 项：keyId 唯一约束、scope 字段通配 50021、附件流端到端）：凭证生命周期 6 项、对外取数 9 项（含游标翻页不重 / 单调键不重不漏 / scope 收窄 / 越权 40400）、错误语义 8 项（401+WWW-Authenticate、非匹配 appCode、`is_public=0`、轮换与吊销即时性）、开放层粒度 3 项（展示应用级收窄 + 旧路径 40400）、审计 5 项（正例 / 负例 / 匿名层埋点 / 属主检索）、静态文件正例 4 项（目录按需创建 / 静态入口含页面标记 / 页面内同源取数 / 无文件应用 40400）。
 - `check:ai` 19/19；`smoke:ai` 8/8（F/I/J/K/L/M/N/O）；api `tsc` / web `vue-tsc` / ESLint 零错。
 
 ### 22.9 编号登记
@@ -1700,3 +1700,173 @@ system 动态追加（不计手册 2000 字帽，上限 20 条，R84）：
 | DB        | +2 表（acc_credential / acc_audit）                        | ARCHITECTURE §31.2          |
 | AI 工具   | +0（43 不变；文案改动已跑 smoke:ai）                       | §22.7                       |
 | 新依赖    | +0（MCP SDK 特批属下期）                                   | PRD-P15 D130                |
+
+---
+
+## 23. P15-C：MCP 适配器（协议适配层）
+
+> 在 §22 的对外契约之上加**第二层协议适配**（REST 语义 → JSON-RPC 工具语义），让外部 Agent（Claude Desktop / Cursor 等）
+> 以 MCP 客户端身份读取已授权数据应用。**零新表、零新数据通道、零新错误码、零新配置键**（D129~~D134 / R142~~R146）。
+> 需求基线：`docs/P15C/`（PRD / ARCHITECTURE / API 三份增补）；本节为主文档收编，**§23.7 列出实施期实测校正**。
+
+### 23.1 端点与传输
+
+| 方法       | 路径           | 行为                                             |
+| ---------- | -------------- | ------------------------------------------------ |
+| POST       | `/api/ext/mcp` | Streamable HTTP（**无状态模式**），JSON-RPC 2.0  |
+| GET/DELETE | `/api/ext/mcp` | **405** + `Allow: POST` + `code=40001`（无条件） |
+
+请求头：
+
+```http
+Authorization: Bearer {keyId}.{secret}
+Content-Type: application/json
+Accept: application/json, text/event-stream
+```
+
+- **凭证即隐含应用**（D126 推论）：端点不带 `appCode`，由凭证行解析应用；凭证绑定应用须**未软删且 `is_public=1`**（否则 40400，与 §22.2 第 ③ 步同口径）。
+- **无状态**（D131）：每请求独立 `McpServer` + `StreamableHTTPServerTransport`（不生成 `sessionId`、不存会话、不开启服务端推送），响应结束即销毁 → 无会话存储、Redis 零新增键、横向扩容无障碍。
+- 响应体为 `application/json`（`enableJsonResponse`，非 SSE 流）；`GET`（SSE 流）/`DELETE`（会话终止）在无状态模式下本就不支持，**明确 405 优于静默 404**。
+- **405 不经过凭证守卫**（守卫只挂 POST）：405 不触任何数据与凭证逻辑，且 R142 要求「一律 405」。
+- **每个 JSON-RPC POST 计 1 次请求配额**（含 `initialize` / `tools/list`，防空握手刷接口）；行数配额仅在数据工具执行后记账。
+
+### 23.2 JSON-RPC 方法
+
+| 方法         | 说明                                                         |
+| ------------ | ------------------------------------------------------------ |
+| `initialize` | 握手；返回 `serverInfo`（`iplat-ext`）+ `capabilities.tools` |
+| `tools/list` | 返回恰好三个工具（§23.3），无第四个                          |
+| `tools/call` | 入参 `name` + `arguments`                                    |
+| 其余 / 通知  | 标准协议错误（SDK 自理）；审计 event 记 `mcp.{method}`       |
+
+### 23.3 工具定义（R143 冻结；名称带 `iplat_` 前缀，防客户端多服务器命名冲突）
+
+**`iplat_get_schema`**：入参 `{}`（无参）。返回 `{ app, tables }`——与 §22.2 `GET .../schema` 的 `data` 段**逐字段一致**（同一 `publicSchema` + 同一 scope 投影）。不计行数。
+
+**`iplat_query_records`**：分页读表，与 §22.2 列表端点同参同结果。
+
+| 入参     | 类型     | 说明                                                    |
+| -------- | -------- | ------------------------------------------------------- |
+| `table`  | string   | 必填；须 ∈ `scope.tables`（越权 → 40400）               |
+| `size`   | number   | 可选；1~50，缺省 20（R104）                             |
+| `cursor` | string   | 可选；上一页 `paging.nextCursor` 原样回传               |
+| `sort`   | string[] | 可选；≤2 项，形如 `"字段:asc"`（R104）                  |
+| `filter` | string[] | 可选；≤3 项，形如 `"字段:eq:值"` / `"字段:contains:值"` |
+| `expand` | string   | 可选；≤1 项                                             |
+
+返回 `{ data: [...], paging: { nextCursor, size } }`；**`nextCursor` 与 REST 的 `after` 跨协议可混用**（同一游标编码器）。行数按返回行数事后记账。
+
+**`iplat_get_record`**：入参 `table`（必填）+ `rowId`（必填）。返回 `{ data: {...} }`——与 §22.2 单条端点同源。行数记 1。
+
+**输出双形态（R143）**：每个工具结果同时给 `structuredContent`（JSON 对象）与 `content[0].text`（同一对象的 JSON 字符串，兼容旧客户端）。
+
+**工具描述**：面向外部 LLM，只陈述用途 + 关键约束（上限 / 必填项），不含内部实现、URL 与 secret。
+
+### 23.4 错误映射（R144，**实测口径**）
+
+**分层原则**：认证与配额在 **HTTP 层**（客户端可自动发现与重试），业务语义在**工具结果内**（Agent 读文本自纠）。
+
+| 场景                                                                 | 层       | 表现                                                           |
+| -------------------------------------------------------------------- | -------- | -------------------------------------------------------------- |
+| 无 / 伪 / 已吊销 / 已过期凭证                                        | HTTP     | `401` + `WWW-Authenticate: Bearer realm="iplat-ext"` + `50019` |
+| 请求 / 行数配额超限                                                  | HTTP     | `429` + `Retry-After` + `X-RateLimit-*` + `42900`              |
+| 方法不允许（GET / DELETE）                                           | HTTP     | `405` + `Allow: POST` + `40001`                                |
+| 表未暴露 / 越权行 / 应用不可见                                       | 工具结果 | `isError=true`，text 含 `40400`                                |
+| **入参形状 / 边界违例**（size>50、类型错、缺必填）                   | 工具结果 | `isError=true`，text 含 **`-32602`**（SDK 前置 zod 校验）      |
+| **入参语义违例**（filter/sort 格式、字段不存在、游标与 sort 不一致） | 工具结果 | `isError=true`，text 含 `40001`                                |
+| 未知方法                                                             | JSON-RPC | 标准 `-32601`（SDK 自理）                                      |
+
+> 注：`50021`（scope 越界）**不在 MCP 错误面**——它是凭证 scope 创建 / 编辑期的错误（管理侧，§22.4），
+> 不在工具执行链上（详见 §23.7 ②）。
+
+### 23.5 配额与审计口径（R145）
+
+- **请求配额**：每个 JSON-RPC POST 计 1（`initialize` / `tools/list` / `tools/call` 均计），分钟窗 + 日窗，按**凭证**而非 IP。
+- **行数配额**：`iplat_query_records` 按返回行数、`iplat_get_record` 记 1 行，响应后记账。
+- **响应头**：成功与 `429` 均回带 `X-RateLimit-Remaining-Minute / -Day` / `X-RateLimit-Rows-Remaining-Day`。
+- **审计 event**：`mcp.initialize` / `mcp.tools.list` / `mcp.tools.call`（其余方法 `mcp.{method}`）；
+  `paramsSummary` = 工具名 + 入参摘要（≤512 字，**不含响应内容与 secret**）；401 由守卫留痕（`ownerId=0` 系统流水）。
+- **查询入口**：`GET /api/access/audits`（§22.4，属主隔离；`credentialId` 精确过滤）。
+
+### 23.6 客户端配置示例（D133 最小产品化）
+
+> 示例以各客户端当期官方文档为准；`<keyId>.<secret>` 为创建凭证时**一次性展示**的完整 Key。
+
+**Claude Desktop**（经 mcp-remote 代理）：
+
+```json
+{
+  "mcpServers": {
+    "iplat": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://<你的域名>/api/ext/mcp",
+        "--header",
+        "Authorization: Bearer <keyId>.<secret>"
+      ]
+    }
+  }
+}
+```
+
+**Cursor**（`.cursor/mcp.json`，原生支持远程 URL + 请求头）：
+
+```json
+{
+  "mcpServers": {
+    "iplat": {
+      "url": "https://<你的域名>/api/ext/mcp",
+      "headers": { "Authorization": "Bearer <keyId>.<secret>" }
+    }
+  }
+}
+```
+
+**curl 冒烟**：
+
+```bash
+curl -X POST https://<你的域名>/api/ext/mcp \
+  -H "Authorization: Bearer <keyId>.<secret>" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+### 23.7 实施期实测校正（相对需求基线 `docs/P15C/`）
+
+实施与 `smoke:mcp`（36 项）实测出以下 6 处偏差，**以本节与代码为准**：
+
+1. **`iplat_get_schema` 返回形状**：基线写 `{ appCode, tables }`，实现为 `{ app, tables }`——
+   验收 #3 要求「与 REST `GET .../schema` 逐字段一致」，而 REST 的 `data` 段是 `{ app, tables }`（§22.2）。
+   加 `appCode` 会破坏逐字段比对，故以验收标准为准（工具调用方本就知道自己在读哪个应用，凭证即隐含应用）。
+2. **`50021` 不出现于工具结果**：基线 §23.4 列了「字段通配 `*` → `50021`」，但查询链没有任何路径接受通配符，
+   且 `50021` 属凭证 `scope` 校验（管理侧）。工具层的入参违例实际分两层（见 §23.4 表）。
+3. **SDK 前置校验的表现形态**：zod 边界/形状违例由 SDK 在进入工具前拒绝，**表现为工具结果 `isError=true` + 文本含
+   `-32602`**（SDK 不抛 JSON-RPC `error` 帧）。这属 SDK 实现细节，R144 的「协议层错误」在实测口径下即此形态。
+4. **新依赖为 `+2`（`@modelcontextprotocol/sdk` + `zod`）**：D130 只特批了 SDK，但 **SDK 的工具入参只接受 zod 形态**
+   （`AnySchema = z3.ZodTypeAny | z4.$ZodType`，不支持 JSON Schema / Standard Schema），而 `zod` 在 SDK 中仅是
+   `peerDependency`——pnpm 隔离下不显式声明则工具连 `inputSchema` 都无法声明（省略则客户端 LLM 不知参数结构，违反验收 #2）。
+   故 `zod ^3.25` 与 SDK 同批引入（版本由 `pnpm-lock.yaml` 锁定）。**建议登记为 D135 或修订 D130 的依赖口径。**
+5. **工具注册出口 `mcp/tool-registry.ts`（唯一类型切断点）**：SDK 的 `registerTool` 泛型会对入参做逐键 `ShapeOutput`
+   展开并叠加 zod v3/v4 双版本兼容类型，实测在 TS 5.8 下**任何**调用都触发 `TS2589`（连 `z.array(z.string()).optional()`
+   都炸；加大编译堆至 4 GB 后仍失败）。处置：该文件内以 `as unknown as` 收敛 `registerTool` 签名，**运行时行为零差异**
+   （SDK 原方法、zod 校验照常、JSON Schema 照常下发），仅不再静态推导 handler 入参形状。SDK 修好类型后删该文件即可。
+6. **`405` 不经过凭证守卫**：基线只说「GET/DELETE → 405」，实现上把守卫从类级下移到 POST——
+   否则未认证的 GET 会先撞 401，405 永不可达（实测确认）。
+
+### 23.8 编号登记
+
+| 系列          | 本期使用                                      | 说明                          |
+| ------------- | --------------------------------------------- | ----------------------------- |
+| 决策          | D131（MCP 端点形态）；D129/D130 正式启用      | PRD-P15-C §2                  |
+| 规则          | R142~R146                                     | PRD-P15-C §3                  |
+| 任务          | T139~T143                                     | 见 PROGRESS「P15-C 任务拆解」 |
+| HTTP 端点     | +1（`POST /api/ext/mcp`；GET/DELETE 405）     | §23.1                         |
+| 对外 MCP 工具 | +3（`iplat_` 前缀冻结；加工具须先修订 R143）  | §23.3                         |
+| 错误码        | +0（下一可用仍为 `50022`）                    | §23.4                         |
+| 配置键        | +0                                            | —                             |
+| DB            | +0                                            | ARCHITECTURE §32.2            |
+| 内部 AI 工具  | +0（43 不变）                                 | §23.7                         |
+| 新依赖        | **+2**（`@modelcontextprotocol/sdk` + `zod`） | §23.7 ④                       |
+| 验收资产      | +1（`smoke:mcp`，36 项）                      | ARCHITECTURE §32.10           |
