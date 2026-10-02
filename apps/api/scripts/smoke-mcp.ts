@@ -289,6 +289,8 @@ async function main(): Promise<void> {
     })
     await ok(`/api/app/${appCode}/publish`, { method: 'PUT', json: { isPublic: 1 }, token })
 
+    // 直写夹具须**同步 `r_cN` 冗余列**（A 侧写路径由 `buildIndexColumns` 维护；filter / rowFilter
+    // 走这些列做 SQL 下推）。book 字段顺序 title → r_c1、score → r_c2（P17 T152 实测踩到）
     await prisma.appRecord.createMany({
       data: Array.from({ length: ROWS }, (_, index) => ({
         appId: appDef.id,
@@ -296,6 +298,8 @@ async function main(): Promise<void> {
         rowId: randomUUID(),
         data: { title: `书${String(index + 1).padStart(3, '0')}`, score: index + 1 },
         createdBy: appDef.ownerId,
+        rC1: `书${String(index + 1).padStart(3, '0')}`,
+        rC2: String(index + 1),
       })),
     })
 
@@ -671,6 +675,59 @@ async function main(): Promise<void> {
         '守卫留痕端点名为 mcp（非 unknown）',
         guardRows.some((row) => row.endpoint === 'mcp'),
         guardRows.map((row) => row.endpoint).join(','),
+      )
+    }
+    console.log('')
+
+    // ==================== 7. 行级过滤继承（P17 T152 / R148 + R150）====================
+    console.log('7. 行级过滤（凭证 rowFilter 经同一取数内核在 MCP 三件套透明生效）')
+    {
+      const rfCred = await ok<{ id: string; apiKey: string }>('/api/access/credentials', {
+        method: 'POST',
+        json: {
+          appCode,
+          name: `MCP-RF${stamp}`,
+          scope: { tables: ['book'], rowFilter: { book: ['score:eq:3'] } },
+        },
+        token,
+      })
+      credIds.push(rfCred.id)
+
+      const list = await callTool(rfCred.apiKey, 'iplat_query_records', { table: 'book', size: 50 })
+      const rows = (list.rpc?.result?.structuredContent?.data ?? []) as Array<
+        Record<string, unknown>
+      >
+      check(
+        'rowFilter 透明继承：query_records 只回符合条件的行（工具入参 / 描述不变）',
+        rows.length === 1 && rows[0].score === 3,
+        `len=${rows.length} score=${rows.map((row) => String(row.score)).join(',')}`,
+      )
+
+      const allowed = await callTool(rfCred.apiKey, 'iplat_get_record', {
+        table: 'book',
+        rowId: String(rows[0]?.rowId ?? ''),
+      })
+      check(
+        '详情：满足 rowFilter 的行可读（同源内核）',
+        allowed.rpc?.result?.isError !== true &&
+          (allowed.rpc?.result?.structuredContent?.data as Record<string, unknown> | undefined)
+            ?.score === 3,
+        `text=${resultText(allowed).slice(0, 60)}`,
+      )
+
+      // 同表另一行（score ≠ 3）：行存在但被 rowFilter 挡住 → 与 REST 同表现（isError + 40400）
+      const otherRow = await prisma.appRecord.findFirstOrThrow({
+        where: { tableId: bookTable.id, deletedAt: null, rC2: { not: '3' } },
+        select: { rowId: true },
+      })
+      const denied = await callTool(rfCred.apiKey, 'iplat_get_record', {
+        table: 'book',
+        rowId: otherRow.rowId,
+      })
+      check(
+        '详情：行存在但不满足 rowFilter → isError + 40400（与 REST detail 同源同表现）',
+        denied.rpc?.result?.isError === true && resultText(denied).includes('40400'),
+        `isError=${denied.rpc?.result?.isError} text=${resultText(denied).slice(0, 70)}`,
       )
     }
     console.log('')

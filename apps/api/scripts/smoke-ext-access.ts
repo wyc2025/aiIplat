@@ -755,6 +755,55 @@ async function main(): Promise<void> {
           apiKey: credC.apiKey,
         })
         check('不存在的文件 → 40400', missing.body?.code === 40400, `code=${missing.body?.code}`)
+
+        // ---- P17 T151（走查 W11 收窄）：附件流须过凭证 scope 交集（表 · 字段）----
+        // 与 records/detail 同口径（scope 即授权边界）；越界引用视同「未引用」→ 40400（防探测不裂缝）
+        const credNoScope = await ok<{ id: string; apiKey: string }>('/api/access/credentials', {
+          method: 'POST',
+          json: { appCode, name: `无附件表${stamp}`, scope: { tables: ['book'] } },
+          token,
+        })
+        credIds.push(credNoScope.id)
+        const outOfScope = await call(`/api/ext/v1/app/${appCode}/files/${fileId}/stream`, {
+          apiKey: credNoScope.apiKey,
+        })
+        check(
+          'W11：凭证 scope 不含该表 → 附件流 40400（表级交集生效）',
+          outOfScope.body?.code === 40400,
+          `code=${outOfScope.body?.code}`,
+        )
+
+        const credFieldScope = await ok<{ id: string; apiKey: string }>('/api/access/credentials', {
+          method: 'POST',
+          json: {
+            appCode,
+            name: `附件字段收窄${stamp}`,
+            scope: { tables: ['album'], fields: { album: ['title'] } },
+          },
+          token,
+        })
+        credIds.push(credFieldScope.id)
+        const fieldOut = await call(`/api/ext/v1/app/${appCode}/files/${fileId}/stream`, {
+          apiKey: credFieldScope.apiKey,
+        })
+        check(
+          'W11：scope 字段不含该附件字段 → 40400（字段级交集生效）',
+          fieldOut.body?.code === 40400,
+          `code=${fieldOut.body?.code}`,
+        )
+        await ok(`/api/access/credentials/${credFieldScope.id}`, {
+          method: 'PUT',
+          json: { scope: { tables: ['album'], fields: { album: ['title', 'cover'] } } },
+          token,
+        })
+        const fieldIn = await call(`/api/ext/v1/app/${appCode}/files/${fileId}/stream`, {
+          apiKey: credFieldScope.apiKey,
+        })
+        check(
+          'W11：字段口径补回该附件字段 → 200（放行，无需换凭证）',
+          fieldIn.status === 200 && fieldIn.text.includes('IPLAT-ATTACH-OK'),
+          `status=${fieldIn.status} len=${fieldIn.text.length}`,
+        )
       } catch (error) {
         check('附件流端到端（C3）', false, (error as Error).message)
       }
@@ -765,6 +814,234 @@ async function main(): Promise<void> {
             .update({ where: { id: BigInt(id) }, data: { deletedAt: new Date() } })
             .catch(() => undefined)
         }
+      }
+    }
+
+    // ==================== 8. 行级过滤 rowFilter（P17 T152 / R147~R149）====================
+    console.log('8. 行级过滤（管理侧 50021 / 取数收窄与交集 / 详情判拒 / 失效判拒与自愈）')
+    {
+      try {
+        // 夹具：post 表（title / status / qty）+ 3 行（两 published、一 draft），字段全暴露
+        await ok(`/api/app/${appCode}/tables`, {
+          method: 'POST',
+          json: {
+            name: 'post',
+            label: '文章',
+            fields: [
+              { name: 'title', label: '标题', type: 'text' },
+              { name: 'status', label: '状态', type: 'text' },
+              { name: 'qty', label: '数量', type: 'number' },
+            ],
+          },
+          token,
+        })
+        const postTable = await prisma.appTable.findFirstOrThrow({
+          where: { appId: appDef.id, name: 'post', deletedAt: null },
+          select: { id: true },
+        })
+        await ok(`/api/app/${appCode}/tables/${postTable.id.toString()}/expose`, {
+          method: 'PUT',
+          json: { isExposed: 1 },
+          token,
+        })
+        // 字段顺序（sort asc, id asc）＝ A 侧 `indexSlots` 的槽位口径（前 5 个非系统字段 → r_c1..c5）
+        const postFields = await prisma.appField.findMany({
+          where: { tableId: postTable.id, isDeleted: 0 },
+          orderBy: [{ sort: 'asc' }, { id: 'asc' }],
+          select: { id: true, name: true },
+        })
+        for (const field of postFields) {
+          await ok(`/api/app/${appCode}/fields/${field.id.toString()}/expose`, {
+            method: 'PUT',
+            json: { isExposed: 1 },
+            token,
+          })
+        }
+        // 直写夹具须**同步 `r_cN` 冗余列**：A 侧写路径由 `buildIndexColumns` 维护，filter（含 rowFilter）
+        // 走这些列做 SQL 下推；只写 `data` 会让 WHERE 匹配不到行（本脚本 2026-10-02 实测踩到）
+        const slotOf = new Map(postFields.map((field, index) => [field.name, index + 1] as const))
+        for (const item of [
+          { title: `甲${stamp}`, status: 'published', qty: 10 },
+          { title: `乙${stamp}`, status: 'draft', qty: 20 },
+          { title: `丙${stamp}`, status: 'published', qty: 30 },
+        ]) {
+          const indexColumns: Record<string, string> = {}
+          for (const [name, slot] of slotOf) {
+            indexColumns[`rC${slot}`] = String((item as Record<string, unknown>)[name])
+          }
+          await prisma.appRecord.create({
+            data: {
+              appId: appDef.id,
+              tableId: postTable.id,
+              rowId: randomUUID(),
+              data: item,
+              createdBy: appDef.ownerId,
+              ...indexColumns,
+            },
+          })
+        }
+
+        // ---- 8.1 管理侧校验（R147）：非法 rowFilter → 50021，errmsg 指明条目 ----
+        const badCases: Array<[string, Record<string, unknown>]> = [
+          ['表不在 scope', { tables: ['post'], rowFilter: { book: ['status:eq:published'] } }],
+          ['字段不存在', { tables: ['post'], rowFilter: { post: ['ghost:eq:1'] } }],
+          ['算子非法', { tables: ['post'], rowFilter: { post: ['status:like:x'] } }],
+          ['值类型不可解析', { tables: ['post'], rowFilter: { post: ['qty:eq:abc'] } }],
+          [
+            '条目超上限',
+            {
+              tables: ['post'],
+              rowFilter: { post: ['status:eq:a', 'status:eq:b', 'status:eq:c', 'status:eq:d'] },
+            },
+          ],
+        ]
+        for (const [label, scope] of badCases) {
+          const res = await call('/api/access/credentials', {
+            method: 'POST',
+            json: { appCode, name: `非法${stamp}`, scope },
+            token,
+          })
+          const message = typeof res.body?.message === 'string' ? (res.body.message as string) : ''
+          check(
+            `rowFilter 非法（${label}）→ 50021 且指明条目`,
+            res.body?.code === 50021 && message.includes('rowFilter'),
+            `code=${res.body?.code} msg=${message.slice(0, 60)}`,
+          )
+        }
+
+        // ---- 8.2 生效收窄 + 请求 filter 交集 + 冲突空页（R148）----
+        const credRf = await ok<{ id: string; apiKey: string }>('/api/access/credentials', {
+          method: 'POST',
+          json: {
+            appCode,
+            name: `行过滤${stamp}`,
+            scope: { tables: ['post'], rowFilter: { post: ['status:eq:published'] } },
+          },
+          token,
+        })
+        credIds.push(credRf.id)
+
+        const narrowed = await call(`/api/ext/v1/app/${appCode}/tables/post/records?size=50`, {
+          apiKey: credRf.apiKey,
+        })
+        const narrowedRows = (narrowed.body?.data ?? []) as Array<Record<string, unknown>>
+        check(
+          'rowFilter 生效：只回 published 行（收窄而非拒绝）',
+          narrowed.status === 200 &&
+            narrowedRows.length === 2 &&
+            narrowedRows.every((row) => row.status === 'published'),
+          `len=${narrowedRows.length} status=${narrowedRows.map((row) => String(row.status)).join(',')}`,
+        )
+
+        const intersected = await call(
+          `/api/ext/v1/app/${appCode}/tables/post/records?size=50&filter=qty:eq:30`,
+          { apiKey: credRf.apiKey },
+        )
+        const interRows = (intersected.body?.data ?? []) as Array<Record<string, unknown>>
+        check(
+          'rowFilter 与请求 filter 取交集（AND 无优先级）',
+          intersected.status === 200 &&
+            interRows.length === 1 &&
+            interRows[0].qty === 30 &&
+            interRows[0].status === 'published',
+          `len=${interRows.length}`,
+        )
+
+        const conflict = await call(
+          `/api/ext/v1/app/${appCode}/tables/post/records?size=50&filter=status:eq:draft`,
+          { apiKey: credRf.apiKey },
+        )
+        check(
+          '条件冲突 → code 0 空页（不报错）',
+          conflict.status === 200 &&
+            conflict.body?.code === 0 &&
+            (conflict.body?.data ?? []).length === 0,
+          `code=${conflict.body?.code} len=${(conflict.body?.data ?? []).length}`,
+        )
+
+        // ---- 8.3 详情判拒（R148）：行存在但不满足 rowFilter → 40400 ----
+        const allRows = await prisma.appRecord.findMany({
+          where: { tableId: postTable.id, deletedAt: null },
+          select: { rowId: true, data: true },
+        })
+        const publishedRow = allRows.find(
+          (row) => (row.data as Record<string, unknown>).status === 'published',
+        )
+        const draftRow = allRows.find(
+          (row) => (row.data as Record<string, unknown>).status === 'draft',
+        )
+        const detailOk = await call(
+          `/api/ext/v1/app/${appCode}/tables/post/records/${publishedRow?.rowId}`,
+          { apiKey: credRf.apiKey },
+        )
+        check(
+          '详情：满足 rowFilter 的行可读',
+          detailOk.status === 200 &&
+            detailOk.body?.code === 0 &&
+            detailOk.body?.data?.status === 'published',
+          `code=${detailOk.body?.code}`,
+        )
+        const detailDenied = await call(
+          `/api/ext/v1/app/${appCode}/tables/post/records/${draftRow?.rowId}`,
+          { apiKey: credRf.apiKey },
+        )
+        check(
+          '详情：行存在但不满足 rowFilter → 40400（与不存在同表现）',
+          detailDenied.body?.code === 40400,
+          `code=${detailDenied.body?.code}`,
+        )
+
+        // ---- 8.4 运行期失效判拒 + 自愈（R149）----
+        const statusField = postFields.find((field) => field.name === 'status')
+        await ok(`/api/app/${appCode}/fields/${statusField?.id.toString()}/expose`, {
+          method: 'PUT',
+          json: { isExposed: 0 },
+          token,
+        })
+        const afterOffline = await call(`/api/ext/v1/app/${appCode}/tables/post/records?size=50`, {
+          apiKey: credRf.apiKey,
+        })
+        check(
+          'rowFilter 引用字段取消暴露 → 该表 40400（判拒，不静默跳过）',
+          afterOffline.body?.code === 40400,
+          `code=${afterOffline.body?.code}`,
+        )
+        await ok(`/api/app/${appCode}/fields/${statusField?.id.toString()}/expose`, {
+          method: 'PUT',
+          json: { isExposed: 1 },
+          token,
+        })
+        const healed = await call(`/api/ext/v1/app/${appCode}/tables/post/records?size=50`, {
+          apiKey: credRf.apiKey,
+        })
+        check(
+          '恢复暴露 → 自愈可读（无需改凭证）',
+          healed.status === 200 && (healed.body?.data ?? []).length === 2,
+          `status=${healed.status} len=${(healed.body?.data ?? []).length}`,
+        )
+
+        // ---- 8.5 有效性自检：合法 rowFilter 可正常创建（防「一律拒绝」的假绿）----
+        const credRfOk = await call('/api/access/credentials', {
+          method: 'POST',
+          json: {
+            appCode,
+            name: `合法行过滤${stamp}`,
+            scope: {
+              tables: ['post'],
+              fields: { post: ['title', 'status', 'qty'] },
+              rowFilter: { post: ['status:eq:published', 'title:contains:甲'] },
+            },
+          },
+          token,
+        })
+        check(
+          '合法 rowFilter（含 contains）→ 创建成功',
+          credRfOk.body?.code === 0 && typeof credRfOk.body?.data?.apiKey === 'string',
+          `code=${credRfOk.body?.code} msg=${String(credRfOk.body?.message ?? '').slice(0, 60)}`,
+        )
+        if (credRfOk.body?.data?.id) credIds.push(credRfOk.body.data.id as string)
+      } catch (error) {
+        check('行级过滤端到端（P17）', false, (error as Error).message)
       }
     }
   } finally {
