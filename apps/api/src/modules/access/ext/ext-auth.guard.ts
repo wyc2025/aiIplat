@@ -9,7 +9,8 @@ import type { Request } from 'express'
 import { ErrorCode } from '../../../common/constants/error-code'
 import { AuditService } from '../audit/audit.service'
 import { CredentialService, type CredentialPrincipal } from '../credential/credential.service'
-import { parseBearerKey } from '../credential/credential.util'
+import { TokenStore } from '../credential/token-store'
+import { parseBearerKey, parseBearerToken } from '../credential/credential.util'
 import { extEndpointOf } from './ext-path.util'
 
 /** 携带凭证主体的请求（守卫解析结果；控制器与 T136 的配额 / 审计拦截器消费） */
@@ -43,27 +44,55 @@ export class CredentialUnauthorizedException extends HttpException {
 export class ExtAuthGuard implements CanActivate {
   constructor(
     private readonly credentialService: CredentialService,
+    private readonly tokens: TokenStore,
     private readonly audit: AuditService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<ExtRequest>()
     const started = Date.now()
-    const parsed = parseBearerKey(request.headers.authorization)
-    if (!parsed) {
-      this.recordUnauthorized(request, 'invalid', started)
-      throw new CredentialUnauthorizedException(
-        '缺少或非法的凭证（需 Authorization: Bearer {keyId}.{secret}）',
-      )
-    }
-    const principal = await this.credentialService.verify(parsed.keyId, parsed.secret)
+    const principal = await this.resolvePrincipal(request, started)
     if (!principal) {
-      this.recordUnauthorized(request, parsed.keyId, started)
-      throw new CredentialUnauthorizedException('凭证无效、已吊销或已过期')
+      throw new CredentialUnauthorizedException(
+        '凭证无效、已吊销或已过期（需 Authorization: Bearer {keyId}.{secret} 或 Bearer it_...）',
+      )
     }
     request.principal = principal
     void this.credentialService.touchLastUsed(principal.credentialId)
     return true
+  }
+
+  /**
+   * 双形态分派（P18 T156 / R153）：
+   *
+   * - `Bearer {keyId}.{secret}`（API Key）→ 凭证校验（`type` 须 `api_key`，D141）；
+   * - `Bearer it_...`（access token）→ Redis 查凭证 id → **再实查凭证行**校验有效性；
+   * - 其余形态 → `null`（统一 401，不区分原因）。
+   *
+   * **令牌路径为何还要回查 DB**：令牌只证明「持有者曾用正确 secret 换过令牌」，授权事实
+   * （scope / 是否吊销 / 是否过期）**永远以凭证行为准**——因此 scope 收窄、吊销、轮换、
+   * 凭证到期都对已签发令牌**即时生效**（R153/R154），无需逐令牌传播失效。
+   */
+  private async resolvePrincipal(
+    request: ExtRequest,
+    started: number,
+  ): Promise<CredentialPrincipal | null> {
+    const header = request.headers.authorization
+    const parsedKey = parseBearerKey(header)
+    if (parsedKey) {
+      const principal = await this.credentialService.verify(parsedKey.keyId, parsedKey.secret)
+      if (!principal) this.recordUnauthorized(request, parsedKey.keyId, started)
+      return principal
+    }
+    const token = parseBearerToken(header)
+    if (token) {
+      const credentialId = await this.tokens.resolve(token)
+      const principal = credentialId ? await this.credentialService.principalOf(credentialId) : null
+      if (!principal) this.recordUnauthorized(request, 'invalid', started)
+      return principal
+    }
+    this.recordUnauthorized(request, 'invalid', started)
+    return null
   }
 
   /**

@@ -108,3 +108,43 @@ export function parseBearerKey(
   if (secret.length < SECRET_MIN_LENGTH) return null
   return { keyId, secret }
 }
+
+// ==================== OAuth2 access token（P18 T155 / D139/R151） ====================
+
+/** access token 前缀（D139）：`it_` + base64url(32 字节) */
+export const ACCESS_TOKEN_PREFIX = 'it_'
+
+/** access token 形态：`it_` + 43 字符 base64url（32 字节定长） */
+const ACCESS_TOKEN_PATTERN = /^it_[A-Za-z0-9_-]{43}$/
+
+/**
+ * 签发 access token（D139）：32 字节随机 → base64url。
+ *
+ * **不透明令牌**（无结构、不含凭证信息）：仅作 Redis 查找键，映射回 credentialId；
+ * 不用 JWT 是因为 JWT 无吊销能力（要即时失效就得配黑名单，等于回到存储查找，白付复杂度）。
+ */
+export function issueAccessToken(): string {
+  return `${ACCESS_TOKEN_PREFIX}${randomBytes(32).toString('base64url')}`
+}
+
+/**
+ * 令牌摘要（R151）：`sha256(token)` hex —— Redis 只以摘要为键。
+ *
+ * 令牌与 secret 同等对待：原文不落库、不落日志、不进审计；即便 Redis 快照泄露也无法反推可用令牌。
+ */
+export function hashToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex')
+}
+
+/**
+ * 从 `Authorization` 头提取 access token（`Bearer it_...`；R153 双形态分派）。
+ *
+ * 形态不符返回 null，由调用方统一 401——与 `parseBearerKey` 同样不做存在性区分。
+ */
+export function parseBearerToken(header: string | undefined): string | null {
+  if (!header) return null
+  const match = /^Bearer\s+(\S+)$/i.exec(header.trim())
+  if (!match) return null
+  const token = match[1]
+  return ACCESS_TOKEN_PATTERN.test(token) ? token : null
+}

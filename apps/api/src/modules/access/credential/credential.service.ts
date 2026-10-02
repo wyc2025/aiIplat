@@ -2,7 +2,12 @@ import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { Prisma, type AccCredential } from '@prisma/client'
 import { ErrorCode } from '../../../common/constants/error-code'
-import { MAX_ROW_FILTER } from '../../../common/constants/credential.constant'
+import {
+  CREDENTIAL_TYPE_API_KEY,
+  CREDENTIAL_TYPES,
+  MAX_ROW_FILTER,
+  type CredentialType,
+} from '../../../common/constants/credential.constant'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import {
   coerceFilterValue,
@@ -19,6 +24,7 @@ import {
   type CredentialScopeInput,
 } from './credential.util'
 import type { CreateCredentialDto, UpdateCredentialDto } from './dto/credential.dto'
+import { TokenStore } from './token-store'
 
 /** 凭证状态：1 active / 0 revoked（吊销不可逆，R131） */
 export const CREDENTIAL_STATUS_ACTIVE = 1
@@ -38,6 +44,8 @@ export interface CredentialView {
   appCode: string
   appName: string
   scope: CredentialScope
+  /** 凭证形态（P18 D141）：`api_key` 直连资源端点 / `oauth` 换短时效令牌；创建后不可改 */
+  type: CredentialType
   /** 1 active / 0 revoked */
   status: number
   expiresAt: Date | null
@@ -86,6 +94,7 @@ export class CredentialService {
     private readonly config: ConfigService,
     private readonly appFacade: AppFacade,
     private readonly quota: QuotaService,
+    private readonly tokens: TokenStore,
   ) {}
 
   // ==================== 管理侧（R131：登录态 + 属主自服务） ====================
@@ -110,12 +119,15 @@ export class CredentialService {
     }
     // ③ scope 校验（越界 50021）
     const scope = this.buildScope(dto.scope, app.tables)
-    // ④ 签发 + 落库（keyId 唯一冲突自动换号重试，见 insertCredential）
+    // ④ 凭证形态（P18 D141）：缺省 api_key；创建后不可改，故只在此处校验一次
+    const type = this.resolveType(dto.type)
+    // ⑤ 签发 + 落库（keyId 唯一冲突自动换号重试，见 insertCredential）
     const { row, apiKey } = await this.insertCredential({
       ownerId: userId,
       appId: BigInt(app.appId),
       name: dto.name.trim(),
       scope: scope as unknown as Prisma.InputJsonValue,
+      type,
       expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
     })
     return {
@@ -152,6 +164,14 @@ export class CredentialService {
 
   /** 编辑（备注名 / scope / 过期时间；密钥不可改——改密钥请走轮换） */
   async update(userId: bigint, id: bigint, dto: UpdateCredentialDto): Promise<CredentialView> {
+    // 凭证形态创建后不可更改（P18 D141）：DTO 显式接收 type 只为给出明确错误
+    // （否则被全局 ValidationPipe 的 whitelist 静默剥离，用户以为改成功了）
+    if (dto.type !== undefined) {
+      throw new BusinessException(
+        ErrorCode.ParamInvalid,
+        '凭证类型创建后不可更改（如需更换请新建凭证）',
+      )
+    }
     const row = await this.requireOwned(userId, id)
     const data: Prisma.AccCredentialUncheckedUpdateInput = {}
     if (dto.name !== undefined) data.name = dto.name.trim()
@@ -170,10 +190,11 @@ export class CredentialService {
     return this.toView(updated, await this.appBriefOf(userId, row.appId))
   }
 
-  /** 吊销（不可逆，立即生效：校验不缓存，R131） */
+  /** 吊销（不可逆，立即生效：校验不缓存，R131）；已签发令牌一并即时失效（P18 R154） */
   async revoke(userId: bigint, id: bigint): Promise<{ ok: true; id: string }> {
     const row = await this.requireOwned(userId, id)
     await this.prisma.accCredential.update({ where: { id: row.id }, data: { status: 0 } })
+    await this.tokens.revokeAll(row.id)
     return { ok: true, id: row.id.toString() }
   }
 
@@ -191,6 +212,8 @@ export class CredentialService {
       where: { id: row.id },
       data: { secretHash: issued.secretHash, secretPrefix: issued.secretPrefix },
     })
+    // 旧 secret 立即失效 → 已签发令牌同步级联失效（P18 R154：不等 TTL）
+    await this.tokens.revokeAll(row.id)
     return {
       ...this.toView(updated, await this.appBriefOf(userId, row.appId)),
       apiKey: issued.apiKey,
@@ -202,17 +225,62 @@ export class CredentialService {
   // ==================== 对外校验（T135 守卫消费；R132 第 1 步） ====================
 
   /**
-   * 凭证校验（R130/R131）：缺头 / keyId 不存在 / 摘要不匹配 / 已吊销 / 已过期 → `null`。
+   * 资源端点的凭证校验（R130/R131；P18 D141 加形态准入）：keyId 不存在 / 摘要不匹配 / 已吊销 /
+   * 已过期 / **非 api_key 形态** → `null`。
    *
    * 刻意不区分失败原因——调用方（ext 守卫）统一 401 + `WWW-Authenticate`，不泄露任何存在性差异；
    * 不缓存（每次实查主键索引），保证吊销 / 轮换即时生效。
+   *
+   * `oauth` 型凭证的 secret 不得直连资源端点（须先经 `/api/ext/oauth/token` 换发令牌）——
+   * 否则「短时效令牌」的语义可以被绕过（长期 secret 直接当钥匙用）。
    */
   async verify(keyId: string, secret: string): Promise<CredentialPrincipal | null> {
+    const row = await this.loadVerified(keyId, secret)
+    if (!row || row.type !== CREDENTIAL_TYPE_API_KEY) return null
+    return this.toPrincipal(row)
+  }
+
+  /**
+   * 令牌端点专用校验（P18 D141/R152）：**不限形态**——任何有效凭证都可换 access token。
+   *
+   * 放宽的理由是迁移路径：存量 api_key 型凭证可渐进改用 OAuth 流程；资源端点仍只认
+   * api_key 直连，故语义边界依然清晰（形态差异只体现在「能不能直接当 Bearer 用」）。
+   */
+  async verifyForToken(keyId: string, secret: string): Promise<CredentialPrincipal | null> {
+    const row = await this.loadVerified(keyId, secret)
+    return row ? this.toPrincipal(row) : null
+  }
+
+  /**
+   * 主体解析（P18 R153；令牌路径用）：按凭证 id 实查凭证行并**重新校验有效性**。
+   *
+   * 令牌命中 Redis 后仍走这一步，是「scope / 吊销 / 到期即时生效」的实现方式：
+   * 不逐令牌传播失效，而是让授权事实每次都回凭证行取；此处不校验 `type`
+   * （令牌本就由 oauth 语义承载，且形态创建后不可改）。
+   */
+  async principalOf(credentialId: bigint): Promise<CredentialPrincipal | null> {
+    const row = await this.prisma.accCredential.findUnique({ where: { id: credentialId } })
+    if (!row) return null
+    if (row.status !== CREDENTIAL_STATUS_ACTIVE) return null
+    if (row.expiresAt && row.expiresAt.getTime() <= Date.now()) return null
+    return this.toPrincipal(row)
+  }
+
+  /** 凭证校验公共段：存在 + 摘要匹配 + 未吊销 + 未过期（实查不入缓存 → 变更即时生效） */
+  private async loadVerified(keyId: string, secret: string): Promise<AccCredential | null> {
     const row = await this.prisma.accCredential.findUnique({ where: { keyId } })
     if (!row) return null
     if (row.secretHash !== hashSecret(secret)) return null
     if (row.status !== CREDENTIAL_STATUS_ACTIVE) return null
     if (row.expiresAt && row.expiresAt.getTime() <= Date.now()) return null
+    return row
+  }
+
+  /**
+   * 凭证行 → 取数主体（R153）：令牌与 API Key 两条路径产出的**主体完全同构**，
+   * 故下游（配额 / 审计 / scope / rowFilter / MCP 工具链）零感知、零改动。
+   */
+  private toPrincipal(row: AccCredential): CredentialPrincipal {
     return {
       type: 'credential',
       credentialId: row.id,
@@ -220,6 +288,18 @@ export class CredentialService {
       appId: row.appId,
       scope: row.scope as unknown as CredentialScope,
     }
+  }
+
+  /** 凭证形态归一（P18 D141）：缺省 api_key；非法值 40001 */
+  private resolveType(input?: string): CredentialType {
+    if (input === undefined || input === '') return CREDENTIAL_TYPE_API_KEY
+    if (!(CREDENTIAL_TYPES as readonly string[]).includes(input)) {
+      throw new BusinessException(
+        ErrorCode.ParamInvalid,
+        `凭证类型仅支持 ${CREDENTIAL_TYPES.join(' / ')}`,
+      )
+    }
+    return input as CredentialType
   }
 
   /** 命中后异步更新 `lastUsedAt`（不阻塞响应；失败只记日志，R130） */
@@ -433,6 +513,7 @@ export class CredentialService {
       appCode: app?.code ?? '',
       appName: app?.name ?? '（应用已删除）',
       scope: row.scope as unknown as CredentialScope,
+      type: (row.type as CredentialType) ?? CREDENTIAL_TYPE_API_KEY,
       status: row.status,
       expiresAt: row.expiresAt,
       lastUsedAt: row.lastUsedAt,

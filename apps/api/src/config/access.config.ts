@@ -20,6 +20,8 @@ export default registerAs('access', () => ({
   quotaPerDay: readPositiveInt('ACCESS_QUOTA_PER_DAY', 50000),
   /** 每凭证返回行数·日窗（按返回行数累计，schema 端点计 0 行；R134） */
   rowsPerDay: readPositiveInt('ACCESS_ROWS_PER_DAY', 100000),
+  /** OAuth2 access token 存活秒数（P18 R151；默认 1 小时；过期后使用 → 401） */
+  tokenTtlSeconds: readPositiveInt('ACCESS_TOKEN_TTL_SECONDS', 3600),
   /** acc_audit 保留天数（每日清理 cron，R135） */
   auditRetentionDays: readPositiveInt('ACCESS_AUDIT_RETENTION_DAYS', 90),
   /** 审计缓冲 flush 间隔毫秒（每 5s 或满 100 条批量落表，R135） */

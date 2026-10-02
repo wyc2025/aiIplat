@@ -50,6 +50,15 @@ export class CreateCredentialDto {
   @Length(1, 64, { message: '备注名长度须在 1~64 之间' })
   name!: string
 
+  @ApiPropertyOptional({
+    description:
+      '凭证类型：api_key（默认，长期有效，直连资源端点）/ oauth（换短时效令牌）；创建后不可更改',
+    enum: ['api_key', 'oauth'],
+  })
+  @IsOptional()
+  @IsString()
+  type?: string
+
   @ApiProperty({ description: '授权范围（表 + 可选字段）', type: CredentialScopeDto })
   @ValidateNested()
   @Type(() => CredentialScopeDto)
@@ -79,4 +88,13 @@ export class UpdateCredentialDto {
   @IsOptional()
   @IsISO8601({}, { message: 'expiresAt 必须是 ISO 8601 时间字符串' })
   expiresAt?: string | null
+
+  /**
+   * 显式接收 type（虽然不可改，P18 D141）：若 DTO 不声明，全局 `ValidationPipe` 的
+   * `whitelist: true` 会把它**静默剥离**，用户以为改成功了——此处改由服务层明确报错。
+   */
+  @ApiPropertyOptional({ description: '（只读）凭证类型，传入即报错——创建后不可更改' })
+  @IsOptional()
+  @IsString()
+  type?: string
 }

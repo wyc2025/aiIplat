@@ -6,6 +6,7 @@
  * 与 `/api/ext/mcp`（P15-C：MCP 端点，401 留痕记为 `mcp`——具体事件由 controller 记账）。
  */
 export function extEndpointOf(path: string): string {
+  if (path.endsWith('/oauth/token')) return 'ext.oauth.token'
   if (path.endsWith('/mcp')) return 'mcp'
   if (path.endsWith('/schema')) return 'schema'
   if (path.includes('/records/')) return 'detail'

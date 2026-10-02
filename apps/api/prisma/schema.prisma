@@ -997,6 +997,8 @@ model AccCredential {
   secretPrefix String    @map("secret_prefix") @db.VarChar(8)
   /// {tables:[], fields:{table:[field]}, ops:['read'], rowFilter:null}（R133/D125）
   scope        Json      @map("scope")
+  /// 凭证形态：api_key（默认，长期有效）/ oauth（client_credentials 换短时效 token）；**创建后不可改**（P18 D141）
+  type         String    @default("api_key") @map("type") @db.VarChar(16)
   /// 1 active / 0 revoked（吊销不可逆，R131）
   status       Int       @default(1) @map("status") @db.TinyInt
   /// NULL = 不过期；到点惰性判定失效（R130）

@@ -63,4 +63,10 @@ export const RedisKey = {
   /** 凭证返回行数·日窗：acc:quota:rows:{credentialId}:d:{yyyyMMdd}，INCRBY + 首次 48h TTL（按返回行数计） */
   accQuotaRowsDay: (credentialId: string, window: string) =>
     `acc:quota:rows:${credentialId}:d:${window}`,
+
+  // ===== access 域 OAuth2 令牌（P18 T155 / D139/R151，ARCHITECTURE-P18 §34.2）=====
+  /** 令牌 → 凭证：acc:token:{sha256(token)} = credentialId，TTL = access.tokenTtlSeconds（不透明令牌，不落 DB） */
+  accToken: (tokenHash: string) => `acc:token:${tokenHash}`,
+  /** 每凭证活跃令牌索引：acc:token:idx:{credentialId}，成员 = sha256(token)；吊销 / 轮换时按集合级联删除（R154） */
+  accTokenIndex: (credentialId: string) => `acc:token:idx:${credentialId}`,
 } as const
