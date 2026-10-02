@@ -687,7 +687,8 @@ async function main(): Promise<void> {
         json: {
           appCode,
           name: `MCP-RF${stamp}`,
-          scope: { tables: ['book'], rowFilter: { book: ['score:eq:3'] } },
+          // title 为「书001…书015」，contains:书01 命中 6 行（书010~015，够翻页以便验证跨协议游标）
+          scope: { tables: ['book'], rowFilter: { book: ['title:contains:书01'] } },
         },
         token,
       })
@@ -699,8 +700,8 @@ async function main(): Promise<void> {
       >
       check(
         'rowFilter 透明继承：query_records 只回符合条件的行（工具入参 / 描述不变）',
-        rows.length === 1 && rows[0].score === 3,
-        `len=${rows.length} score=${rows.map((row) => String(row.score)).join(',')}`,
+        rows.length === 6 && rows.every((row) => String(row.title).includes('书01')),
+        `len=${rows.length}`,
       )
 
       const allowed = await callTool(rfCred.apiKey, 'iplat_get_record', {
@@ -710,14 +711,16 @@ async function main(): Promise<void> {
       check(
         '详情：满足 rowFilter 的行可读（同源内核）',
         allowed.rpc?.result?.isError !== true &&
-          (allowed.rpc?.result?.structuredContent?.data as Record<string, unknown> | undefined)
-            ?.score === 3,
+          String(
+            (allowed.rpc?.result?.structuredContent?.data as Record<string, unknown> | undefined)
+              ?.title ?? '',
+          ).includes('书01'),
         `text=${resultText(allowed).slice(0, 60)}`,
       )
 
-      // 同表另一行（score ≠ 3）：行存在但被 rowFilter 挡住 → 与 REST 同表现（isError + 40400）
+      // 同表另一行（title 不含「书01」）：行存在但被 rowFilter 挡住 → 与 REST 同表现（isError + 40400）
       const otherRow = await prisma.appRecord.findFirstOrThrow({
-        where: { tableId: bookTable.id, deletedAt: null, rC2: { not: '3' } },
+        where: { tableId: bookTable.id, deletedAt: null, rC1: { not: { contains: '书01' } } },
         select: { rowId: true },
       })
       const denied = await callTool(rfCred.apiKey, 'iplat_get_record', {
@@ -728,6 +731,46 @@ async function main(): Promise<void> {
         '详情：行存在但不满足 rowFilter → isError + 40400（与 REST detail 同源同表现）',
         denied.rpc?.result?.isError === true && resultText(denied).includes('40400'),
         `isError=${denied.rpc?.result?.isError} text=${resultText(denied).slice(0, 70)}`,
+      )
+
+      // 销 P17 走查 C1：rowFilter 生效下**跨协议游标混用**（同一编码器，双向各一条）
+      const restPage = await call(
+        `/api/ext/v1/app/${appCode}/tables/book/records?size=1&sort=score:asc`,
+        { apiKey: rfCred.apiKey },
+      )
+      const restCursor =
+        (restPage.body?.paging as { nextCursor?: string } | undefined)?.nextCursor ?? ''
+      const mcpPage = await callTool(rfCred.apiKey, 'iplat_query_records', {
+        table: 'book',
+        size: 5,
+        sort: ['score:asc'],
+        cursor: restCursor,
+      })
+      const mcpRows = (mcpPage.rpc?.result?.structuredContent?.data ?? []) as Array<
+        Record<string, unknown>
+      >
+      check(
+        'C1：REST 游标 → MCP 消费（rowFilter 之下，续页正确衔接）',
+        restPage.status === 200 && mcpPage.rpc?.result?.isError !== true && mcpRows.length === 5,
+        `restStatus=${restPage.status} len=${mcpRows.length}`,
+      )
+
+      const mcpFirst = await callTool(rfCred.apiKey, 'iplat_query_records', {
+        table: 'book',
+        size: 1,
+        sort: ['score:asc'],
+      })
+      const mcpCursor =
+        (mcpFirst.rpc?.result?.structuredContent?.paging as { nextCursor?: string } | undefined)
+          ?.nextCursor ?? ''
+      const restTail = await call(
+        `/api/ext/v1/app/${appCode}/tables/book/records?size=5&sort=score:asc&after=${encodeURIComponent(mcpCursor)}`,
+        { apiKey: rfCred.apiKey },
+      )
+      check(
+        'C1：MCP 游标 → REST 消费（反向混用同样衔接）',
+        restTail.status === 200 && (restTail.body?.data ?? []).length === 5,
+        `status=${restTail.status} len=${(restTail.body?.data ?? []).length}`,
       )
     }
     console.log('')

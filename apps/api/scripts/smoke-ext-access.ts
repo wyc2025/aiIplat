@@ -81,6 +81,8 @@ async function call(
   options: {
     method?: string
     json?: unknown
+    /** form-urlencoded 体（OAuth token 端点的 RFC 形态，P18 T158） */
+    form?: Record<string, string>
     token?: string | null
     apiKey?: string
   } = {},
@@ -88,11 +90,18 @@ async function call(
   const headers: Record<string, string> = {}
   if (options.token) headers.Authorization = `Bearer ${options.token}`
   if (options.apiKey) headers.Authorization = `Bearer ${options.apiKey}`
-  if (options.json !== undefined) headers['Content-Type'] = 'application/json'
+  let payload: string | undefined
+  if (options.form !== undefined) {
+    headers['Content-Type'] = 'application/x-www-form-urlencoded'
+    payload = new URLSearchParams(options.form).toString()
+  } else if (options.json !== undefined) {
+    headers['Content-Type'] = 'application/json'
+    payload = JSON.stringify(options.json)
+  }
   const response = await fetch(`${BASE}${path}`, {
     method: options.method ?? 'GET',
     headers,
-    ...(options.json !== undefined ? { body: JSON.stringify(options.json) } : {}),
+    ...(payload !== undefined ? { body: payload } : {}),
   })
   const text = await response.text()
   let body: Envelope | null = null
@@ -1040,8 +1049,318 @@ async function main(): Promise<void> {
           `code=${credRfOk.body?.code} msg=${String(credRfOk.body?.message ?? '').slice(0, 60)}`,
         )
         if (credRfOk.body?.data?.id) credIds.push(credRfOk.body.data.id as string)
+
+        // ---- 8.6（销 P17 走查 C1）：rowFilter 生效下的**游标翻页**（单调键不重不漏）----
+        // 走查要求单列实测：rowFilter 是常量 WHERE 段，不得干扰 keyset 游标定位
+        const page1 = await call(
+          `/api/ext/v1/app/${appCode}/tables/post/records?size=1&sort=createdAt:asc`,
+          { apiKey: credRf.apiKey },
+        )
+        const page1Rows = (page1.body?.data ?? []) as Array<Record<string, unknown>>
+        const page1Cursor = (page1.body?.paging as { nextCursor?: string } | undefined)?.nextCursor
+        const page2 = await call(
+          `/api/ext/v1/app/${appCode}/tables/post/records?size=1&sort=createdAt:asc&after=${encodeURIComponent(page1Cursor ?? '')}`,
+          { apiKey: credRf.apiKey },
+        )
+        const page2Rows = (page2.body?.data ?? []) as Array<Record<string, unknown>>
+        const pagedIds = [...page1Rows, ...page2Rows].map((row) => String(row.rowId))
+        check(
+          'C1：rowFilter 生效下游标翻页不重不漏（createdAt:asc，2 行 2 页，第 2 页 nextCursor=null）',
+          page1Rows.length === 1 &&
+            page2Rows.length === 1 &&
+            new Set(pagedIds).size === 2 &&
+            ((page2.body?.paging as { nextCursor?: string | null } | undefined)?.nextCursor ??
+              null) === null,
+          `p1=${page1Rows.length} p2=${page2Rows.length} cursor2=${String((page2.body?.paging as { nextCursor?: string | null } | undefined)?.nextCursor)}`,
+        )
       } catch (error) {
         check('行级过滤端到端（P17）', false, (error as Error).message)
+      }
+    }
+
+    // ==================== 9. OAuth2 client_credentials（P18 T158 / R151~R155）====================
+    console.log('9. OAuth2 令牌（换发 / RFC 错误 / 双形态取数 / 失效级联 / 收窄即时 / 配额审计）')
+    {
+      try {
+        // ① 创建 oauth 型凭证（D141：形态创建时确定，不可改）
+        const credOauth = await ok<{ id: string; apiKey: string; type: string }>(
+          '/api/access/credentials',
+          {
+            method: 'POST',
+            json: {
+              appCode,
+              name: `OAuth${stamp}`,
+              type: 'oauth',
+              // 复用第 8 段的 post 表（2 published + 1 draft，且夹具已同步 r_cN 冗余列）
+              scope: { tables: ['post'], rowFilter: { post: ['status:eq:published'] } },
+            },
+            token,
+          },
+        )
+        credIds.push(credOauth.id)
+        check(
+          '创建 oauth 型凭证：type 落库并回显',
+          credOauth.type === 'oauth',
+          `type=${credOauth.type}`,
+        )
+
+        const dot = credOauth.apiKey.indexOf('.')
+        const clientId = credOauth.apiKey.slice(0, dot)
+        const clientSecret = credOauth.apiKey.slice(dot + 1)
+        const tokenPath = '/api/ext/oauth/token'
+
+        // ② RFC 6749 §5.1 成功响应（**非平台 envelope**）
+        const grant = await call(tokenPath, {
+          method: 'POST',
+          form: {
+            grant_type: 'client_credentials',
+            client_id: clientId,
+            client_secret: clientSecret,
+          },
+        })
+        const grantBody = grant.body as unknown as {
+          access_token?: string
+          token_type?: string
+          expires_in?: number
+          code?: number
+        } | null
+        const accessToken = grantBody?.access_token ?? ''
+        check(
+          '换发成功：200 + §5.1 三字段（access_token / token_type / expires_in，非平台 envelope）',
+          grant.status === 200 &&
+            accessToken.startsWith('it_') &&
+            grantBody?.token_type === 'Bearer' &&
+            typeof grantBody?.expires_in === 'number' &&
+            grantBody?.code === undefined,
+          `status=${grant.status} body=${grant.text.slice(0, 80)}`,
+        )
+
+        // ③ RFC 6749 §5.2 错误面（刻意不用平台码，D140）
+        const badSecret = await call(tokenPath, {
+          method: 'POST',
+          form: {
+            grant_type: 'client_credentials',
+            client_id: clientId,
+            client_secret: 'wrong-secret-value',
+          },
+        })
+        check(
+          '错 secret → 401 + invalid_client + WWW-Authenticate（RFC 格式）',
+          badSecret.status === 401 &&
+            (badSecret.body as unknown as { error?: string })?.error === 'invalid_client' &&
+            (badSecret.headers.get('www-authenticate') ?? '').includes('iplat-ext'),
+          `status=${badSecret.status} body=${badSecret.text.slice(0, 60)}`,
+        )
+        const noGrant = await call(tokenPath, {
+          method: 'POST',
+          form: { client_id: clientId, client_secret: clientSecret },
+        })
+        check(
+          'grant_type 缺失 → 400 + invalid_request',
+          noGrant.status === 400 &&
+            (noGrant.body as unknown as { error?: string })?.error === 'invalid_request',
+          `status=${noGrant.status} body=${noGrant.text.slice(0, 60)}`,
+        )
+        const badGrant = await call(tokenPath, {
+          method: 'POST',
+          form: { grant_type: 'password', client_id: clientId, client_secret: clientSecret },
+        })
+        check(
+          'grant_type 不支持 → 400 + unsupported_grant_type',
+          badGrant.status === 400 &&
+            (badGrant.body as unknown as { error?: string })?.error === 'unsupported_grant_type',
+          `status=${badGrant.status} body=${badGrant.text.slice(0, 60)}`,
+        )
+
+        // ④ 令牌可用于资源端点（与 API Key 同管线：scope + rowFilter 一并生效）
+        const viaToken = await call(`/api/ext/v1/app/${appCode}/tables/post/records?size=50`, {
+          apiKey: accessToken,
+        })
+        const viaTokenRows = (viaToken.body?.data ?? []) as Array<Record<string, unknown>>
+        check(
+          '令牌取数：rowFilter 一并生效（post 表 status=published 共 2 行）',
+          viaToken.status === 200 &&
+            viaTokenRows.length === 2 &&
+            viaTokenRows.every((row) => row.status === 'published'),
+          `status=${viaToken.status} len=${viaTokenRows.length}`,
+        )
+        const viaKey = await call(`/api/ext/v1/app/${appCode}/tables/post/records?size=50`, {
+          apiKey: credOauth.apiKey,
+        })
+        check(
+          'oauth 型 secret 直连资源端点 → 401（D141：必须经换发）',
+          viaKey.status === 401 && viaKey.body?.code === 50019,
+          `status=${viaKey.status} code=${viaKey.body?.code}`,
+        )
+        const schemaViaToken = await call(`/api/ext/v1/app/${appCode}/schema`, {
+          apiKey: accessToken,
+        })
+        check(
+          '令牌可调 schema 端点（同一守卫 → 对外端点全覆盖）',
+          schemaViaToken.status === 200 && schemaViaToken.body?.code === 0,
+          `status=${schemaViaToken.status}`,
+        )
+
+        // ⑤ api_key 型也可换 token（D141 迁移路径）
+        const keyCred = await ok<{ id: string; apiKey: string }>('/api/access/credentials', {
+          method: 'POST',
+          json: { appCode, name: `换发型${stamp}`, scope: { tables: ['book'] } },
+          token,
+        })
+        credIds.push(keyCred.id)
+        const keyDot = keyCred.apiKey.indexOf('.')
+        const keyGrant = await call(tokenPath, {
+          method: 'POST',
+          form: {
+            grant_type: 'client_credentials',
+            client_id: keyCred.apiKey.slice(0, keyDot),
+            client_secret: keyCred.apiKey.slice(keyDot + 1),
+          },
+        })
+        check(
+          'api_key 型凭证同样可换令牌（D141：渐进迁移路径）',
+          keyGrant.status === 200 &&
+            (
+              (keyGrant.body as unknown as { access_token?: string })?.access_token ?? ''
+            ).startsWith('it_'),
+          `status=${keyGrant.status}`,
+        )
+
+        // ⑥ 配额（D142）：换发计请求配额，X-RateLimit-* 可见
+        check(
+          '换发计入请求配额（响应带 X-RateLimit-*）',
+          grant.headers.get('x-ratelimit-remaining-day') !== null &&
+            grant.headers.get('x-ratelimit-remaining-minute') !== null,
+          `remain=${grant.headers.get('x-ratelimit-remaining-day')}`,
+        )
+
+        // ⑦ 签发后收窄 scope → 存量令牌立即生效（R153：授权事实以凭证行为准）
+        await ok(`/api/access/credentials/${credOauth.id}`, {
+          method: 'PUT',
+          json: { scope: { tables: ['post'], rowFilter: { post: ['status:eq:draft'] } } },
+          token,
+        })
+        const afterShrink = await call(`/api/ext/v1/app/${appCode}/tables/post/records?size=50`, {
+          apiKey: accessToken,
+        })
+        check(
+          '签发后收窄 rowFilter（改为 status=draft 共 1 行）→ 存量令牌立即生效（无需重新换发）',
+          afterShrink.status === 200 && (afterShrink.body?.data ?? []).length === 1,
+          `len=${(afterShrink.body?.data ?? []).length}`,
+        )
+
+        // ⑧ 轮换 secret → 已签发令牌即时失效（R154，不等 TTL）
+        const rotatedCred = await ok<{ keyId: string; apiKey: string }>(
+          `/api/access/credentials/${credOauth.id}/rotate`,
+          { method: 'POST', json: {}, token },
+        )
+        const afterRotate = await call(`/api/ext/v1/app/${appCode}/tables/book/records?size=50`, {
+          apiKey: token,
+        })
+        check(
+          '轮换 secret → 已签发令牌即时 401（不等 TTL）',
+          afterRotate.status === 401 && afterRotate.body?.code === 50019,
+          `status=${afterRotate.status} code=${afterRotate.body?.code}`,
+        )
+
+        // ⑨ 旧 secret 已失效（换发失败）；新 secret 换发成功且可取数
+        const staleGrant = await call(tokenPath, {
+          method: 'POST',
+          form: {
+            grant_type: 'client_credentials',
+            client_id: clientId,
+            client_secret: clientSecret,
+          },
+        })
+        check(
+          '轮换后旧 secret 换发失败（401 invalid_client）',
+          staleGrant.status === 401,
+          `status=${staleGrant.status} body=${staleGrant.text.slice(0, 60)}`,
+        )
+        const newDot = rotatedCred.apiKey.indexOf('.')
+        const freshGrant = await call(tokenPath, {
+          method: 'POST',
+          form: {
+            grant_type: 'client_credentials',
+            client_id: rotatedCred.apiKey.slice(0, newDot),
+            client_secret: rotatedCred.apiKey.slice(newDot + 1),
+          },
+        })
+        const freshToken =
+          (freshGrant.body as unknown as { access_token?: string })?.access_token ?? ''
+        check(
+          '新 secret 换发成功且新令牌可取数',
+          freshGrant.status === 200 && freshToken.startsWith('it_'),
+          `status=${freshGrant.status}`,
+        )
+
+        // ⑩ 吊销凭证 → 该凭证全部令牌即时失效（R154）
+        await ok(`/api/access/credentials/${credOauth.id}/revoke`, {
+          method: 'POST',
+          json: {},
+          token,
+        })
+        const afterRevoke = await call(`/api/ext/v1/app/${appCode}/tables/book/records?size=50`, {
+          apiKey: freshToken,
+        })
+        check(
+          '吊销凭证 → 已签发令牌即时 401（ownerId=0 之外，属主侧亦立即失效）',
+          afterRevoke.status === 401 && afterRevoke.body?.code === 50019,
+          `status=${afterRevoke.status} code=${afterRevoke.body?.code}`,
+        )
+
+        // ⑪ 审计（D142）：正例进属主检索；负例（invalid_client）为 ownerId=0 系统流水
+        let tokenAudits: Array<{ endpoint: string; resultCode: number }> = []
+        let negativeCount = 0
+        for (let attempt = 0; attempt < 12; attempt += 1) {
+          const page = await ok<{ list: Array<{ endpoint: string; resultCode: number }> }>(
+            `/api/access/audits?credentialId=${credOauth.id}&pageSize=50`,
+            { token },
+          )
+          tokenAudits = (page.list ?? []).filter((item) => item.endpoint === 'ext.oauth.token')
+          negativeCount = await prisma.accAudit.count({
+            where: {
+              endpoint: 'ext.oauth.token',
+              resultCode: 50019,
+              ownerId: BigInt(0),
+              createdAt: { gte: new Date(Date.now() - 10 * 60 * 1000) },
+            },
+          })
+          if (tokenAudits.some((item) => item.resultCode === 0) && negativeCount > 0) break
+          await new Promise((resolve) => setTimeout(resolve, 500))
+        }
+        check(
+          '审计：ext.oauth.token 正例（resultCode=0）进属主检索',
+          tokenAudits.some((item) => item.resultCode === 0),
+          `count=${tokenAudits.length}`,
+        )
+        check(
+          '审计：ext.oauth.token 负例（invalid_client）以 ownerId=0 落表',
+          negativeCount > 0,
+          `count=${negativeCount}`,
+        )
+
+        // ⑫ secret 边界：审计摘要不含 secret / 令牌原文
+        const summaries = await prisma.accAudit.findMany({
+          where: {
+            endpoint: 'ext.oauth.token',
+            createdAt: { gte: new Date(Date.now() - 10 * 60 * 1000) },
+          },
+          select: { paramsSummary: true },
+          take: 50,
+        })
+        check(
+          '审计摘要不含 secret / 令牌原文（只含 grant_type 与 client_id）',
+          summaries.every(
+            (item) =>
+              item.paramsSummary === null ||
+              (!item.paramsSummary.includes(clientSecret) &&
+                !item.paramsSummary.includes(accessToken)),
+          ),
+          `n=${summaries.length}`,
+        )
+      } catch (error) {
+        check('OAuth2 端到端（P18）', false, (error as Error).message)
       }
     }
   } finally {
