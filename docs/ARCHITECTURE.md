@@ -2952,6 +2952,7 @@ disp_grant (
 ### 30.8 已知边界
 
 ① bundle 展示文件断链自担；② 管理端审核人工过目打包文件；③ 展示副本无数据时空渲染（与数据侧演示数据选项正交）；④ 暂存区展示应用仅属主后管可见，公开访问一律 40400；⑤ 跨用户复制的授权重建**不包含**接收方反向授予他人（复制后授权图 = 快照出边闭包的镜像）；⑥ 展示应用文件仅文本白名单（HTML/CSS/JS/JSON 等）随包读取与写入，二进制素材（图片/字体等）不随复制迁移。
+⑦ **删站不清理挂靠关系**（P15-C 走查对遗留 39 的裁决，2026-10-02 维持现状）：删除站点是**软删**（进回收站），展示应用的 `site_id` 保留悬空值——保留「站点从回收站还原」后的挂靠恢复路径；**读写两侧已按「未挂靠」收敛**（口径一致：开放层静态入口与取数面均不可达）。级联解绑的关闭条件是「站点从回收站**彻底删除**」（届时另立任务）。用户指引口径：**如需恢复展示应用访问，先从回收站还原站点，其挂靠关系即自动恢复**。
 
 ---
 
@@ -3048,6 +3049,11 @@ Authorization: Bearer {keyId}.{secret}
 - **游标值必须规范化**：`Date → ISO 字符串`（比较与写入游标两侧共用 `cursorValue` 归一）。否则时间字段排序翻页时，游标经 JSON 往返由 `Date` 变串、与库内 `Date` 不可比 → keyset 定位失效（返回空页）。**该缺陷由 `smoke:ext` 实测发现并修复**。
 - **「不重不漏」的适用边界**：keyset 分页在**单调排序键**（如 `createdAt ASC`）下可保证「边拉边写不重不漏」；默认 `rowId` 是 **UUID（非单调）**，此时翻页**不重**成立、「不漏」不成立（新行可能落在游标之前——非单调键下任何分页方案都无法保证）。`smoke:ext` 因此分两条断言：默认排序断「不重」，`sort=createdAt:asc` 断「不重不漏」。
 - 行字段名 = 用户逻辑字段名（`app_field.name`）；`rowId / createdAt / updatedAt` 恒留；内部列（`r_cN`、`app_id` 等）不出域；`scope.fields` 对行数据同样收窄（内置三件套恒留，`expanded` 内层一并裁剪）。
+- **附件流判定链（P15 为两步；W11/T151 补上第三步）**：① `app_attachment_ref` 引用存在（`deleted_at` 过滤）② 所属表·字段有效暴露
+  ③ **凭证 scope 交集**（credential 分支：引用集合中至少一条 `(表, 字段)` 落在 `scope.tables` 与 `scope.fields[表]` 内，见 §33.5）——
+  全部越界与「未引用」同表现 **40400**；`display` / 匿名分支无 scope 概念，不传判定谓词（P14 口径不变）。
+- **行级过滤（P17 §33）**：`records` / `records/:rowId` 受 `scope.rowFilter` 强制 AND 收窄（详情不满足 → 40400）；
+  附件流**不参与**行级判定（附件随记录可见性）。
 
 ### 31.5 配额与审计横切（R134/R135/R141）
 
@@ -3229,3 +3235,104 @@ SDK 的 `McpServer.registerTool` 泛型会对入参做逐键 `ShapeOutput` 展�
 `inputSchema` 因此按 `Record<string, unknown>` 传递——**运行时零差异**（SDK 原方法、zod 校验照常、JSON Schema 照常下发客户端），
 仅不再静态推导 handler 入参形状（各工具文件以显式 `QueryArgs` 类型 + cast 收口）。
 SDK 修好类型后，删除该文件、各工具直接调 `server.registerTool` 即可，工具实现不动。
+
+---
+
+## 33. P17：rowFilter 行级收窄（授权第四纵深）+ W11 附件流补丁
+
+> 在 §31 的「表 / 字段 / 操作」三纵深之上启用**行级**收窄（P15 Q8 预留的 `scope.rowFilter` 槽位），
+> 并结清 P15-C 走查开出的 **W11 补丁**（对外附件流纳入 scope 交集）。**零新表、零迁移、零新端点、
+> 零新错误码、零新依赖**（D136~~D138 / R147~~R150 / T151~T154）。需求基线 `docs/P17/`。
+
+### 33.1 落点（零新表、零文件结构变动）
+
+- 存储：`acc_credential.scope` JSON 的 `rowFilter` 槽位启用（DDL 不变，`{ tables, fields, ops, rowFilter }`）。
+- 改动集中三处：
+  - `access/credential/`：创建 / 编辑校验链加 rowFilter 校验段（R147）；
+  - **取数内核强制过滤通道**：`PubDataService.listAll / getRow` 新增 `mandatoryFilters` 参数（R148）；
+  - `common/utils/query-filter.util.ts`：R104 过滤语法**单一实现**（pub 域与 access 域共用，见 §33.6）。
+- MCP（`access/mcp/`）**仅两行改动**——三件套把 `contract.mandatoryFilters(table, scope)` 透传给同一门面（R150 透明继承）。
+
+### 33.2 校验链修订（管理侧，创建 / 编辑凭证）
+
+```
+scope 校验（既有：tables ∈ 暴露表、fields ∈ 暴露字段、ops 合法 → 50021）
+  → 【新增】rowFilter 校验（R147）：
+      rowFilter 须为对象（否 50021）
+      每表：表 ∈ scope.tables（否 50021）→ 值须为 1~3 条字符串（否 50021）
+      每条：形态/算子（R104 同一解析器）→ 字段 ∈ 该表 scope 字段口径 → 字段已暴露 → 值类型可解析
+           任一不符 → 50021（errmsg 指明「表 + 条目 + 原因」）
+```
+
+- 解析器复用：与 §31 的 R104 请求 filter **同一实现**（`common/utils/query-filter.util.ts`），
+  管理侧只补 scope 语义，不新写语法（R147）。
+
+### 33.3 查询注入语义（R148）
+
+```
+对外取数（records / detail）
+  → 既有：scope ∩ 暴露投影（表 / 字段）
+  → 【新增】rowFilter 条件串 → app 域**同一解析器**解析为执行器条件（强制过滤通道）
+  → 既有：请求 filter 参数 → 解析为执行器条件
+  → 两者**并列进入同一 filter 数组** → WHERE 段 AND（含同列并列，见下）
+  → 既有：sort + rowId tiebreaker → keyset 游标
+```
+
+- rowFilter 与请求 filter 是**并列 AND**，无优先级；冲突 = 空集 = 空页正常返回。
+- **同列多条件必须并列 AND**（本期实测抓出的真缺陷修复）：`DataService.buildDbWhere` 原先用
+  `Object.assign` 组装同一 `r_cN` 列的条件，**后者覆盖前者**；rowFilter 引入后这会让请求 `filter`
+  顶掉强制条件（收窄变放宽）。现改为：该列已有条件时把新条件推入 `AND` 数组（语义与内存过滤路径一致）。
+- **detail 同样注入**：`op: 'get'` 不支持 WHERE 段，故**有强制条件时改走 list 路径**（同一 WHERE + 按 `rowId` 定位）；
+  行不满足 rowFilter 与行不存在**同表现 40400**（防探测不裂缝）。无 rowFilter 时保持原单行直取（零额外开销）。
+- 游标与排序零影响（rowFilter 是常量 WHERE，不进游标值）；SQL 注入面：全部走同一解析器 + 参数化绑定。
+
+### 33.4 运行期失效判拒（R149）
+
+取数时对 rowFilter 引用做再校验：表 / 字段任一失效（下线 / 取消暴露 / 软删）→ 该表**判不可见 40400**。
+**不静默跳过失效条目**（跳过 = 结果集放大 = 安全回归）。恢复暴露即自愈，无需改凭证。
+实现上即「强制过滤条件走与请求参数同一解析器」的自然结果：解析失败时错误码取 40400（而非请求参数的 40001）。
+
+### 33.5 W11 补丁：对外附件流纳入 scope 收窄（T151）
+
+```
+attachmentStream(ownerId, appCode, fileId, range?, refFilter?)
+  → 既有：引用索引查找（refs = [{tableId, fieldName}, …]）
+  → 既有：表·字段暴露三开关
+  → 【新增】调用方注入的 refFilter(tableName, fieldName)：credential 分支传 scope 交集判定，越界引用跳过
+  → display / 匿名分支不传 refFilter：口径不变（P14）
+```
+
+- **分层实现**（与基线措辞的差异见 API §24.7 ②）：app 域不认识凭证概念（单向依赖），故不接收 principal，
+  改由 access 域**注入谓词**；语义与基线一致——全部引用越界 → 40400（与「未引用」同表现）。
+- 判定口径与 `assertTableInScope` 完全同款：表 ∈ `scope.tables` ∧（该表未限字段 或 字段 ∈ `scope.fields[表]`）；
+  多引用文件任一引用在 scope 内即放行。
+- 遗留 38（P15-C 走查开出的「附件流未纳入 scope 收窄」）**由本补丁关闭**。
+
+### 33.6 公共实现：`common/utils/query-filter.util.ts`
+
+R104 过滤语法的**单一实现**（常量 + 纯函数：形态解析、算子集、`contains` 类型准入、值按类型归一），
+pub 域（请求 filter / 强制过滤）与 access 域（管理侧 rowFilter 校验）共用。
+
+抽到 `common/` 的动机：access 域不得 import app 域内部实现（铁律 6），若各写一份，语法一旦漂移就会出现
+「管理侧放行、运行期拒绝」的裂缝——这正是 R147「复用同一解析器」要防的问题。错误码由调用方决定
+（40001 请求参数 / 40400 运行期判拒 / 50021 管理侧校验），解析层只返回结果。
+
+### 33.7 前端（T153，最小产品化）
+
+- 凭证创建 / 编辑抽屉加「**只看部分数据**」textarea（接 JSON 对象，附一行格式说明与示例；遵守界面文案准则）；
+- 前端只拦「不是合法 JSON 对象」这类明显笔误，完整校验交服务端（50021 的 errmsg 含条目定位，原样展示）；
+- **不下发过滤条件**：`schema` 投影不含 `rowFilter`（§24.3）——外部系统看不到自己被收窄的规则细节。
+
+### 33.8 演进预留（本期不做）
+
+- OR / 嵌套条件树（需结构化 AST，推翻 D136）；变量插值（凭证主体无用户上下文）；
+- `disp_grant` 行级（D137 已排除；若做须动 display 域与 P14 链路）；
+- 失效判拒的「宽限模式」（告警而非判拒）——先保守，有真实诉求再议；
+- 行级**写**（对外本无写）。
+
+### 33.9 资产登记
+
+`common/utils/query-filter.util.ts`（新增）/ `credential.service.buildRowFilter` / `credential.constant.MAX_ROW_FILTER` /
+`pub-data.service.parseFilterRaws`（共用解析器）/ `pub-data.service.attachmentStream(refFilter)` /
+`data.service.buildDbWhere`（同列 AND 修复）/ `access 前端凭证抽屉文本域` /
+`scripts/smoke-ext-access.ts`（57 项）/ `scripts/smoke-mcp.ts`（39 项）—— 明细见 §9 公共资产表。
