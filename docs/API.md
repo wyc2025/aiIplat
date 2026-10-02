@@ -1978,3 +1978,103 @@ rowFilter 引用的表 / 字段在签发后被下线或取消暴露 → 该表**
 | 新依赖    | +0                                                               | —          |
 | 前端      | +1 文本域（凭证抽屉「只看部分数据」）                            | —          |
 | 验收资产  | smoke:ext +16 项（W11 三条 + rowFilter 十三条）/ smoke:mcp +3 项 | —          |
+
+---
+
+## 25. P18：OAuth2 client_credentials（接入凭证第二形态）
+
+> 为接入凭证加第二形态：用 `client_id` / `client_secret` 换**短时效 access token**，再以 `Bearer it_*`
+> 调 §22（REST）/ §23（MCP）全部端点。**API Key 与 OAuth2 并存**，互不影响；资源端点契约不变，
+> 唯一变化是 `Authorization` 头接受两种 Bearer 形态。需求基线：`docs/P18/`；实施补充见 §25.5。
+
+### 25.1 新端点（+1）
+
+#### `POST /api/ext/oauth/token`
+
+请求（form-urlencoded 优先，JSON 宽容）：
+
+```http
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=client_credentials&client_id=ik_3f9ab2c7d1&client_secret=X7k...
+```
+
+成功 `200`（RFC 6749 §5.1，**非平台 envelope**）：
+
+```json
+{ "access_token": "it_9f2...", "token_type": "Bearer", "expires_in": 3600 }
+```
+
+错误（RFC 6749 §5.2，**非平台 envelope**）：
+
+| 场景                                     | HTTP | body                                                                           |
+| ---------------------------------------- | ---- | ------------------------------------------------------------------------------ |
+| client_id / secret 错、凭证已吊销 / 过期 | 401  | `{ "error": "invalid_client" }` + `WWW-Authenticate: Bearer realm="iplat-ext"` |
+| `grant_type` 缺失                        | 400  | `{ "error": "invalid_request" }`                                               |
+| `grant_type` 非 `client_credentials`     | 400  | `{ "error": "unsupported_grant_type" }`                                        |
+| 签发计入请求配额超限                     | 429  | 平台口径（`42900` + `Retry-After` + `X-RateLimit-*`）                          |
+
+- 每次签发计该凭证**请求配额 +1**（不计行数）；审计 event `ext.oauth.token`（正负例落表，摘要不含 secret）。
+- `access.tokenTtlSeconds`（`ACCESS_TOKEN_TTL_SECONDS`，默认 3600）为本期唯一新增配置键。
+- **api_key 型凭证同样可换令牌**（D141 迁移路径）；`oauth` 型凭证的 secret **不得直连资源端点**（须走本端点）。
+
+### 25.2 资源端点双形态（R153/R154）
+
+| Authorization 头                | 形态         | 校验                                                     |
+| ------------------------------- | ------------ | -------------------------------------------------------- |
+| `Bearer ik_xxxxxxxxxx.{secret}` | API Key      | 既有 sha256 比对（不缓存），`type` 须 `api_key`          |
+| `Bearer it_...`                 | access token | Redis 查 `acc:token:{sha256}` → **实查凭证行**校验有效性 |
+
+- 失败统一：`401` + `WWW-Authenticate: Bearer realm="iplat-ext", error="invalid_token"` + body `{ code: 50019 }`（§22 口径不变）。
+- 吊销 / 轮换 secret / 凭证到期 → 该凭证**全部令牌即时失效**（不等 TTL）。
+- **令牌使用期 scope 恒以凭证行为准**：签发后收窄 scope 或改 rowFilter，存量令牌立即按新授权生效（无需重新换发）。
+- MCP 端点（§23）同守卫，故令牌同样可用于 `/api/ext/mcp`；手动配置仍推荐 API Key（令牌 1 小时过期）。
+
+### 25.3 管理侧契约变化（端点号沿用 §22.4，零新增）
+
+| 端点                              | 变化                                                                            |
+| --------------------------------- | ------------------------------------------------------------------------------- |
+| `POST /api/access/credentials`    | body 增 `type?: "api_key" \| "oauth"`（缺省 `api_key`）；非法值 40001；响应同构 |
+| `PUT /api/access/credentials/:id` | **类型不可变**（D141）：带 `type` → `40001`（显式报错，不静默忽略）             |
+| `GET /api/access/credentials*`    | 响应增 `type` 字段                                                              |
+
+### 25.4 客户端示例
+
+```bash
+# ① 换 token
+curl -X POST https://<你的域名>/api/ext/oauth/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials&client_id=<keyId>&client_secret=<secret>"
+
+# ② 用 token（REST 与 MCP 通用）
+curl https://<你的域名>/api/ext/v1/app/<appCode>/tables/book/records \
+  -H "Authorization: Bearer it_9f2..."
+```
+
+**分工口径**：程序化集成用 OAuth2（自动换发、短时效、标准协议库可直用）；手动配置（MCP 客户端、curl 调试）
+仍推荐 API Key。
+
+### 25.5 实施补充（相对需求基线 `docs/P18/`）
+
+1. **`type` 不可变的错误面**：`UpdateCredentialDto` 显式声明 `type` 字段，服务层据此返回 40001——
+   若 DTO 不声明，全局 `ValidationPipe` 的 `whitelist: true` 会**静默剥离**该字段，用户会以为改成功了。
+2. **配额计入时机**：仅在客户端**通过校验后**计数（D142 推论）——否则凭猜测 keyId 即可刷空他人配额。
+3. **审计负例归属**：`invalid_client` 无凭证上下文 → `ownerId=0` 系统流水（不进属主检索）；
+   smoke 分两条断言核对（属主侧正例 + `ownerId=0` 直查负例）。
+4. **令牌自然过期**：Redis TTL 到点即失效，无清理任务；索引中的孤儿摘要在下次签发时顺带清扫。
+
+### 25.6 编号登记（本期后）
+
+| 系列         | 本期使用                                                    | 下一个可用 |
+| ------------ | ----------------------------------------------------------- | ---------- |
+| 决策         | D139~D142                                                   | D143       |
+| 规则         | R151~R155                                                   | R156       |
+| 任务         | T155~T158                                                   | T159       |
+| HTTP 端点    | +1（`POST /api/ext/oauth/token`）                           | —          |
+| 对外工具     | +0（REST 4 端点 × 双形态；MCP 3 不变）                      | —          |
+| 错误码       | +0（token 端点走 RFC 格式；资源端点复用 50019 / 42900）     | 50022      |
+| 配置键       | +1（`access.tokenTtlSeconds` = `ACCESS_TOKEN_TTL_SECONDS`） | —          |
+| DB           | +1 列（`acc_credential.type`，迁移）                        | —          |
+| 新依赖       | +0                                                          | —          |
+| 内部 AI 工具 | +0（43 不变）                                               | —          |
+| 验收资产     | smoke:ext 57→76（+19）/ smoke:mcp 39→41（+2）               | —          |

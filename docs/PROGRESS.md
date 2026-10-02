@@ -723,11 +723,35 @@
 - **失效判拒而非跳过（R149）**：引用字段取消暴露 → 该表整体 40400（收窄方向）；跳过会让结果集意外放大（安全回归）。恢复暴露即自愈。
 - **附件流分层实现（W11）**：app 域不接收 principal，改为**注入谓词** `refFilter(table, field)`；语义与基线一致（全部引用越界 → 40400），但依赖方向干净。
 
+## P18 任务拆解（OAuth2 client_credentials：接入凭证第二形态）
+
+> 来源：`docs/P18/`（`PRD-P18-OAUTH2-CLIENT-CREDENTIALS.md` + ARCHITECTURE 增补 + API 增补 + 走查报告-P17）。
+> 编号：D139~D142 / R151~~R155 / T155~~T158。
+> 增量：**+1 列（`acc_credential.type`，迁移 `20261002100000_add_credential_type`）/ +1 端点（`POST /api/ext/oauth/token`）/
+> +1 配置键（`ACCESS_TOKEN_TTL_SECONDS`）/ 零新错误码（下一可用仍 50022）/ 零新依赖 / 内部 AI 工具 43 与对外 MCP 工具 3 不变 /
+> 验收资产 smoke:ext 57→**76**、smoke:mcp 39→**41****。
+> 本期顺带销项：**P17 走查 C1**（跨协议游标混用）、**C2**（vite 生产构建证据——并因此抓出一个真缺陷）、**S-1**（ARCH §31.9 第 2/3 条「已落地」）。
+
+| 编号 | 任务                                                                                                                                                                                                                                                                                                                                | 状态   | 完成日期   |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ---------- |
+| T155 | 迁移 + `type` 列 + token 端点 + Redis 令牌存取：`20261002100000_add_credential_type`；`credential.util` 加 `issueAccessToken` / `hashToken` / `parseBearerToken`；`token-store.ts`（签发 / 解析 / 级联吊销 / 孤儿清扫）；`oauth-token.controller.ts`（RFC 6749 §5.1/§5.2，自写响应以绕开平台 envelope）；`ACCESS_TOKEN_TTL_SECONDS` | 已完成 | 2026-10-02 |
+| T156 | 守卫双形态 + 失效级联：`ExtAuthGuard.resolvePrincipal` 按形态分派（`ik_*.*` 凭证校验 / `it_*` 令牌 → **实查凭证行**）；`CredentialService` 拆 `loadVerified` / `toPrincipal`、新增 `verifyForToken`（不限形态）与 `principalOf`（令牌路径）；`revoke` / `rotate` 级联 `revokeAll`                                                   | 已完成 | 2026-10-02 |
+| T157 | 管理 UI：凭证创建弹窗「类型」二选一（默认 API 密钥）+ 编辑态只读 + 分工说明；列表新增类型列；`UpdateCredentialDto` 显式接收 `type` 以给出 40001（防 whitelist 静默剥离）                                                                                                                                                            | 已完成 | 2026-10-02 |
+| T158 | 验证与文档：`smoke:ext` 新增第 9 段 19 条（**76/76**）+ 销 C1（游标翻页）；`smoke:mcp` 销 C1 两条（**41/41**）；销 C2（`vite build` 通过，并修掉其抓出的构建缺陷）；销 S-1；API §25 / ARCH §34 / 本文件                                                                                                                             | 已完成 | 2026-10-02 |
+
+**关键设计点**
+
+- **不透明令牌 + Redis（D139）**：`it_` + 32 字节 base64url，**sha256 作 Redis 键**（原文不落库、不落日志、不进审计），TTL = 令牌寿命；另有每凭证索引集合支撑**即时级联吊销**。不用 JWT：无吊销能力，要即时失效就得配黑名单，等于回到存储查找。
+- **令牌路径回查 DB（R153）**：令牌只证明「曾用正确 secret 换过令牌」，**授权事实永远以凭证行为准**——这是「签发后收窄 scope / 改 rowFilter 立即生效」「吊销 / 轮换 / 到期即时失效」的统一实现，无需逐令牌传播。
+- **格式刻意分治（D140）**：token 端点说 RFC 6749（互操作对象是 OAuth 客户端库），资源端点维持平台码。落点是**控制器自写响应**——不经全局包装也不经异常过滤器。
+- **形态准入（D141）**：资源端点只认 `api_key` 直连（`oauth` 型 secret 直连 → 401，否则「短时效」语义可被绕过）；token 端点**不限形态**（给存量 api_key 凭证的迁移路径）。`type` 创建后不可改。
+- **记账（D142）**：签发**通过客户端校验后**才计请求配额 +1（否则凭猜 keyId 即可刷空他人配额）；审计 `ext.oauth.token` 正负例落表，摘要只含 `grant_type` 与 `client_id`。
+
 ## 进行中
 
-**无进行中任务**（P14 T124~~T131、P15 T132~~T138、**P15-C T139~~T143**、**P16 T144~~T150**、**P17 T151~~T154** 均已全部完成并通过验证，见各期任务拆解与文末回执）。
+**无进行中任务**（P14 T124~~T131、P15 T132~~T138、**P15-C T139~~T143**、**P16 T144~~T150**、**P17 T151~~T154**、**P18 T155~~T158** 均已全部完成并通过验证，见各期任务拆解与文末回执）。
 P12 尾巴（T122）已销项：铁律 3 / ARCH §6.2 文本修订、里程碑与工具数口径、走查待补取证 3 项（含发现并修复的 PublicRenderer 缺陷）。
-下一期候选（均待用户立项）：市场版本更新机制、OAuth2 client_credentials、站点内嵌应用数据语义（遗留 31）、P10 走查遗留的上游失败加固三项、**MCP 二期**（stdio 自托管 / 写工具 / aggregate——须先修订 R143 与 D131）、P16 走查遗留的 `zod` 依赖追认（D135 预留）。
+下一期候选（均待用户立项）：市场版本更新机制（P13 D111 挂账）、站点内嵌应用数据语义（遗留 31）、P10 走查遗留的上游失败加固三项、**MCP 二期**（stdio 自托管 / 写工具 / aggregate——须先修订 R143 与 D131）、RFC 8414 发现端点与 MCP 自动 OAuth（§34.6）、P16 走查遗留的 `zod` 依赖追认（D135 预留）。
 
 ## 遗留问题
 
@@ -1879,6 +1903,14 @@ P12 尾巴（T122）已销项：铁律 3 / ARCH §6.2 文本修订、里程碑�
 > **实测发现并修正 1 处真缺陷（静态检查与既有用例都查不出）**：**同列多条件的 SQL 下推互相覆盖**——`DataService.buildDbWhere` 用 `Object.assign` 组装同一 `r_cN` 列的条件，后一条覆盖前一条；rowFilter 引入后这意味**凭证持有者可用同字段 `filter` 顶掉强制条件、读到授权外的行**（收窄变放宽）。修复：同列条件推入 `AND` 数组（语义与内存过滤路径 `filters.every` 一致）。**取证**：`smoke:ext`「条件冲突 → 空页」在修复前返回 2 行（published 行），修复后为空页。**该缺陷由「rowFilter + 请求 filter 同字段」这一新组合暴露，属 P17 的必测面**。
 > **另一处夹具认知（非产品缺陷，但值得记档）**：A 侧 filter / sort 走 `r_cN` **冗余列 SQL 下推**（由写路径 `buildIndexColumns` 维护），**直写 `appRecord.data` 的夹具必须同步这些列**，否则 WHERE 匹配不到行——`smoke:ext` 第 8 段与 `smoke:mcp` 夹具因此补写 `rC1/rC2`（症状：条件恒返回空集，易误判为「过滤失效」）。
 > **待需求方知悉**：`smoke:ai` 项数在 7 / 8 之间浮动（I 段「import_site_article」在云盘无合规候选文件时**跳过**，不计失败）——属既有设计，非本期回归问题。
+
+> 2026-10-02：**P18（OAuth2 client_credentials）全部完成**（T155~~T158；ARCHITECTURE §34 / API §25 已并入；ARCH §31.9 第 2/3 条由「预留」校正为「已落地」＝走查 S-1 销项）。**P17 走查 C1 / C2 随本期销项**。
+> **增量**：**+1 列（`acc_credential.type`，迁移 `20261002100000_add_credential_type`，存量行自动 `api_key` 零改写）/ +1 端点（`POST /api/ext/oauth/token`）/ +1 配置键（`ACCESS_TOKEN_TTL_SECONDS`，默认 3600）/ 零新错误码（下一可用仍 50022）/ 零新依赖 / 内部 AI 工具 43 与对外 MCP 工具 3 不变 / smoke:ext 57→76、smoke:mcp 39→41**。
+> **落地**：① **不透明令牌 + Redis**（D139）——`it_` + 32B base64url，**sha256 作键**（原文不落库/不落日志/不进审计）、TTL = 令牌寿命，另有每凭证索引集合支撑级联吊销；② **守卫双形态**（R153）——`resolvePrincipal` 按 `ik_*.*` / `it_*` 分派，令牌命中后**实查凭证行**，故 scope 收窄、rowFilter 变更、吊销、轮换、到期**全部即时生效**（无需逐令牌传播）；③ **格式分治**（D140）——token 端点控制器**自写响应**（RFC 6749 §5.1/§5.2，不经平台 envelope 与异常过滤器），资源端点维持 50019 / 42900；④ **形态准入**（D141）——资源端点只认 `api_key` 直连（`oauth` 型 secret 直连 → 401），token 端点不限形态（迁移路径），`type` 创建后不可改（`UpdateCredentialDto` 显式接收以给出 40001，防 whitelist 静默剥离）；⑤ **记账**（D142）——通过客户端校验后才计请求配额（防凭猜 keyId 刷他人配额），审计 `ext.oauth.token` 正负例落表、摘要不含 secret；⑥ **前端**——创建弹窗类型二选一 + 编辑只读 + 列表类型列（界面文案准则口径）。
+> **验证证据（本轮实测）**：① **`smoke:ext` 76/76**（新增第 9 段 19 条：oauth 型创建与 type 回显 / §5.1 三字段 / §5.2 三类错误（invalid_client 401 + `WWW-Authenticate`、invalid_request、unsupported_grant_type）/ 令牌取数（**rowFilter 一并生效**）/ oauth 型 secret 直连 401 / 令牌可调 schema / api_key 型亦可换发 / 换发计配额 / **签发后收窄即时生效** / **轮换即时失效** / 旧 secret 换发 401 / 新令牌可用 / **吊销即时失效** / 审计正例入属主检索 / 负例 `ownerId=0` 落表 / 摘要不含 secret 与令牌原文；另销 **C1**：rowFilter 下 `createdAt:asc` 游标翻页不重不漏）；② **`smoke:mcp` 41/41**（销 **C1**：REST 游标 → MCP 消费、MCP 游标 → REST 消费，双向衔接）；③ 回归 **`check:ai` 19/19 + `smoke:ai` 7/7**（项数随云盘候选文件浮动）；④ 双端 `tsc` / ESLint 零错 + **`pnpm build`（vue-tsc + vite build）通过，26.68s**。
+> **⭐ 实测抓出 1 个真缺陷（走查 C2 的构建证据直接兑现）**：**`apps/web/src/views/access/index.vue` 无法通过 vite 生产构建**（P17 交付时遗留）。根因——prettier 把多语句的 `@click="auditDrawer.pageNo = 1; loadAudits()"` 格式化**拆成多行**，而 Vue 模板表达式**不支持换行分隔的语句**，vite 编译期报 `Error parsing JavaScript expression`；**`vue-tsc` 与 ESLint 都不报**（类型与规则层面均合法，故 P17 的「双端静态检查零错」未能拦住）。处置：抽 `searchAudits()` 函数、事件改单表达式；已实测 `pnpm build` 通过。**教训已写入 ARCH §34.7 ①：前端验收须含 `vite build`，仅 `vue-tsc` 不足以证明可交付。**
+> **销项清单**：P17 走查 **C1**（跨协议游标混用，REST↔MCP 双向）✅ / **C2**（vite 构建证据 + 上述缺陷修复）✅ / **S-1**（ARCH §31.9 第 2 条 OAuth2、第 3 条 rowFilter 同改「已落地」）✅。
+> **待需求方知悉（低风险）**：① **`prisma generate` 在 Windows 下可能报 `EPERM`**（引擎 DLL 被占用），不阻断——类型已生成（本次实测 `AccCredential.type` 正常可解析）；② **`nest build` 可能触发 safe-delete 的大量文件确认**（`dist` 上千文件），清理 `dist` 后重建即可；③ **`ACCESS_TOKEN_TTL_SECONDS` 是本期唯一新增配置键**，未配置时默认 1 小时。
 
 ## 更新规则（AI 必读）
 

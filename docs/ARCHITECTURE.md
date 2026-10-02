@@ -3105,8 +3105,8 @@ Authorization: Bearer {keyId}.{secret}
 ### 31.9 演进预留（本期不做，架构不堵路）
 
 1. **MCP 适配器（P15-C 已落地，D129~D134）**：`access/mcp/` 协议适配器已交付，复用 `ExtAuthGuard` / 配额 / 审计管线；`@modelcontextprotocol/sdk` + `zod` 已引入。详见 **§32**。
-2. **OAuth2 client_credentials**：`acc_credential` 加 `type` 列即可（默认 `api_key`），校验链不变。
-3. **行级 `rowFilter`**：`scope` JSON 已留键；实现时需求值器白名单（防注入），单独立项。
+2. **OAuth2 client_credentials（P18 已落地，D139~D142）**：`access/credential/` + `access/ext/` 交付 `type` 列与 token 端点，守卫双形态（`ik_*` / `it_*`），配额 / 审计 / 取数链零改动。详见 **§34**。
+3. **行级 `rowFilter`（P17 已落地，D136~D138）**：`access/credential/` 管理侧校验 + `PubDataService` 强制过滤通道 + `common/utils/query-filter.util.ts` 单一解析器；行级 `rowFilter` 与 W11 附件流收窄均已交付。详见 **§33**。
 4. **轮换双活窗口**：v1 轮换即时生效；双活需第二有效 secret 槽（加列）。
 5. **多应用凭证**：若 D126 将来放宽为一对多，拆 scope 出 `acc_grant` 表即可，凭证行不动。
 6. **审计维度扩展**：`acc_audit` 已含 `tableName` 与 `paramsSummary`，按需加列即可。
@@ -3335,4 +3335,97 @@ pub 域（请求 filter / 强制过滤）与 access 域（管理侧 rowFilter �
 `common/utils/query-filter.util.ts`（新增）/ `credential.service.buildRowFilter` / `credential.constant.MAX_ROW_FILTER` /
 `pub-data.service.parseFilterRaws`（共用解析器）/ `pub-data.service.attachmentStream(refFilter)` /
 `data.service.buildDbWhere`（同列 AND 修复）/ `access 前端凭证抽屉文本域` /
-`scripts/smoke-ext-access.ts`（57 项）/ `scripts/smoke-mcp.ts`（39 项）—— 明细见 §9 公共资产表。
+`scripts/smoke-ext-access.ts`（57 → P18 后 76 项）/ `scripts/smoke-mcp.ts`（39 → P18 后 41 项）—— 明细见 §9 公共资产表。
+
+---
+
+## 34. P18：OAuth2 client_credentials（接入凭证第二形态）
+
+> 为 `acc_credential` 增加第二形态：客户端用 `client_id` / `client_secret` 在 token 端点换取
+> **短时效 access token**，再以 `Bearer it_*` 使用既有全部对外端点（REST / MCP 同管线）。
+> **API Key 与 OAuth2 并存、互不影响**（P15 Q2 拍板「先 API Key、架构预留 OAuth」的兑现）。
+> 增量：**+1 列（`type`，迁移）/ +1 端点（token）/ +1 配置键 / 零新错误码 / 零新依赖 /
+> 内部 AI 工具 43 与对外 MCP 工具 3 均不变**（D139~~D142 / R151~~R155 / T155~T158）。
+
+### 34.1 落点与迁移
+
+- **迁移**：`acc_credential` 加列 `type varchar(16) NOT NULL DEFAULT 'api_key'`（存量行自动 `api_key`，
+  **零数据改写**；`20261002100000_add_credential_type`）。
+- 改动集中在 `access/` 域：`credential/`（形态校验、令牌存储 `token-store.ts`）+ `ext/`（守卫双形态、
+  `oauth-token.controller.ts`）。**配额 / 审计 / 取数 / 工具链零改动**——令牌解析后产出的 principal
+  与 API Key 路径**完全同构**。
+- `TokenStore` 归属 `credential/` 而非 `ext/`：`ExtModule` 已依赖 `CredentialModule`，反向归属会造成模块循环。
+
+### 34.2 令牌生命周期（D139/R151）
+
+```
+签发：POST /api/ext/oauth/token（client_id=keyId, client_secret=secret, grant_type=client_credentials）
+  → 凭证校验（sha256 比对、未吊销、未过期；**不限形态**，D141 迁移路径）
+  → token = "it_" + base64url(32B)
+  → Redis SET acc:token:{sha256(token)} = credentialId，EX = access.tokenTtlSeconds（默认 3600）
+  → Redis SADD acc:token:idx:{credId} {sha256(token)}（索引，不随 TTL）
+  → 请求配额 +1（D142）；审计 ext.oauth.token
+
+使用：Bearer it_* → GET acc:token:{sha256} → credentialId → **实查凭证行**（R153）→ 同一 principal 管线
+
+失效：吊销 / 轮换 secret → SMEMBERS idx → 逐个 DEL → DEL 索引（即时，R154）
+```
+
+- **键是摘要**：令牌原文不落库、不落日志、不进审计；Redis 快照泄露也拿不到可用令牌。
+- **索引不设 TTL**：孤儿成员（已自然过期的摘要）在下次签发时顺带清扫（凭证级基数极低，不建后台任务）。
+- **不设并发令牌数上限**：令牌风暴由请求配额兜底（D142）。
+
+### 34.3 守卫双形态（R153/R154）
+
+```
+ExtAuthGuard.canActivate → resolvePrincipal
+  → Bearer {keyId}.{secret}（含点号）→ 凭证校验（type 须 api_key；oauth 型直连 → 401，D141）
+  → Bearer it_...（形态匹配）→ Redis 查 credentialId → **实查凭证行**（principalOf）→ 同一 principal
+  → 其余形态 → 401 + WWW-Authenticate + 50019（与凭证失效同表现）
+```
+
+- **令牌路径为何回查 DB**：令牌只证明「持有者曾用正确 secret 换过令牌」，授权事实（scope / 吊销 / 到期）
+  **永远以凭证行为准**——这是「签发后收窄 scope 立即生效」「吊销即时失效」的实现方式，
+  无需逐令牌传播失效。
+- MCP 端点共用同一守卫（§32.3），故 `Bearer it_*` **天然可用于 `/api/ext/mcp`**；手动 MCP 配置仍推荐
+  API Key（令牌 1 小时过期，手贴体验差）。
+
+### 34.4 token 端点契约（D140/R152/R155）
+
+- 路径 `POST /api/ext/oauth/token`（与 `/api/ext/v1`、`/api/ext/mcp` 同族）。
+- 入参：`application/x-www-form-urlencoded` 优先（RFC 要求），JSON 宽容；`grant_type` 必填且仅 `client_credentials`。
+- 成功：RFC 6749 §5.1 三字段；**不回带 scope**（scope 以凭证行为准，避免快照错觉）。
+- 失败：RFC 6749 §5.2（`invalid_client` 401 / `invalid_request`、`unsupported_grant_type` 400）——
+  **平台 envelope 与业务码在此端点刻意不适用**（D140：互操作对象是 OAuth 客户端库）；
+  唯一例外是配额超限 429 走平台口径（未超 RFC 定义范围，客户端可据此退避）。
+- **控制器自写响应**：不经全局响应包装，也不经异常过滤器——「格式分治」的实现落点。
+- 401 由控制器 `recordUnauthorized` 等价的 `writeAudit` 留痕（`ownerId=0` 系统流水）；
+  secret / token 原文不进审计（摘要只含 `grant_type` 与 `client_id`）。
+
+### 34.5 前端（T157，最小产品化）
+
+- 凭证创建弹窗加「类型」二选一（默认 `API 密钥`）+ 一句话分工说明；编辑态**只读**并提示「类型创建后不可更改」。
+- `UpdateCredentialDto` **显式接收 `type` 仅用于报错**：否则全局 `ValidationPipe` 的 `whitelist` 会静默剥离，
+  用户以为改成功了（服务层因此返回 40001）。
+- 列表新增「类型」列（显示「API 密钥」/「OAuth2 令牌」，不暴露内部标识）。
+
+### 34.6 演进预留（本期不做）
+
+- RFC 8414 发现端点 + MCP 自动 OAuth 流程（归 MCP 二期一并议）；
+- 并发令牌数上限 / 令牌清单管理页（本期由请求配额兜底）；
+- JWT 自校验令牌（需吊销名单配合，与即时失效姿态冲突）；
+- refresh_token / authorization_code（无交互场景）。
+
+### 34.7 实测校正与本期销项（相对需求基线 `docs/P18/`）
+
+1. **修掉一个真缺陷：`access/index.vue` 无法通过 vite 生产构建**（P17 交付遗留，**本期走查 C2 证据抓出**）。
+   根因：prettier 把多语句的 `@click="auditDrawer.pageNo = 1; loadAudits()"` 拆成多行，而 Vue 模板表达式
+   **不支持换行分隔语句** → vite 编译期语法错误；`vue-tsc` 与 ESLint **都不报**（类型与规则层面均合法）。
+   处置：抽 `searchAudits()` 函数、事件改单表达式。**教训**：前端验收资产应含 `vite build`，
+   仅跑 `vue-tsc` 不足以证明可交付。
+2. **`TokenStore` 模块归属**：基线未指定；实现放 `credential/` 并由此模块导出（避免 ExtModule ↔ CredentialModule 循环）。
+3. **配额计入时机**：仅在客户端**通过校验后**计（D142）——无效 clientId 的请求不进配额表（否则凭猜 keyId 即可刷空他人配额）。
+4. **审计负例的归属**：`invalid_client` 时无凭证上下文 → `ownerId=0` 系统流水，不进属主检索（与守卫 401 留痕同口径）；
+   smoke 因此分两条断言（属主侧正例 + `ownerId=0` 直查负例）。
+5. **运维提示**：`prisma generate` 在 Windows 下可能因引擎 DLL 被占用报 `EPERM`（不阻断，类型已生成）；
+   `nest build` 可能触发 safe-delete 大量文件确认（清 `dist` 后重建即可）。
