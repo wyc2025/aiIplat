@@ -7,6 +7,11 @@ export interface UserInfoResult {
   user: Omit<SysUser, 'password'> & { dept: SysDept | null }
   /** 角色标识列表，如 ['admin'] */
   roles: string[]
+  /**
+   * 角色显示名列表（与 `roles` 同源同序），如 ['超级管理员']。
+   * 面向用户展示用——界面不应出现 `admin` 这类内部标识（AGENTS.md「界面文案准则」）。
+   */
+  roleLabels: string[]
   /** 权限标识列表，超管为 ['*'] */
   perms: string[]
   /** 权限过滤后的菜单树 */

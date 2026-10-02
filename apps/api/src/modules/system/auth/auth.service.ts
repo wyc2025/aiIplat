@@ -131,6 +131,8 @@ export class AuthService {
 
     const activeRoles = this.filterActiveRoles(user.userRoles.map((ur) => ur.role))
     const roles = activeRoles.map((role) => role.code)
+    // 角色显示名（与 roles 同源同序）：界面展示「超级管理员」而不是内部标识 `admin`
+    const roleLabels = activeRoles.map((role) => role.name)
     const isSuperAdmin = roles.includes('admin')
 
     const perms = await this.refreshPermsCache(user.id, activeRoles)
@@ -140,7 +142,7 @@ export class AuthService {
     const { password: _password, userRoles: _userRoles, ...userInfo } = user
     const tree = this.buildMenuTree(menus)
     await this.appendAppMenuSegment(tree, user.id)
-    return { user: userInfo, roles, perms, menus: tree }
+    return { user: userInfo, roles, roleLabels, perms, menus: tree }
   }
 
   /**
