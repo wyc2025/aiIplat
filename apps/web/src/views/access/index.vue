@@ -53,6 +53,8 @@ const formDialog = reactive({
   expiresAt: '',
   tables: [] as string[],
   fields: {} as Record<string, string[]>,
+  /** 行过滤文本（P17；JSON 对象文本，留空 = 不过滤） */
+  rowFilterText: '',
   /** 当前所选应用的暴露清单（编辑时按凭证绑定应用加载） */
   pubConfig: null as PubConfigTable[] | null,
   loadingSchema: false,
@@ -83,7 +85,9 @@ const auditDrawer = reactive({
 const activeApps = computed(() => apps.value)
 
 /** 当前所选应用**已暴露**的表（scope 只能从中选） */
-const exposedTables = computed(() => (formDialog.pubConfig ?? []).filter((table) => table.isExposed === 1))
+const exposedTables = computed(() =>
+  (formDialog.pubConfig ?? []).filter((table) => table.isExposed === 1),
+)
 
 /** 应用列表项归一（`listApps` 的 isPublic/status 为扩展字段） */
 function mapApp(app: { appCode: string; name: string }): AppOption {
@@ -160,6 +164,7 @@ async function openCreate(): Promise<void> {
   formDialog.expiresAt = ''
   formDialog.tables = []
   formDialog.fields = {}
+  formDialog.rowFilterText = ''
   formDialog.pubConfig = null
   formDialog.visible = true
   // 下拉取最新：页面加载后（或另一页签里）新建的应用要能选到
@@ -173,6 +178,9 @@ async function openEdit(item: CredentialItem): Promise<void> {
   formDialog.expiresAt = item.expiresAt ? item.expiresAt.slice(0, 19) : ''
   formDialog.tables = [...item.scope.tables]
   formDialog.fields = { ...(item.scope.fields ?? {}) }
+  formDialog.rowFilterText = item.scope.rowFilter
+    ? JSON.stringify(item.scope.rowFilter, null, 2)
+    : ''
   formDialog.visible = true
   await loadSchema(item.appCode)
 }
@@ -196,7 +204,9 @@ function tableFields(table: PubConfigTable): Array<{ id: string; name: string; l
 }
 
 function buildScope(): CredentialScopeInput | null {
-  const tables = formDialog.tables.filter((name) => exposedTables.value.some((table) => table.tableCode === name))
+  const tables = formDialog.tables.filter((name) =>
+    exposedTables.value.some((table) => table.tableCode === name),
+  )
   if (tables.length === 0) {
     ElMessage.warning('至少要选择 1 项已公开的数据')
     return null
@@ -205,7 +215,25 @@ function buildScope(): CredentialScopeInput | null {
   for (const [table, picked] of Object.entries(formDialog.fields)) {
     if (picked.length > 0 && tables.includes(table)) fields[table] = picked
   }
-  return { tables, fields }
+  // 行过滤（P17）：留空 = 不过滤；完整校验（表 / 字段 / 比较方式 / 值的类型）由服务端复核，
+  // 不合法会明确指出是哪个表的哪一条（50021），前端只拦「不是合法 JSON 对象」这类明显笔误
+  const raw = formDialog.rowFilterText.trim()
+  let rowFilter: Record<string, string[]> | null = null
+  if (raw) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      ElMessage.warning('行过滤填写有误：请填 JSON 对象，例如 {"book": ["status:eq:published"]}')
+      return null
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      ElMessage.warning('行过滤需要是「表名 → 条件数组」的对象形式')
+      return null
+    }
+    rowFilter = parsed as Record<string, string[]>
+  }
+  return { tables, fields, rowFilter }
 }
 
 async function submitForm(): Promise<void> {
@@ -294,9 +322,13 @@ async function onRotate(item: CredentialItem): Promise<void> {
 }
 
 async function onRevoke(item: CredentialItem): Promise<void> {
-  const ok = await confirmDialog(`吊销后不可恢复，外部系统将立即无法取数，确认吊销「${item.name}」？`, '提示', {
-    type: 'warning',
-  })
+  const ok = await confirmDialog(
+    `吊销后不可恢复，外部系统将立即无法取数，确认吊销「${item.name}」？`,
+    '提示',
+    {
+      type: 'warning',
+    },
+  )
   if (!ok) return
   try {
     await revokeCredential(item.id)
@@ -504,9 +536,7 @@ function resultText(code: number): string {
           <span
             v-else
             class="v-access__hint"
-          >
-            —
-          </span>
+          > — </span>
         </template>
       </el-table-column>
       <el-table-column
@@ -623,7 +653,9 @@ function resultText(code: number): string {
         </el-form-item>
 
         <el-form-item
-          v-for="table in exposedTables.filter((item) => formDialog.tables.includes(item.tableCode))"
+          v-for="table in exposedTables.filter((item) =>
+            formDialog.tables.includes(item.tableCode),
+          )"
           :key="table.tableCode"
           :label="`${table.label} 字段`"
         >
@@ -638,6 +670,21 @@ function resultText(code: number): string {
           </el-checkbox-group>
           <div class="v-access__hint">
             不勾选 = 该表全部已暴露字段
+          </div>
+        </el-form-item>
+
+        <el-form-item label="只看部分数据">
+          <el-input
+            v-model="formDialog.rowFilterText"
+            type="textarea"
+            :rows="3"
+            placeholder="留空表示不限制（格式见下方说明）"
+          />
+          <div class="v-access__hint">
+            按表填写筛选条件，只把符合条件的行开放给对接方。格式为「表名 → 条件数组」，例如
+            <code>{{ '{"book": ["status:eq:published"]}' }}</code>
+            表示只开放 book 表中 status 为 published 的行；比较方式支持 eq（等于）与
+            contains（包含）， 每张表最多 3 条，多条为「并且」的关系。
           </div>
         </el-form-item>
       </el-form>
@@ -737,7 +784,10 @@ function resultText(code: number): string {
         <el-button
           type="primary"
           :icon="Search"
-          @click="auditDrawer.pageNo = 1; loadAudits()"
+          @click="
+            auditDrawer.pageNo = 1
+            loadAudits()
+          "
         >
           查询
         </el-button>

@@ -7,12 +7,13 @@ import { get, post, put } from '@/utils/request'
  * 可读表与字段（只能收窄暴露范围）。`secret` 仅在**创建 / 轮换**响应出现一次，此后任何接口不回显。
  */
 
-/** 凭证授权范围（R133/D125）：表 + 可选字段（缺省表 = 该表全部已暴露字段） */
+/** 凭证授权范围（R133/D125 + P17 D136）：表 + 可选字段 + 可选行过滤（缺省表 = 该表全部已暴露字段） */
 export interface CredentialScope {
   tables: string[]
   fields: Record<string, string[]>
   ops: ['read']
-  rowFilter: null
+  /** 行级过滤 `{表名: ["字段:op:值", …]}`（P17 第四纵深）；null = 不过滤 */
+  rowFilter: Record<string, string[]> | null
 }
 
 /** 凭证视图（管理侧；**不含 secret**，只有 keyId 与 secret 前缀） */
@@ -45,6 +46,8 @@ export interface CredentialIssued extends CredentialItem {
 export interface CredentialScopeInput {
   tables: string[]
   fields?: Record<string, string[]>
+  /** 行级过滤（P17）；缺省 = 不过滤 */
+  rowFilter?: Record<string, string[]> | null
 }
 
 /** 审计条目（acc_audit 出域形态） */
