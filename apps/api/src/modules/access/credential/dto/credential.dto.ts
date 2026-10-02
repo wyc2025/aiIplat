@@ -11,7 +11,7 @@ import {
   ValidateNested,
 } from 'class-validator'
 
-/** 凭证 scope 入参（R133）：tables 必填非空；fields 可选（缺省 = 该表全部已暴露字段） */
+/** 凭证 scope 入参（R133；P17 启用第四纵深 rowFilter）：tables 必填非空；fields / rowFilter 可选 */
 export class CredentialScopeDto {
   @ApiProperty({ description: '可读表名清单（至少 1 张；须为已暴露的表）', type: [String] })
   @IsArray({ message: 'scope.tables 必须是数组' })
@@ -26,6 +26,16 @@ export class CredentialScopeDto {
   @IsOptional()
   @IsObject({ message: 'scope.fields 必须是对象' })
   fields?: Record<string, string[]>
+
+  @ApiPropertyOptional({
+    description:
+      '行级过滤 {表名: ["字段:op:值", …]}（P17 第四纵深）；缺省 = 不过滤。' +
+      '条件与请求 filter 同语法（op 取 eq / contains），每表至多 3 条、多条为「且」的关系',
+    type: Object,
+  })
+  @IsOptional()
+  @IsObject({ message: 'scope.rowFilter 必须是对象' })
+  rowFilter?: Record<string, string[]> | null
 }
 
 /** 创建凭证（API-P15 §1-1） */

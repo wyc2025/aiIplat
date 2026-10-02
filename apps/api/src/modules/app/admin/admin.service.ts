@@ -8,11 +8,7 @@ import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { RedisService } from '../../../infra/redis/redis.service'
 import { invalidatePubAll, invalidatePubData } from '../pub/pub.cache'
 import { invalidateAppSchema } from '../schema/schema.cache'
-import {
-  cleanExpiredDraftsCore,
-  purgeDeletedAppsCore,
-  softDeleteApp,
-} from './app-clean.core'
+import { cleanExpiredDraftsCore, purgeDeletedAppsCore, softDeleteApp } from './app-clean.core'
 import type { CreateAppDto, ListAppQueryDto, UpdateAppDto } from './dto/admin.dto'
 
 /** 应用状态：draft（AI 草稿，不占 active 额度）/ active（已入册） */
@@ -283,7 +279,6 @@ export class AdminService {
     ]
   }
 
-
   /**
    * 发布 / 取消发布（R103：置 1 先校验≥1 暴露表，缺项 50012 带清单；置 0 即时失效取数面缓存）。
    * P14 D115：`is_public` 语义为「可被授权读取的总开关」，不再产出公开链接（pub_code 消费停止）。
@@ -452,7 +447,11 @@ export class AdminService {
     appCode: string
     name: string
     isPublic: number
-    tables: Array<{ name: string; label: string; fields: Array<{ name: string; label: string }> }>
+    tables: Array<{
+      name: string
+      label: string
+      fields: Array<{ name: string; label: string; type: string }>
+    }>
   }> {
     const app = await this.assertOwned(userId, code)
     const tables = await this.prisma.appTable.findMany({
@@ -464,7 +463,7 @@ export class AdminService {
       ? await this.prisma.appField.findMany({
           where: { tableId: { in: tables.map((table) => table.id) }, isDeleted: 0, isExposed: 1 },
           orderBy: [{ sort: 'asc' }, { id: 'asc' }],
-          select: { tableId: true, name: true, label: true },
+          select: { tableId: true, name: true, label: true, type: true },
         })
       : []
     return {
@@ -477,7 +476,8 @@ export class AdminService {
         label: table.label,
         fields: fields
           .filter((field) => field.tableId === table.id)
-          .map((field) => ({ name: field.name, label: field.label })),
+          // `type` 供 access 域校验 rowFilter 的值可否按字段定义解析（P17 R147）
+          .map((field) => ({ name: field.name, label: field.label, type: field.type })),
       })),
     }
   }

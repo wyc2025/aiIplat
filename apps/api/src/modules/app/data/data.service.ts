@@ -100,7 +100,12 @@ export class DataService {
 
   /** get 语义糖（GET /app/data/record） */
   async getRecord(userId: bigint, dto: RecordQueryDto) {
-    return this.query(userId, { appCode: dto.appCode, op: 'get', table: dto.table, rowId: dto.rowId })
+    return this.query(userId, {
+      appCode: dto.appCode,
+      op: 'get',
+      table: dto.table,
+      rowId: dto.rowId,
+    })
   }
 
   /**
@@ -186,7 +191,10 @@ export class DataService {
     app: AppDef,
     table: ResolvedTable,
     cap: number,
-  ): Promise<{ rows: Array<{ rowId: string; data: Record<string, unknown> }>; truncated: boolean }> {
+  ): Promise<{
+    rows: Array<{ rowId: string; data: Record<string, unknown> }>
+    truncated: boolean
+  }> {
     const records = await this.prisma.appRecord.findMany({
       where: { tableId: table.id, deletedAt: null },
       orderBy: { id: 'asc' },
@@ -313,7 +321,7 @@ export class DataService {
     return this.prisma.$transaction((tx) => this.createRow(tx, app, table, values, userId))
   }
 
-  /** 更新行（部分字段；未提供字段保持原值） */  async updateRow(
+  /** 更新行（部分字段；未提供字段保持原值） */ async updateRow(
     db: Db,
     app: AppDef,
     table: ResolvedTable,
@@ -422,13 +430,19 @@ export class DataService {
           break
         case 'bool':
           if (typeof raw !== 'boolean') {
-            throw new BusinessException(ErrorCode.AppDataInvalid, `字段「${field.label}」应为布尔值`)
+            throw new BusinessException(
+              ErrorCode.AppDataInvalid,
+              `字段「${field.label}」应为布尔值`,
+            )
           }
           data[field.name] = raw
           break
         case 'datetime': {
           if (typeof raw !== 'string' || Number.isNaN(Date.parse(raw))) {
-            throw new BusinessException(ErrorCode.AppDataInvalid, `字段「${field.label}」应为合法日期时间`)
+            throw new BusinessException(
+              ErrorCode.AppDataInvalid,
+              `字段「${field.label}」应为合法日期时间`,
+            )
           }
           data[field.name] = new Date(raw).toISOString()
           break
@@ -436,7 +450,10 @@ export class DataService {
         case 'enum': {
           const allowed = new Set((field.enumOptions ?? []).map((option) => option.value))
           if (!allowed.has(String(raw))) {
-            throw new BusinessException(ErrorCode.AppDataInvalid, `字段「${field.label}」取值不在枚举内`)
+            throw new BusinessException(
+              ErrorCode.AppDataInvalid,
+              `字段「${field.label}」取值不在枚举内`,
+            )
           }
           data[field.name] = String(raw)
           break
@@ -522,19 +539,32 @@ export class DataService {
     filters: QueryFilterDto[],
   ): Prisma.AppRecordWhereInput {
     const where: Prisma.AppRecordWhereInput = { tableId: table.id, deletedAt: null }
+    // 同一列的多个条件必须**并列 AND**，不能被后一条覆盖（P17 T152 实测抓到的真缺陷）：
+    // 凭证 rowFilter 与请求 filter 落在同一字段时，覆盖会让请求参数顶掉强制条件 ——
+    // 等于把「收窄」变成「放宽」，凭证持有者可用同字段 filter 读到授权外的行。
+    const conjunctions: Prisma.AppRecordWhereInput[] = []
     for (const filter of filters) {
       const column = this.indexColumn(table, filter.f)
+      let condition: Prisma.AppRecordWhereInput
       if (filter.op === 'eq') {
-        Object.assign(where, { [column]: String(filter.v) })
+        condition = { [column]: String(filter.v) }
       } else if (filter.op === 'ne') {
-        Object.assign(where, { [column]: { not: String(filter.v) } })
+        condition = { [column]: { not: String(filter.v) } }
       } else if (filter.op === 'contains') {
-        Object.assign(where, { [column]: { contains: String(filter.v) } })
+        condition = { [column]: { contains: String(filter.v) } }
       } else if (filter.op === 'in') {
         const list = Array.isArray(filter.v) ? filter.v.map((item) => String(item)) : []
-        Object.assign(where, { [column]: { in: list } })
+        condition = { [column]: { in: list } }
+      } else {
+        continue
+      }
+      if (Object.prototype.hasOwnProperty.call(where, column)) {
+        conjunctions.push(condition)
+      } else {
+        Object.assign(where, condition)
       }
     }
+    if (conjunctions.length > 0) where.AND = conjunctions
     return where
   }
 
@@ -720,7 +750,10 @@ export class DataService {
     return projected
   }
 
-  private async loadRows(table: ResolvedTable, rowIds: string[]): Promise<Map<string, DataRowView>> {
+  private async loadRows(
+    table: ResolvedTable,
+    rowIds: string[],
+  ): Promise<Map<string, DataRowView>> {
     if (rowIds.length === 0) return new Map()
     const rows = await this.prisma.appRecord.findMany({
       where: { tableId: table.id, rowId: { in: rowIds }, deletedAt: null },
@@ -762,7 +795,10 @@ export class DataService {
         where: { appId: app.id, fromTableId: table.id, fromFieldId: field.id, deletedAt: null },
       })
       if (!rel) {
-        throw new BusinessException(ErrorCode.AppDataInvalid, `多值关联字段「${field.label}」缺少关系定义`)
+        throw new BusinessException(
+          ErrorCode.AppDataInvalid,
+          `多值关联字段「${field.label}」缺少关系定义`,
+        )
       }
       const parent = await db.appRecord.findUnique({ where: { id: recordId } })
       if (!parent) continue

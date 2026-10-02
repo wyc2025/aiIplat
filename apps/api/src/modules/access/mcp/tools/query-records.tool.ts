@@ -78,11 +78,13 @@ export function registerQueryRecordsTool(server: McpServer, deps: McpToolDeps): 
         if (args.filter) query.filter = args.filter
         if (args.expand) query.expand = [args.expand]
 
+        // P17 R150：rowFilter 经同一取数内核透明继承（工具入参与描述不动，R143 冻结不变）
         const { rows, sort } = await deps.appFacade.publicListAll(
           deps.principal.ownerId,
           deps.appCode,
           args.table,
           query,
+          deps.contract.mandatoryFilters(args.table, deps.principal.scope),
         )
         const { keys, signature } = deps.contract.resolveSort(sort)
         const cursor = deps.contract.decodeCursor(args.cursor ?? '', signature)

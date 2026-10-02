@@ -203,7 +203,10 @@ export class AppFacade {
    * 返回 schema 全量打包（表含字段全量、n:n 关系、功能页 schema 原样）+ 应用元数据；
    * 供 market 域组装快照并落 `market_listing.snapshot`。
    */
-  async exportStructure(userId: bigint, appCode: string): Promise<{
+  async exportStructure(
+    userId: bigint,
+    appCode: string,
+  ): Promise<{
     ok: true
     appId: string
     name: string
@@ -411,7 +414,12 @@ export class AppFacade {
     appCode: string,
   ): Promise<{ appId: string; appCode: string; name: string; description: string | null }> {
     const app = await this.pubDataService.resolvePublicApp(ownerId, appCode)
-    return { appId: app.id.toString(), appCode: app.code, name: app.name, description: app.description }
+    return {
+      appId: app.id.toString(),
+      appCode: app.code,
+      name: app.name,
+      description: app.description,
+    }
   }
 
   /** 取数面暴露表结构（§30.4 `/schema`；缓存 600s） */
@@ -439,8 +447,12 @@ export class AppFacade {
     appCode: string,
     table: string,
     query: Record<string, unknown>,
-  ): Promise<{ rows: Array<Record<string, unknown>>; sort: Array<{ f: string; dir: 'asc' | 'desc' }> }> {
-    return this.pubDataService.listAll(ownerId, appCode, table, query)
+    mandatoryFilters: string[] = [],
+  ): Promise<{
+    rows: Array<Record<string, unknown>>
+    sort: Array<{ f: string; dir: 'asc' | 'desc' }>
+  }> {
+    return this.pubDataService.listAll(ownerId, appCode, table, query, mandatoryFilters)
   }
 
   /** 取数面单行（§30.4 `/tables/:table/records/:rowId`）；返回 `{ op, row }`（取数执行器语义） */
@@ -450,8 +462,9 @@ export class AppFacade {
     table: string,
     rowId: string,
     query: Record<string, unknown>,
+    mandatoryFilters: string[] = [],
   ): Promise<{ op: string; row: Record<string, unknown> }> {
-    return this.pubDataService.getRow(ownerId, appCode, table, rowId, query)
+    return this.pubDataService.getRow(ownerId, appCode, table, rowId, query, mandatoryFilters)
   }
 
   /**
@@ -463,8 +476,15 @@ export class AppFacade {
     appCode: string,
     fileId: string,
     range?: { start: number; end: number },
+    refFilter?: (table: string, field: string) => boolean,
   ): Promise<AppAttachmentStream & { contentType: string; inline: boolean }> {
-    const meta = await this.pubDataService.attachmentStream(ownerId, appCode, fileId, range)
+    const meta = await this.pubDataService.attachmentStream(
+      ownerId,
+      appCode,
+      fileId,
+      range,
+      refFilter,
+    )
     const resolved = resolveAppPubMime(meta.ext)
     return { ...meta, contentType: resolved.contentType, inline: resolved.inline }
   }

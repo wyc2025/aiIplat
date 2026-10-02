@@ -13,3 +13,6 @@ export const EXT_API_PREFIX = 'ext/v1'
 
 /** 对外列表默认页大小（R136；上限沿用 R104 的 size ≤ 50） */
 export const EXT_DEFAULT_PAGE_SIZE = 20
+
+/** 凭证行级过滤（`scope.rowFilter`）每表条件条数上限（P17 R147；与 R104 请求 filter ≤3 对齐） */
+export const MAX_ROW_FILTER = 3

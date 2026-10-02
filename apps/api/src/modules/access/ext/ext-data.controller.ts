@@ -1,13 +1,4 @@
-import {
-  Controller,
-  Get,
-  Param,
-  Query,
-  Req,
-  Res,
-  UseGuards,
-  UseInterceptors,
-} from '@nestjs/common'
+import { Controller, Get, Param, Query, Req, Res, UseGuards, UseInterceptors } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger'
 import type { Response } from 'express'
 import { ErrorCode } from '../../../common/constants/error-code'
@@ -17,6 +8,7 @@ import { SkipTransform } from '../../../gateway/decorators/skip-transform.decora
 import { AppFacade } from '../../app/facade/app-facade.service'
 import { AuditInterceptor } from '../audit/audit.interceptor'
 import type { CredentialPrincipal } from '../credential/credential.service'
+import type { CredentialScope } from '../credential/credential.util'
 import { QuotaInterceptor } from '../quota/quota.interceptor'
 import { CredentialUnauthorizedException, ExtAuthGuard, type ExtRequest } from './ext-auth.guard'
 import { ExtContractService } from './ext-contract.service'
@@ -86,11 +78,13 @@ export class ExtDataController {
     const principal = await this.resolvePrincipal(appCode, req)
     this.contract.assertTableInScope(table, principal.scope)
     const size = this.contract.resolveSize(query.size)
+    // P17 R148：凭证 rowFilter 强制注入（与请求 filter 并列 AND 取交集；条件冲突 = 空页正常返回）
     const { rows, sort } = await this.appFacade.publicListAll(
       principal.ownerId,
       principal.appCode,
       table,
       query,
+      this.contract.mandatoryFilters(table, principal.scope),
     )
     const { keys, signature } = this.contract.resolveSort(sort)
     const cursor = this.contract.decodeCursor(this.str(query.after), signature)
@@ -125,6 +119,8 @@ export class ExtDataController {
       table,
       rowId,
       query,
+      // P17 R148：行不满足 rowFilter → 40400（与「行不存在」同表现，防探测不裂缝）
+      this.contract.mandatoryFilters(table, principal.scope),
     )
     this.markAudit(res, 'detail', table, 1, this.summarize(query))
     // 内部 detail 形状为 `{ op, row }`（取数执行器语义），对外契约只出 `row`
@@ -214,6 +210,8 @@ export class ExtDataController {
       principal.ownerId,
       principal.appCode,
       fileId,
+      undefined,
+      (table, field) => this.inCredentialScope(table, field, principal.scope),
     )
     const size = Number(meta.size)
     const disposition = download || !meta.inline ? 'attachment' : 'inline'
@@ -249,10 +247,13 @@ export class ExtDataController {
 
     const stream = parsed
       ? (
-          await this.appFacade.publicAttachment(principal.ownerId, principal.appCode, fileId, {
-            start: parsed.start,
-            end: parsed.end,
-          })
+          await this.appFacade.publicAttachment(
+            principal.ownerId,
+            principal.appCode,
+            fileId,
+            { start: parsed.start, end: parsed.end },
+            (table, field) => this.inCredentialScope(table, field, principal.scope),
+          )
         ).stream
       : meta.stream
     if (parsed) {
@@ -264,6 +265,17 @@ export class ExtDataController {
       res.status(200).set({ 'Content-Length': String(size) })
     }
     stream.pipe(res)
+  }
+
+  /**
+   * W11（T151）：附件引用是否落在凭证 scope 内——表 ∈ `scope.tables` ∧（该表未限字段 或 字段 ∈ `scope.fields[表]`）。
+   * 与 records/detail 的 `assertTableInScope` 同口径（scope 即授权边界）；越界引用由 app 域侧过滤掉，
+   * 全部越界时与「未引用」同表现（40400，防探测不裂缝）。display / 匿名分支无 scope 概念，不走此判定。
+   */
+  private inCredentialScope(table: string, field: string, scope: CredentialScope): boolean {
+    if (!scope.tables.includes(table)) return false
+    const picked = scope.fields?.[table]
+    return !picked || picked.length === 0 || picked.includes(field)
   }
 
   /** 查询参数取字符串（缺省空串） */

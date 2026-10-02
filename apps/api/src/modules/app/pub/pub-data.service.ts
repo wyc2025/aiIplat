@@ -4,6 +4,11 @@ import type { AppDef } from '@prisma/client'
 import { ErrorCode } from '../../../common/constants/error-code'
 import { RedisKey } from '../../../common/constants/redis-key'
 import { BusinessException } from '../../../common/exceptions/business.exception'
+import {
+  coerceFilterValue,
+  parseFilterRaw,
+  supportsContains,
+} from '../../../common/utils/query-filter.util'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { RedisService } from '../../../infra/redis/redis.service'
 import { CloudFacade, type AppAttachmentStream } from '../../cloud/facade/cloud-facade.service'
@@ -29,10 +34,6 @@ import type { ResolvedTable } from '../schema/schema.types'
 
 /** R101 内置三件套：永远输出（不受字段暴露影响；内部列永不输出） */
 const BUILTIN_FIELDS = new Set(['rowId', 'createdAt', 'updatedAt'])
-/** R104 filter op 白名单（contains 限 text/enum） */
-const PUBLIC_FILTER_OPS = ['eq', 'contains'] as const
-/** contains 允许的字段类型（R104） */
-const CONTAINS_TYPES = new Set(['text', 'enum'])
 /** 公开列表默认 size（R104：上限走配置 app.pubListMaxSize，默认 50） */
 const DEFAULT_PUB_SIZE = 20
 
@@ -246,12 +247,18 @@ export class PubDataService {
     appCode: string,
     tableName: string,
     query: Record<string, unknown>,
+    mandatoryFilters: string[] = [],
   ): Promise<{ rows: Array<Record<string, unknown>>; sort: QuerySortDto[] }> {
     const app = await this.resolvePublicApp(ownerId, appCode)
     const { table, tableId } = await this.resolveExposedTable(app.id, tableName)
     const exposure = await this.computeExposure(app.id, table, tableId)
     // 复用 R104 参数解析（size 由契约层控制，这里传 1 占位：本方法不做切片）
-    const plan = this.parseListParams({ ...query, page: 1, size: 1 }, table, exposure)
+    const plan = this.parseListParams(
+      { ...query, page: 1, size: 1 },
+      table,
+      exposure,
+      mandatoryFilters,
+    )
     const { rows } = await this.dataService.queryForPublic(app, table, {
       op: 'list',
       filter: plan.filter,
@@ -261,13 +268,20 @@ export class PubDataService {
     return { rows: rows.map((view) => this.project(view, exposure, plan)), sort: plan.sort }
   }
 
-  /** 取数面单行（行不存在 → 40400；支持 expand） */
+  /**
+   * 取数面单行（行不存在 → 40400；支持 expand）。
+   *
+   * @param mandatoryFilters 强制过滤条件串（P17 R148：凭证 `scope.rowFilter`）。**非空时改走 list 路径**
+   *   （`op: 'get'` 不支持 WHERE 段），用与列表完全同源的 WHERE 取行；行不满足条件与行不存在
+   *   同表现为 40400（防探测口径不裂缝）。空数组时保持原单行直取（零额外开销）。
+   */
   async getRow(
     ownerId: bigint,
     appCode: string,
     tableName: string,
     rowId: string,
     query: Record<string, unknown>,
+    mandatoryFilters: string[] = [],
   ) {
     const app = await this.resolvePublicApp(ownerId, appCode)
     const { table, tableId } = await this.resolveExposedTable(app.id, tableName)
@@ -288,6 +302,22 @@ export class PubDataService {
       expandFields,
       cacheKey: '',
     }
+    if (mandatoryFilters.length > 0) {
+      // 强制过滤（rowFilter）：与 list 同源的 WHERE 段；取回后按 rowId 定位（单行语义不变）
+      const filter = this.parseFilterRaws(mandatoryFilters, table, exposure, () => {
+        throw new BusinessException(ErrorCode.NotFound, '资源不存在')
+      })
+      const { rows } = await this.dataService.queryForPublic(app, table, {
+        op: 'list',
+        filter,
+        sort: [],
+        expand,
+      })
+      const hit = rows.find((row) => String(row.rowId) === String(rowId))
+      if (!hit) throw new BusinessException(ErrorCode.NotFound, '资源不存在')
+      plan.filter = filter
+      return { op: 'get', row: this.project(hit, exposure, plan) }
+    }
     const { rows } = await this.dataService.queryForPublic(app, table, {
       op: 'get',
       rowId,
@@ -300,13 +330,19 @@ export class PubDataService {
 
   /**
    * 公开附件流：① `app_attachment_ref` 有引用（deleted_at 过滤）② 所属表·字段有效暴露
-   * ③ MIME 口径由控制器按 R26 输出。任一失败 → 40400（防探测）。
+   * ③ **调用方附加判定**（`refFilter`，W11 收窄用）④ MIME 口径由控制器按 R26 输出。
+   * 任一失败 → 40400（防探测）。
+   *
+   * @param refFilter 可选的引用级判定（表名 → 字段名）。**access 域 credential 分支**用它做
+   *   凭证 scope 交集（W11/T151）：不落在授权范围内的引用不参与「可见」判定——全部引用都越界
+   *   时与「未引用」同表现为 40400。谓词由调用方注入，本域不认识凭证概念（铁律 6：单向依赖）。
    */
   async attachmentStream(
     ownerId: bigint,
     appCode: string,
     fileId: string,
     range?: { start: number; end: number },
+    refFilter?: (table: string, field: string) => boolean,
   ): Promise<AppAttachmentStream> {
     const app = await this.resolvePublicApp(ownerId, appCode)
     let id: bigint
@@ -326,9 +362,11 @@ export class PubDataService {
     for (const ref of refs) {
       const table = await this.prisma.appTable.findFirst({
         where: { id: ref.tableId, appId: app.id, deletedAt: null, isSystem: 0, isExposed: 1 },
-        select: { id: true },
+        select: { id: true, name: true },
       })
       if (!table) continue
+      // W11（T151）：凭证 scope 交集由调用方判定；越界引用视同「无引用」（最终统一 40400，防探测不裂缝）
+      if (refFilter && !refFilter(table.name, ref.fieldName)) continue
       const field = await this.prisma.appField.findFirst({
         where: { tableId: table.id, name: ref.fieldName, isDeleted: 0, isExposed: 1 },
         select: { id: true },
@@ -440,11 +478,7 @@ export class PubDataService {
   }
 
   /** 展开对象裁剪：rowId 恒留，其余仅暴露字段（有请求子集时再取交集） */
-  private pickExpanded(
-    item: unknown,
-    allowed: Set<string>,
-    requested: string[] | null,
-  ): unknown {
+  private pickExpanded(item: unknown, allowed: Set<string>, requested: string[] | null): unknown {
     if (typeof item !== 'object' || item === null || Array.isArray(item)) return item
     const record = item as Record<string, unknown>
     const out: Record<string, unknown> = {}
@@ -462,10 +496,18 @@ export class PubDataService {
 
   // ==================== 内部：R104 参数解析 ====================
 
+  /**
+   * R104 参数白名单解析。
+   *
+   * @param mandatoryFilters **强制过滤条件串**（P17 R148：access 域传入的凭证 `scope.rowFilter`）。
+   *   与请求方 `filter` 走**同一解析器**、在 WHERE 段并列 AND；**不受请求方 `filter` 条数上限约束**
+   *   （上限是请求方参数纪律，强制条件条数由凭证配置侧保证 ≤3）。运行期引用失效 → 40400（R149 判拒）。
+   */
   private parseListParams(
     query: Record<string, unknown>,
     table: ResolvedTable,
     exposure: ExposureSet,
+    mandatoryFilters: string[] = [],
   ): PublicPlan {
     const maxSize = this.config.get<number>('app.pubListMaxSize', 50)
     const maxSort = this.config.get<number>('app.pubSortMaxFields', 2)
@@ -475,9 +517,7 @@ export class PubDataService {
     if (page < 1) this.paramInvalid('page 必须 ≥ 1')
     const rawSize = query.size
     const size =
-      rawSize === undefined || rawSize === ''
-        ? DEFAULT_PUB_SIZE
-        : this.intParam(rawSize, 0, 'size')
+      rawSize === undefined || rawSize === '' ? DEFAULT_PUB_SIZE : this.intParam(rawSize, 0, 'size')
     if (size < 1 || size > maxSize) {
       this.paramInvalid(`size 需为 1~${maxSize} 的整数`)
     }
@@ -502,28 +542,15 @@ export class PubDataService {
       else executorSort.push(item)
     }
 
-    const filter: QueryFilterDto[] = []
-    for (const raw of filterRaws) {
-      const first = raw.indexOf(':')
-      const second = first >= 0 ? raw.indexOf(':', first + 1) : -1
-      if (first < 0 || second < 0) this.paramInvalid(`filter 需为「字段:op:值」：${raw}`)
-      const field = raw.slice(0, first)
-      const op = raw.slice(first + 1, second)
-      const value = raw.slice(second + 1)
-      if (!(PUBLIC_FILTER_OPS as readonly string[]).includes(op)) {
-        this.paramInvalid(`filter op 仅允许 ${PUBLIC_FILTER_OPS.join('/')}`)
-      }
-      this.assertPublicField(field, table, exposure, '过滤')
-      const definition = table.fieldMap.get(field)
-      if (op === 'contains' && (!definition || !CONTAINS_TYPES.has(definition.type))) {
-        this.paramInvalid(`contains 仅支持文本/枚举字段：${field}`)
-      }
-      filter.push({
-        f: field,
-        op: op as 'eq' | 'contains',
-        v: this.coerceFilterValue(definition?.type, value),
-      })
-    }
+    // 请求方 filter（违例 40001）与强制过滤 rowFilter（运行期失效判拒 40400）共用同一解析器（R147/R148）
+    const filter: QueryFilterDto[] = [
+      ...this.parseFilterRaws(filterRaws, table, exposure, (message) => this.paramInvalid(message)),
+      ...this.parseFilterRaws(mandatoryFilters, table, exposure, () => {
+        // R149：强制过滤引用的表/字段在签发后失效 → 该表整体判不可见（收窄方向），
+        // **不静默跳过失效条目**（跳过 = 结果集意外放大 = 安全回归）；恢复暴露即自愈。
+        throw new BusinessException(ErrorCode.NotFound, '资源不存在')
+      }),
+    ]
 
     const { expand, expandFields } = this.parseExpand(
       this.strList(query.expand, 'expand'),
@@ -544,7 +571,38 @@ export class PubDataService {
     }
   }
 
-  /** expand（≤1 层，限 ref 字段且目标表已暴露；可指定字段子集，服务端仍按白名单裁剪） */
+  /**
+   * 过滤条件串 → 执行器条件的解析（**R104 单一解析器**：请求 filter 与强制过滤 rowFilter 共用）。
+   *
+   * 形态 / op 合法性走 `common/utils/query-filter.util`——与 access 域管理侧的 rowFilter 校验
+   * **同一份实现**（R147）；字段准入与值归一复用本服务的 `assertPublicField` 与公共 `coerceFilterValue`。
+   *
+   * @param onError 违例处理 —— 错误码由调用方决定（请求参数 40001 / 运行期失效判拒 40400，R149）
+   */
+  private parseFilterRaws(
+    raws: string[],
+    table: ResolvedTable,
+    exposure: ExposureSet,
+    onError: (message: string) => never,
+  ): QueryFilterDto[] {
+    const filter: QueryFilterDto[] = []
+    for (const raw of raws) {
+      const parsed = parseFilterRaw(raw)
+      if (!parsed.ok) onError(parsed.error)
+      const { field, op, value } = parsed.value
+      this.assertPublicField(field, table, exposure, '过滤', onError)
+      const definition = table.fieldMap.get(field)
+      if (op === 'contains' && !supportsContains(definition?.type)) {
+        onError(`contains 仅支持文本/枚举字段：${field}`)
+      }
+      const coerced = coerceFilterValue(definition?.type, value)
+      if (!coerced.ok) onError(coerced.error)
+      filter.push({ f: field, op, v: coerced.value })
+    }
+    return filter
+  }
+
+  /** expand（≤1 层，限 ref 字段且目标表已暴露；可指定字段子集；服务端仍按白名单裁剪） */
   private parseExpand(
     raws: string[],
     table: ResolvedTable,
@@ -600,21 +658,11 @@ export class PubDataService {
     table: ResolvedTable,
     exposure: ExposureSet,
     usage: string,
+    onError: (message: string) => never = (message) => this.paramInvalid(message),
   ): void {
     if (BUILTIN_FIELDS.has(field)) return
-    if (!table.fieldMap.has(field)) this.paramInvalid(`${usage}字段不存在：${field}`)
-    if (!exposure.allowed.has(field)) this.paramInvalid(`${usage}字段未暴露：${field}`)
-  }
-
-  /** 过滤值按字段类型归一（number → 数值；bool → 布尔；其余原样） */
-  private coerceFilterValue(type: string | undefined, raw: string): unknown {
-    if (type === 'number') {
-      const num = Number(raw)
-      if (!Number.isFinite(num)) this.paramInvalid(`数值字段过滤值非法：${raw}`)
-      return num
-    }
-    if (type === 'bool') return raw === 'true' || raw === '1'
-    return raw
+    if (!table.fieldMap.has(field)) onError(`${usage}字段不存在：${field}`)
+    if (!exposure.allowed.has(field)) onError(`${usage}字段未暴露：${field}`)
   }
 
   private intParam(value: unknown, fallback: number, name: string): number {
@@ -678,7 +726,8 @@ export class PubDataService {
     if (left === null || left === undefined) return -1 * order
     if (right === null || right === undefined) return 1 * order
     const a = left instanceof Date ? left.getTime() : typeof left === 'number' ? left : String(left)
-    const b = right instanceof Date ? right.getTime() : typeof right === 'number' ? right : String(right)
+    const b =
+      right instanceof Date ? right.getTime() : typeof right === 'number' ? right : String(right)
     if (typeof a === 'number' && typeof b === 'number') return (a - b) * order
     return String(a).localeCompare(String(b)) * order
   }

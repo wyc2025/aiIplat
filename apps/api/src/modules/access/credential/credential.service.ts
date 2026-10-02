@@ -2,7 +2,13 @@ import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { Prisma, type AccCredential } from '@prisma/client'
 import { ErrorCode } from '../../../common/constants/error-code'
+import { MAX_ROW_FILTER } from '../../../common/constants/credential.constant'
 import { BusinessException } from '../../../common/exceptions/business.exception'
+import {
+  coerceFilterValue,
+  parseFilterRaw,
+  supportsContains,
+} from '../../../common/utils/query-filter.util'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { AppFacade } from '../../app/facade/app-facade.service'
 import { QuotaService } from '../quota/quota.service'
@@ -328,7 +334,93 @@ export class CredentialService {
       }
     }
 
-    return { tables, fields, ops: ['read'], rowFilter: null }
+    return {
+      tables,
+      fields,
+      ops: ['read'],
+      // P17 R147：行级过滤（第四纵深）——表 ∈ tables、字段 ∈ 该表 scope 字段口径且在暴露开关内
+      rowFilter: this.buildRowFilter(input.rowFilter, tables, exposed, fields),
+    }
+  }
+
+  /**
+   * rowFilter 构建与校验（P17 R147）。
+   *
+   * 语法 / 算子 / 值类型复用 R104 请求 filter 的**同一解析器**（`common/utils/query-filter.util`），
+   * 本方法只补 scope 语义：表 ∈ `scope.tables`、字段 ∈ 该表 scope 字段口径（`fields` 未配 = 全部已暴露字段）
+   * 且在暴露开关内。任一违例 → **50021**，errmsg 指明条目（表 + 条目 + 原因）。
+   *
+   * @returns 归一后的条件表；未配 / 空对象 → `null`（不过滤，现行行为）
+   */
+  private buildRowFilter(
+    input: CredentialScopeInput['rowFilter'],
+    tables: string[],
+    exposed: Map<string, ExposedTable>,
+    fields: Record<string, string[]>,
+  ): Record<string, string[]> | null {
+    if (input === undefined || input === null) return null
+    if (typeof input !== 'object' || Array.isArray(input)) {
+      throw new BusinessException(
+        ErrorCode.CredentialScopeInvalid,
+        'scope.rowFilter 需为「表名 → 条件数组」对象，如 {"book": ["status:eq:published"]}',
+      )
+    }
+    const result: Record<string, string[]> = {}
+    for (const [tableName, conditions] of Object.entries(input)) {
+      if (!tables.includes(tableName)) {
+        throw new BusinessException(
+          ErrorCode.CredentialScopeInvalid,
+          `scope.rowFilter 中的表「${tableName}」不在 scope.tables 内`,
+        )
+      }
+      if (!Array.isArray(conditions) || conditions.some((item) => typeof item !== 'string')) {
+        throw new BusinessException(
+          ErrorCode.CredentialScopeInvalid,
+          `scope.rowFilter.${tableName} 需为条件串数组，如 ["status:eq:published"]`,
+        )
+      }
+      if (conditions.length === 0 || conditions.length > MAX_ROW_FILTER) {
+        throw new BusinessException(
+          ErrorCode.CredentialScopeInvalid,
+          `scope.rowFilter.${tableName} 需为 1~${MAX_ROW_FILTER} 条条件（多条为「且」的关系）`,
+        )
+      }
+      const exposedFields = new Map(
+        (exposed.get(tableName)?.fields ?? []).map((field) => [field.name, field.type]),
+      )
+      const scopedFields = fields[tableName]
+      for (const raw of conditions) {
+        // ① 形态 / 算子合法性（R104 同一解析器）
+        const parsed = parseFilterRaw(raw)
+        if (!parsed.ok) this.rowFilterInvalid(tableName, raw, parsed.error)
+        const { field, op, value } = parsed.value
+        // ② 字段须在该表 scope 字段口径内（`fields` 未配该表 = 全部已暴露字段）
+        if (scopedFields && !scopedFields.includes(field)) {
+          this.rowFilterInvalid(tableName, raw, `字段「${field}」不在该表授权字段范围内`)
+        }
+        // ③ 字段须存在且已暴露（禁止用不可见字段做存在性探测）
+        const type = exposedFields.get(field)
+        if (!exposedFields.has(field)) {
+          this.rowFilterInvalid(tableName, raw, `字段「${field}」不存在或未暴露`)
+        }
+        if (op === 'contains' && !supportsContains(type)) {
+          this.rowFilterInvalid(tableName, raw, `contains 仅支持文本/枚举字段：${field}`)
+        }
+        // ④ 值须能按字段定义解析
+        const coerced = coerceFilterValue(type, value)
+        if (!coerced.ok) this.rowFilterInvalid(tableName, raw, coerced.error)
+      }
+      result[tableName] = [...conditions]
+    }
+    return Object.keys(result).length > 0 ? result : null
+  }
+
+  /** rowFilter 条目违例统一报错（50021，errmsg 定位到「表 + 条目 + 原因」） */
+  private rowFilterInvalid(table: string, raw: string, reason: string): never {
+    throw new BusinessException(
+      ErrorCode.CredentialScopeInvalid,
+      `scope.rowFilter.${table} 条目「${raw}」：${reason}`,
+    )
   }
 
   /** 出域视图（bigint → string；secret 绝不出现） */
@@ -353,5 +445,6 @@ export class CredentialService {
 interface ExposedTable {
   name: string
   label: string
-  fields: Array<{ name: string; label: string }>
+  /** `type` 供 rowFilter 值类型校验（P17 R147；与 app 域 `exposedSchema` 的暴露口径一致） */
+  fields: Array<{ name: string; label: string; type: string }>
 }

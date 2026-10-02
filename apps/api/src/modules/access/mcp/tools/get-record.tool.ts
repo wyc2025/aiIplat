@@ -32,12 +32,14 @@ export function registerGetRecordTool(server: McpServer, deps: McpToolDeps): voi
       deps.ctx.tableName = args.table
       try {
         deps.contract.assertTableInScope(args.table, deps.principal.scope)
+        // P17 R148/R150：行不满足 rowFilter → 40400（与 REST detail 同源同表现）
         const detail = await deps.appFacade.publicDetail(
           deps.principal.ownerId,
           deps.appCode,
           args.table,
           args.rowId,
           {},
+          deps.contract.mandatoryFilters(args.table, deps.principal.scope),
         )
         deps.ctx.rows = 1
         return toolOk({

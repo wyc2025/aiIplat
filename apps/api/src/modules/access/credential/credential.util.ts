@@ -10,27 +10,30 @@ const KEY_ID_PATTERN = /^ik_[0-9A-Za-z]{10}$/
 const SECRET_MIN_LENGTH = 20
 
 /**
- * 凭证授权范围（R133 / D125）。
+ * 凭证授权范围（R133 / D125；P17 D136 启用第四纵深 `rowFilter`）。
  *
  * - `tables`：可读的表名清单（创建时禁止为空 → 40001）；
  * - `fields`：`{表名: [字段名…]}`，缺省的表 = 该表全部已暴露字段；
  * - `ops`：本期恒 `['read']`（D119 对外纯只读，字段预留不实现）；
- * - `rowFilter`：列预留（NULL），本期不实现（D125）。
+ * - `rowFilter`：`{表名: ["字段:op:值", …]}`，缺省 / null = 不过滤（P17 R147；与 R104 请求 filter 同语法，
+ *   每表 ≤3 条、表内 AND）。
  *
  * **只能收窄**：保存时逐项校验 ⊆ 暴露三开关并集（越界 50021，显式报错优于静默收窄）；
  * 运行时再取交集（暴露开关后续收紧时凭证自动跟着收窄，无需改凭证）。
+ * rowFilter 为**常量 WHERE 段**，与请求方 filter 并列 AND，游标 / 排序 / 配额口径不受影响（R148）。
  */
 export interface CredentialScope {
   tables: string[]
   fields: Record<string, string[]>
   ops: ['read']
-  rowFilter: null
+  rowFilter: Record<string, string[]> | null
 }
 
-/** 管理侧 scope 入参形态（fields 可选、值可不做去重） */
+/** 管理侧 scope 入参形态（fields / rowFilter 可选、值可不做去重） */
 export interface CredentialScopeInput {
   tables: string[]
   fields?: Record<string, string[]>
+  rowFilter?: Record<string, string[]> | null
 }
 
 /** 签发结果（apiKey 仅在创建 / 轮换响应中出现一次，R130） */
@@ -90,7 +93,9 @@ export function issueCredential(existingKeyId?: string): IssuedCredential {
  * 形态不符（缺头 / 无 Bearer 前缀 / 无点号 / keyId 非 `ik_` 前缀 / secret 过短）一律返回 null，
  * 由调用方统一 401 + `WWW-Authenticate`——不做任何"存在性"区分（凭证层不泄露资源信息）。
  */
-export function parseBearerKey(header: string | undefined): { keyId: string; secret: string } | null {
+export function parseBearerKey(
+  header: string | undefined,
+): { keyId: string; secret: string } | null {
   if (!header) return null
   const match = /^Bearer\s+(\S+)$/i.exec(header.trim())
   if (!match) return null

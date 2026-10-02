@@ -90,10 +90,7 @@ export class ExtContractService {
     if (raw === undefined || raw === '') return EXT_DEFAULT_PAGE_SIZE
     const size = Number(raw)
     if (!Number.isInteger(size) || size < 1 || size > EXT_MAX_PAGE_SIZE) {
-      throw new BusinessException(
-        ErrorCode.ParamInvalid,
-        `size 需为 1~${EXT_MAX_PAGE_SIZE} 的整数`,
-      )
+      throw new BusinessException(ErrorCode.ParamInvalid, `size 需为 1~${EXT_MAX_PAGE_SIZE} 的整数`)
     }
     return size
   }
@@ -212,6 +209,17 @@ export class ExtContractService {
     if (!scope.tables.includes(table)) {
       throw new BusinessException(ErrorCode.NotFound, '资源不存在')
     }
+  }
+
+  /**
+   * 该表的强制过滤条件串（P17 R148/R150）：`scope.rowFilter[表]`，缺省 → 空数组（不过滤）。
+   *
+   * REST 取数面（records / detail）与 MCP 三件套**共用此入口**，保证 rowFilter 在两条协议上
+   * 同源生效（R150 透明继承）；条件串的语法校验 / 求值全部由 app 域同一解析器完成（R147）。
+   */
+  mandatoryFilters(table: string, scope: CredentialScope): string[] {
+    const conditions = scope.rowFilter?.[table]
+    return Array.isArray(conditions) ? conditions : []
   }
 
   /** 行数据按 scope 字段收窄（`rowId / createdAt / updatedAt` 恒留；未限定字段时原样返回） */
