@@ -7,6 +7,12 @@ import { get, post, put } from '@/utils/request'
  * 可读表与字段（只能收窄暴露范围）。`secret` 仅在**创建 / 轮换**响应出现一次，此后任何接口不回显。
  */
 
+/**
+ * 凭证类型（P18 D141）：`api_key` 长期有效、可直接当密钥用；`oauth` 先换短时效令牌再用。
+ * **创建后不可更改**。
+ */
+export type CredentialType = 'api_key' | 'oauth'
+
 /** 凭证授权范围（R133/D125 + P17 D136）：表 + 可选字段 + 可选行过滤（缺省表 = 该表全部已暴露字段） */
 export interface CredentialScope {
   tables: string[]
@@ -25,6 +31,8 @@ export interface CredentialItem {
   appCode: string
   appName: string
   scope: CredentialScope
+  /** 凭证类型（P18；创建后不可更改） */
+  type: CredentialType
   /** 1 = 有效 / 0 = 已吊销（吊销不可逆） */
   status: number
   expiresAt: string | null
@@ -79,11 +87,12 @@ export interface AuditPage {
 /** 我的凭证列表（含应用 code / 名称回填与当日用量） */
 export const listCredentials = () => get<CredentialItem[]>('/access/credentials')
 
-/** 创建凭证（`apiKey` 仅本次响应返回一次；scope 越界 50021；超上限 50020） */
+/** 创建凭证（`apiKey` 仅本次响应返回一次；scope 越界 50021；超上限 50020；类型缺省 api_key） */
 export const createCredential = (payload: {
   appCode: string
   name: string
   scope: CredentialScopeInput
+  type?: CredentialType
   expiresAt?: string
 }) => post<CredentialIssued>('/access/credentials', payload)
 

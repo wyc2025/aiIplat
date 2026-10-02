@@ -23,6 +23,7 @@ import {
   type AuditItem,
   type CredentialItem,
   type CredentialScopeInput,
+  type CredentialType,
 } from '@/api/access'
 import { getPubConfig, listApps, type PubConfigTable } from '@/api/app'
 import { confirmDialog } from '@/utils/confirm'
@@ -50,6 +51,8 @@ const formDialog = reactive({
   id: '',
   name: '',
   appCode: '',
+  /** 凭证类型（P18；仅创建时可选，编辑态只读——类型创建后不可改） */
+  type: 'api_key' as CredentialType,
   expiresAt: '',
   tables: [] as string[],
   fields: {} as Record<string, string[]>,
@@ -161,6 +164,7 @@ async function openCreate(): Promise<void> {
   formDialog.id = ''
   formDialog.name = ''
   formDialog.appCode = ''
+  formDialog.type = 'api_key'
   formDialog.expiresAt = ''
   formDialog.tables = []
   formDialog.fields = {}
@@ -175,6 +179,8 @@ async function openEdit(item: CredentialItem): Promise<void> {
   formDialog.id = item.id
   formDialog.name = item.name
   formDialog.appCode = item.appCode
+  // 类型只读回填（P18 D141：创建后不可更改，界面仅展示，提交时不回传）
+  formDialog.type = item.type
   formDialog.expiresAt = item.expiresAt ? item.expiresAt.slice(0, 19) : ''
   formDialog.tables = [...item.scope.tables]
   formDialog.fields = { ...(item.scope.fields ?? {}) }
@@ -197,6 +203,11 @@ function onTableChange(tables: string[]): void {
   for (const key of Object.keys(formDialog.fields)) {
     if (!tables.includes(key)) delete formDialog.fields[key]
   }
+}
+
+/** 凭证类型显示名（界面文案准则：不把 api_key / oauth 这类内部标识直接摆给用户） */
+function typeLabel(type: CredentialType): string {
+  return type === 'oauth' ? 'OAuth2 令牌' : 'API 密钥'
 }
 
 function tableFields(table: PubConfigTable): Array<{ id: string; name: string; label: string }> {
@@ -265,6 +276,8 @@ async function submitForm(): Promise<void> {
       appCode: formDialog.appCode,
       name,
       scope,
+      // 类型仅创建时可设（P18 D141）；编辑提交不回传该字段
+      type: formDialog.type,
       ...(formDialog.expiresAt ? { expiresAt: formDialog.expiresAt } : {}),
     })
     formDialog.visible = false
@@ -366,6 +379,18 @@ function openAudit(): void {
   void loadAudits()
 }
 
+/**
+ * 审计查询（页码归一后重新拉取）。
+ *
+ * 抽成函数而非内联多语句：prettier 会把 `@click` 里的多语句拆成多行，而 Vue 模板表达式
+ * **不支持换行分隔的语句**（换行即语法错误）——vite 编译期才暴露，`vue-tsc` 不报。
+ * 这是 P17 走查 C2 要的那份构建证据抓出来的问题（2026-10-02）。
+ */
+async function searchAudits(): Promise<void> {
+  auditDrawer.pageNo = 1
+  await loadAudits()
+}
+
 async function loadAudits(): Promise<void> {
   auditDrawer.loading = true
   auditDrawer.loadError = false
@@ -462,6 +487,14 @@ function resultText(code: number): string {
         label="备注名"
         min-width="140"
       />
+      <el-table-column
+        label="类型"
+        width="120"
+      >
+        <template #default="{ row }">
+          {{ typeLabel(row.type) }}
+        </template>
+      </el-table-column>
       <el-table-column
         label="数据应用"
         min-width="170"
@@ -582,6 +615,32 @@ function resultText(code: number): string {
         label-width="96px"
         label-position="right"
       >
+        <el-form-item label="类型">
+          <el-radio-group
+            v-if="!formDialog.id"
+            v-model="formDialog.type"
+          >
+            <el-radio value="api_key">
+              API 密钥
+            </el-radio>
+            <el-radio value="oauth">
+              OAuth2 令牌
+            </el-radio>
+          </el-radio-group>
+          <span v-else>{{ typeLabel(formDialog.type) }}</span>
+          <div class="v-access__hint">
+            <template v-if="formDialog.id">
+              类型创建后不可更改
+            </template>
+            <template v-else-if="formDialog.type === 'oauth'">
+              适合服务器程序自动换取令牌（令牌 1 小时过期，过期后重新换取）
+            </template>
+            <template v-else>
+              长期有效的密钥，适合手动填到客户端或脚本里
+            </template>
+          </div>
+        </el-form-item>
+
         <el-form-item label="数据应用">
           <el-select
             v-model="formDialog.appCode"
@@ -784,10 +843,7 @@ function resultText(code: number): string {
         <el-button
           type="primary"
           :icon="Search"
-          @click="
-            auditDrawer.pageNo = 1
-            loadAudits()
-          "
+          @click="searchAudits"
         >
           查询
         </el-button>
