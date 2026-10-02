@@ -150,7 +150,7 @@ async function submit(): Promise<void> {
     try {
       schema = JSON.parse(dialog.schemaText) as Record<string, unknown>
     } catch {
-      ElMessage.error('页面模式不是合法 JSON')
+      ElMessage.error('页面配置格式不正确')
       return
     }
   }
@@ -216,7 +216,7 @@ function openPage(page: AppPageListItem): void {
   >
     <div class="v-app-pages__header">
       <h3 class="v-app-pages__title">
-        功能页 · {{ appCode }}
+        功能页
       </h3>
       <el-button
         type="primary"
@@ -260,19 +260,22 @@ function openPage(page: AppPageListItem): void {
       />
       <el-table-column
         prop="code"
-        label="标识"
+        label="页面标识"
         min-width="120"
       />
       <el-table-column
         prop="route"
-        label="路由"
+        label="页面地址"
         min-width="120"
       />
       <el-table-column
-        prop="genBy"
         label="来源"
         width="90"
-      />
+      >
+        <template #default="{ row }">
+          {{ row.genBy === 'manual' ? '手动创建' : '系统生成' }}
+        </template>
+      </el-table-column>
       <el-table-column
         label="操作"
         width="240"
@@ -318,7 +321,7 @@ function openPage(page: AppPageListItem): void {
         </el-form-item>
         <el-form-item
           v-if="!dialog.editingId"
-          label="路由"
+          label="页面地址"
           required
         >
           <el-input
@@ -362,7 +365,7 @@ function openPage(page: AppPageListItem): void {
               />
             </el-tab-pane>
             <el-tab-pane
-              label="高级模式（JSON）"
+              label="高级模式"
               name="advanced"
             >
               <el-input
@@ -372,7 +375,7 @@ function openPage(page: AppPageListItem): void {
                 spellcheck="false"
               />
               <div class="v-page-editor__hint">
-                两模式各存各稿：切换标签会以库中最新保存版本重载（未保存的改动不互转）
+                两种模式的修改互相独立；切换标签时，会用已保存的版本重新载入
               </div>
             </el-tab-pane>
           </el-tabs>

@@ -62,6 +62,8 @@ export interface UserInfo {
 export interface UserInfoResult {
   user: UserInfo
   roles: string[]
+  /** 角色显示名（与 roles 同源同序），如 ['超级管理员']；界面展示用，避免出现 admin 这类内部标识 */
+  roleLabels: string[]
   perms: string[]
   menus: MenuTreeNode[]
 }

@@ -639,7 +639,7 @@
           show-icon
           :closable="false"
           title="该文件无法在线播放/显示"
-          description="常见原因是浏览器不支持该编码格式（如 H.265/HEVC）。请下载后用本地播放器查看。"
+          description="该文件的格式在网页里无法播放，请下载后用本地播放器查看。"
         />
       </div>
       <template
@@ -670,7 +670,7 @@
       append-to-body
     >
       <p class="v-cf-tip">
-        公开「{{ pubDirRow?.name }}」后，访客可凭公开链接在线访问该文件夹及其中内容（子项公开性随公开链上溯判定）。
+        公开「{{ pubDirRow?.name }}」后，访客可凭公开链接在线访问该文件夹及其中内容（其中的子文件夹是否可见，跟随本文件夹设置）。
       </p>
       <el-checkbox v-model="pubDirAllowListing">
         允许访客浏览文件列表（关闭后仅知道完整路径可访问）
@@ -1585,7 +1585,7 @@ async function onSetPrivate(row: CloudFile): Promise<void> {
 async function onCancelPrivate(row: CloudFile): Promise<void> {
   try {
     await cancelPublicLink(Number(row.id))
-    ElMessage.success('已取消私有（恢复继承站点公开状态）')
+    ElMessage.success('已取消私有（跟随所在站点的公开设置）')
     reload()
   } catch {
     // 拦截器提示

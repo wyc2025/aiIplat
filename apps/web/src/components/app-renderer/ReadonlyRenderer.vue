@@ -251,7 +251,7 @@ onMounted(() => void loadAll())
         </el-descriptions>
         <el-empty
           v-else
-          description="预览态不展示详情行（需真实路由参数）"
+          description="预览时不显示该详情内容"
         />
       </el-card>
     </template>

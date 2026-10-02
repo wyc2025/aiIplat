@@ -69,7 +69,7 @@
               {{ site.siteUrl }}
             </el-link>
           </el-descriptions-item>
-          <el-descriptions-item label="站点标识（slug）">
+          <el-descriptions-item label="站点标识">
             {{ site.slug }}
           </el-descriptions-item>
           <el-descriptions-item label="站点标题">
@@ -87,7 +87,7 @@
             <span class="v-ss-tip">开：访客评论需审核后展示；关：直接展示</span>
           </el-descriptions-item>
           <!-- SPA 回退开关（P9 T94 / D81 / R81）：按站生效，NULL = 关 = 与 P7 前行为一致 -->
-          <el-descriptions-item label="SPA 回退">
+          <el-descriptions-item label="地址直达">
             <el-switch
               v-permission="'site:site:manage'"
               :model-value="site.spaFallback === 'index.html'"
@@ -95,13 +95,13 @@
               @change="toggleSpaFallback"
             />
             <span class="v-ss-tip">
-              开：无扩展名地址（如 /article/9）回退到 index.html，适合前端路由模板；关：只有真实存在的文件可访问
+              开：像 /article/9 这样没有文件后缀的地址也能直接打开页面（适合前端路由模板）；关：只有真实存在的文件可以访问
             </span>
             <div
               v-if="site.spaFallback === 'index.html'"
               class="v-ss-tip"
             >
-              若模板仍是旧版 hash 路由，需在下方「模板库」重新应用模板并刷新地址后才会生效
+              如果当前模板还是旧版，需要到下方「模板库」重新应用一次模板，并刷新地址后才会生效
             </div>
           </el-descriptions-item>
           <el-descriptions-item label="创建时间">
@@ -178,7 +178,7 @@
               应用所选模板
             </el-button>
             <span class="v-ss-tip">
-              应用后：模板自带文件覆盖站点同名文件（旧版进回收站可还原），media/ 与模板外文件不受影响
+              应用后：模板自带文件覆盖站点同名文件（旧版进回收站可还原），媒体目录与模板之外的文件不受影响
             </span>
           </div>
         </div>
@@ -303,7 +303,7 @@ async function reload() {
 /** 跳「站点列表」页（路由由后端菜单注册；菜单缺失时提前提示，避免落 404） */
 function goSiteList() {
   if (!router.hasRoute('site-site')) {
-    ElMessage.warning('未找到「站点列表」菜单，请先同步后端菜单数据（seed）后重新登录')
+    ElMessage.warning('暂时打不开「站点列表」页，请联系管理员处理后再重新登录')
     return
   }
   router.push('/site/site')
@@ -374,7 +374,7 @@ async function toggleSpaFallback(value: string | number | boolean) {
     const legacy = await detectLegacyTemplate()
     if (legacy) {
       const go = await confirmDialog(
-        '当前站点模板疑似旧版（hash 路由）：开启回退后，需重新应用模板并刷新地址才会生效。仍要开启？',
+        '当前模板可能是旧版：开启后需要到「模板库」重新应用一次模板并刷新地址才会生效。仍要开启？',
         '提示',
         { type: 'warning', confirmButtonText: '仍要开启' },
       )
@@ -385,7 +385,7 @@ async function toggleSpaFallback(value: string | number | boolean) {
   try {
     await updateSite(site.value.id, { spaFallback: enabling ? 'index.html' : null })
     await store.load()
-    ElMessage.success(enabling ? '已开启 SPA 回退' : '已关闭 SPA 回退（无扩展名地址恢复 404）')
+    ElMessage.success(enabling ? '已开启地址直达' : '已关闭地址直达（没有后缀的地址将无法打开）')
   } catch {
     // 拦截器提示
   } finally {
@@ -434,7 +434,7 @@ async function onApplyTemplate() {
   const tpl = templates.value.find((t) => t.id === selectedTemplateId.value)
   if (!tpl || !site.value) return
   const confirmed = await confirmDialog(
-    `确认应用「${tpl.name}」？同名文件将被覆盖，旧版可在回收站还原；media/ 与模板外文件不受影响。`,
+    `确认应用「${tpl.name}」？同名文件将被覆盖，旧版可在回收站还原；媒体目录与模板之外的文件不受影响。`,
     '应用模板',
     { type: 'warning', confirmButtonText: '应用' },
   )

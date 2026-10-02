@@ -354,7 +354,7 @@
                 >
               </div>
               <div class="v-sa-tip">
-                落站点 media/ 目录，相对路径 {{ form.coverPath || 'media/xxx.png' }}
+                图片会保存到站点的媒体目录，可点右侧预览
               </div>
             </el-form-item>
           </el-col>
@@ -399,7 +399,7 @@
                 :loading="imageUploading"
                 @click="imageInput?.click()"
               >
-                插入图片（落 media/）
+                插入图片
               </el-button>
               <input
                 ref="imageInput"
@@ -485,7 +485,7 @@
         <el-col :span="12">
           <div class="v-sa-pane-title">
             预览
-            <span class="v-sa-tip">渲染禁用 raw HTML</span>
+            <span class="v-sa-tip">预览（出于安全，不执行页面脚本）</span>
           </div>
           <div class="v-sa-preview">
             <MarkdownView :content="form.contentMd" />
@@ -1108,7 +1108,7 @@ async function onToggleStatus(row: SiteArticleItem) {
 
 async function onRemove(row: SiteArticleItem) {
   const confirmed = await confirmDialog(
-    `确认删除「${row.title}」？正文、标签关联与全部评论将被物理删除，不可恢复`,
+    `确认删除「${row.title}」？正文、标签关联与全部评论将被彻底删除，不可恢复`,
     '警告',
     {
       type: 'warning',

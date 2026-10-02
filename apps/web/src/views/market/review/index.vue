@@ -10,7 +10,7 @@ import { listReviewListings, reviewListing, type ReviewItem } from '@/api/market
 
 /**
  * 应用中心 · 市场审核（P13 T119/T121，market:review，PRD §8）：
- * 待审列表（快照摘要）→ 通过 / 拒绝（必填理由）；在架列表 → 下架。
+ * 待审列表（结构副本摘要）→ 通过 / 拒绝（必填理由）；在架列表 → 下架。
  * 审核是人的事：AI 永不代审核（PRD §9）。
  */
 const activeTab = ref<'pending' | 'approved'>('pending')
@@ -93,7 +93,7 @@ async function promptNote(item: ReviewItem): Promise<string | null> {
   }
 }
 
-/** 快照摘要渲染（模板内不做类型标注，收敛到函数） */
+/** 结构副本摘要渲染（模板内不做类型标注，收敛到函数） */
 function summaryLabels(tables: Array<{ label: string }>): string {
   return tables.map((item) => item.label).join('、')
 }
@@ -123,7 +123,7 @@ async function run(item: ReviewItem, action: 'approve' | 'reject' | 'delist', no
         市场审核
       </h3>
       <p class="v-market-review__desc">
-        审核他人提交的数据应用（提交即冻结结构快照，审核只针对快照）；拒绝必须填写理由。
+        审核他人提交的数据应用（提交时已保存结构副本，审核只针对该副本）；拒绝必须填写理由。
       </p>
     </div>
 
@@ -179,9 +179,6 @@ async function run(item: ReviewItem, action: 'approve' | 'reject' | 'delist', no
             <div class="v-market-review__name">
               {{ row.name }}
             </div>
-            <div class="v-market-review__sub">
-              {{ row.code }}
-            </div>
           </template>
         </el-table-column>
         <el-table-column
@@ -190,7 +187,7 @@ async function run(item: ReviewItem, action: 'approve' | 'reject' | 'delist', no
           width="130"
         />
         <el-table-column
-          label="快照摘要"
+          label="结构副本摘要"
           min-width="240"
         >
           <template #default="{ row }">

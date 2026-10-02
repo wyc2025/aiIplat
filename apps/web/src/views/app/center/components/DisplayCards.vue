@@ -146,7 +146,7 @@ async function submitCreate(): Promise<void> {
     })
     ElMessage.success(
       created.siteSlug
-        ? `已创建，并挂到站点「${created.siteTitle ?? created.siteSlug}」；写入页面文件后即可访问`
+        ? `已创建，并挂到站点「${created.siteTitle ?? '所选站点'}」；写入页面文件后即可访问`
         : '已创建，页面文件暂存在云盘；挂到站点后即可对外访问',
     )
     createDialog.visible = false
@@ -209,7 +209,7 @@ async function submitGrant(): Promise<void> {
   try {
     for (const appCode of toGrant) {
       const result = await grantDisplay(grantDialog.id, appCode)
-      if (result.isPublic !== 1) notes.push(`${appCode} 尚未开启「可被读取」，站点取数仍会 40400`)
+      if (result.isPublic !== 1) notes.push(`${appNameOf(appCode)} 尚未开启「可被读取」，授权后站点仍读不到数据`)
     }
     for (const appCode of toRevoke) {
       await revokeDisplay(grantDialog.id, appCode)
@@ -427,7 +427,7 @@ function appNameOf(appCode: string): string {
             <el-option
               v-for="site in sites"
               :key="site.id"
-              :label="`${site.title}（${site.slug}）`"
+              :label="site.title"
               :value="site.slug"
             />
           </el-select>
@@ -464,7 +464,7 @@ function appNameOf(appCode: string): string {
             <el-option
               v-for="site in sites"
               :key="site.id"
-              :label="`${site.title}（${site.slug}）`"
+              :label="site.title"
               :value="site.slug"
             />
           </el-select>

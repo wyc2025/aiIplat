@@ -84,7 +84,7 @@
         </template>
       </el-table-column>
       <el-table-column
-        label="IP"
+        label="来源 IP"
         width="130"
         prop="ip"
       />
@@ -306,7 +306,7 @@ async function onSubmitReply() {
 }
 
 async function onRemove(row: SiteCommentItem) {
-  const confirmed = await confirmDialog('确认删除该评论？物理删除不可恢复', '警告', { type: 'warning' })
+  const confirmed = await confirmDialog('确认删除该评论？删除后不可恢复', '警告', { type: 'warning' })
   if (!confirmed) return
   try {
     await removeComment(Number(row.id))

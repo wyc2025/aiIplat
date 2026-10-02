@@ -35,7 +35,7 @@ async function doUpload(file: File): Promise<void> {
   try {
     const uploaded = await uploadAppAttachment(props.appCode, file)
     emit('update:modelValue', uploaded.fileId)
-    ElMessage.success(`已上传：${uploaded.path}`)
+    ElMessage.success(`附件已上传`)
   } catch {
     // 请求层已提示
   } finally {
@@ -118,7 +118,7 @@ function clearAttachment() {
     v-else-if="field.type === 'attachment'"
     class="v-field-attachment"
   >
-    <span class="v-field-attachment__value">文件 ID：{{ value || '（未上传）' }}</span>
+    <span class="v-field-attachment__value">{{ value ? '已上传附件' : '（未上传）' }}</span>
     <el-upload
       :show-file-list="false"
       :auto-upload="false"

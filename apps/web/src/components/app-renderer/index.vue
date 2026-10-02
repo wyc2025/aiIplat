@@ -300,7 +300,7 @@ function resetFilter(dsName: string): void {
 
 async function submitAction(action: string, params: Record<string, unknown>): Promise<boolean> {
   if (!actionExists(action)) {
-    ElMessage.warning(`页面未声明动作「${action}」，请在功能页编辑器补充后重试`)
+    ElMessage.warning(`该页面还没有配置这个操作，请在功能页编辑器里补充后重试`)
     return false
   }
   try {
@@ -357,7 +357,7 @@ async function submitEdit(): Promise<void> {
 
 async function removeRow(row: DataRowView, tableName: string): Promise<void> {
   if (
-    !(await confirmDialog('删除后历史痕迹保留（软删），确认删除该行？', '删除确认', {
+    !(await confirmDialog('删除后记录仍可追溯，确认删除该行？', '删除确认', {
       type: 'warning',
     }))
   ) {
@@ -659,7 +659,7 @@ function detailRows(bind: string): DataRowView[] {
     <!-- 编辑弹窗 -->
     <el-dialog
       v-model="edit.visible"
-      :title="`编辑 ${edit.table}`"
+      :title="`编辑`"
       width="560px"
     >
       <el-form label-width="100px">

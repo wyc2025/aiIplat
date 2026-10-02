@@ -96,7 +96,7 @@
             v-if="currentModel"
             class="v-model-price"
           >
-            输入 {{ currentModel.inputPrice }} / 输出 {{ currentModel.outputPrice }} 积分·千 tokens
+            输入 {{ currentModel.inputPrice }} / 输出 {{ currentModel.outputPrice }} 积分（每千 tokens 计费）
             <el-tag
               v-if="currentModel.supportTool !== 1"
               type="info"
@@ -125,7 +125,7 @@
               <p class="v-empty-sub">
                 选择上方模型后输入消息即可提问。<br>
                 点回形针可附加云盘文件或本地文本文件（≤5 个、单个 ≤2MB）。<br>
-                小文件全文注入，大文件由 AI 按需分段读取。
+                较小的文件会直接作为内容发给 AI，较大的文件由 AI 按需读取。
               </p>
             </div>
 

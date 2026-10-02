@@ -198,7 +198,7 @@ function tableFields(table: PubConfigTable): Array<{ id: string; name: string; l
 function buildScope(): CredentialScopeInput | null {
   const tables = formDialog.tables.filter((name) => exposedTables.value.some((table) => table.tableCode === name))
   if (tables.length === 0) {
-    ElMessage.warning('至少要选择 1 张已暴露的表')
+    ElMessage.warning('至少要选择 1 项已公开的数据')
     return null
   }
   const fields: Record<string, string[]> = {}
@@ -309,18 +309,19 @@ async function onRevoke(item: CredentialItem): Promise<void> {
 
 function scopeSummary(item: CredentialItem): string {
   const narrowed = Object.entries(item.scope.fields ?? {}).filter(([, fields]) => fields.length > 0)
-  if (narrowed.length === 0) return '全部已暴露字段'
+  if (narrowed.length === 0) return '全部已公开的数据'
   return narrowed.map(([table, fields]) => `${table}: ${fields.join('/')}`).join('；')
 }
 
 // ==================== 审计 ====================
 
+/** 调用结果的中文名（对外只显示这一列，不显示错误码数值） */
 const RESULT_CODES = [
   { value: 0, label: '成功' },
-  { value: 40001, label: '参数越界' },
-  { value: 40400, label: '不可见 / 未授权' },
-  { value: 42900, label: '超配额' },
-  { value: 50019, label: '凭证无效' },
+  { value: 40001, label: '请求不合法' },
+  { value: 40400, label: '无权读取' },
+  { value: 42900, label: '超出用量上限' },
+  { value: 50019, label: '凭证已失效' },
 ]
 
 function openAudit(): void {
@@ -358,10 +359,17 @@ function onAuditPage(pageNo: number): void {
   void loadAudits()
 }
 
+/**
+ * 调用方显示名（面向用户，不暴露内部编号）：
+ * - `cred:{id}` → 该凭证的备注名（列表里找不到时用通用词）
+ * - `display:{id}` → 站点页面的匿名访客（展示应用页面的取数）
+ */
 function principalText(principal: string): string {
   const [type, id] = principal.split(':')
-  if (type === 'cred') return `凭证 #${id}`
-  if (type === 'display') return `展示应用 #${id}`
+  if (type === 'cred') {
+    return list.value.find((item) => item.id === id)?.name ?? '接入凭证'
+  }
+  if (type === 'display') return '站点访客'
   return principal
 }
 
@@ -383,11 +391,10 @@ function resultText(code: number): string {
       type="info"
       :closable="false"
       show-icon
-      title="接入凭证用于外部系统经 /api/ext/v1 只读读取数据应用已暴露的数据"
+      title="接入凭证用于让外部系统只读读取数据应用里已公开的数据"
     >
       <template #default>
-        密钥只在创建 / 轮换时展示一次，请立即妥善保存；此后任何页面都不再回显。授权范围只能<b>收窄</b>
-        （表 / 字段须为已暴露项）。
+        密钥只在创建 / 更换时显示一次，请立即保存；之后不会再显示。可读范围只能比应用已公开的更小。
       </template>
     </el-alert>
 
@@ -429,19 +436,18 @@ function resultText(code: number): string {
       >
         <template #default="{ row }">
           {{ row.appName }}
-          <span class="v-access__hint">{{ row.appCode }}</span>
         </template>
       </el-table-column>
       <el-table-column
-        label="Key"
+        label="密钥"
         min-width="200"
       >
         <template #default="{ row }">
-          <span class="v-access__mono">{{ row.keyId }}.{{ row.secretPrefix }}…</span>
+          <span class="v-access__mono">{{ row.secretPrefix }}••••••</span>
         </template>
       </el-table-column>
       <el-table-column
-        label="授权范围"
+        label="可读范围"
         min-width="230"
       >
         <template #default="{ row }">
@@ -557,7 +563,7 @@ function resultText(code: number): string {
             <el-option
               v-for="app in activeApps"
               :key="app.appCode"
-              :label="`${app.name}（${app.appCode}）`"
+              :label="app.name"
               :value="app.appCode"
             />
           </el-select>
@@ -588,7 +594,7 @@ function resultText(code: number): string {
           />
         </el-form-item>
 
-        <el-form-item label="可读表">
+        <el-form-item label="可读数据">
           <div
             v-loading="formDialog.loadingSchema"
             class="v-access__scope"
@@ -603,7 +609,7 @@ function resultText(code: number): string {
                   :key="table.tableCode"
                   :value="table.tableCode"
                 >
-                  {{ table.label }}（{{ table.tableCode }}）
+                  {{ table.label }}
                 </el-checkbox>
               </el-checkbox-group>
             </template>
@@ -611,7 +617,7 @@ function resultText(code: number): string {
               v-else
               class="v-access__hint"
             >
-              该应用还没有已暴露的表（请先到「我的应用 ▸ 结构」暴露表与字段，或发布应用）
+              该应用还没有公开任何数据（请先到「我的应用 ▸ 结构」开启公开，或先把应用发布）
             </span>
           </div>
         </el-form-item>
@@ -619,7 +625,7 @@ function resultText(code: number): string {
         <el-form-item
           v-for="table in exposedTables.filter((item) => formDialog.tables.includes(item.tableCode))"
           :key="table.tableCode"
-          :label="`${table.tableCode} 字段`"
+          :label="`${table.label} 字段`"
         >
           <el-checkbox-group v-model="formDialog.fields[table.tableCode]">
             <el-checkbox
@@ -681,7 +687,7 @@ function resultText(code: number): string {
           复制密钥
         </el-button>
         <div class="v-access__hint">
-          外部系统调用：<code>Authorization: Bearer {{ secretDialog.apiKey }}</code>
+          外部系统请求时带上该密钥即可（请勿外传）
         </div>
       </div>
       <template #footer>
@@ -711,7 +717,7 @@ function resultText(code: number): string {
           <el-option
             v-for="item in list"
             :key="item.id"
-            :label="`${item.name}（${item.keyId}）`"
+            :label="item.name"
             :value="item.id"
           />
         </el-select>
@@ -724,7 +730,7 @@ function resultText(code: number): string {
           <el-option
             v-for="code in RESULT_CODES"
             :key="code.value"
-            :label="`${code.label}（${code.value}）`"
+            :label="code.label"
             :value="code.value"
           />
         </el-select>
@@ -766,7 +772,7 @@ function resultText(code: number): string {
         </el-table-column>
         <el-table-column
           prop="endpoint"
-          label="端点"
+          label="操作"
           width="100"
         />
         <el-table-column
@@ -787,7 +793,7 @@ function resultText(code: number): string {
           width="90"
         >
           <template #default="{ row }">
-            {{ row.durationMs }}ms
+            {{ row.durationMs }} 毫秒
           </template>
         </el-table-column>
         <el-table-column
@@ -809,7 +815,7 @@ function resultText(code: number): string {
           width="130"
         />
         <el-table-column
-          label="参数摘要"
+          label="请求内容"
           min-width="200"
         >
           <template #default="{ row }">

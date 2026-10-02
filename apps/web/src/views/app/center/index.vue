@@ -191,11 +191,11 @@ async function submitMarket(): Promise<void> {
   }
   marketDialog.submitting = true
   try {
-    const result = await submitToMarket({
+    await submitToMarket({
       appCode: marketDialog.appCode,
       withDemoData: marketDialog.withDemo,
     })
-    ElMessage.success(`已提交（条目 ${result.listingCode}），等待管理员审核`)
+    ElMessage.success(`已提交，等待管理员审核`)
     marketDialog.visible = false
     await Promise.all([load(), loadMyListings()])
   } catch {
@@ -225,7 +225,7 @@ async function submitCreate(): Promise<void> {
       mode: form.mode,
     })
     ElMessage.success(
-      result.status === 'draft' ? `草稿已创建：${result.appCode}` : `应用已创建：${result.appCode}`,
+      result.status === 'draft' ? '草稿已创建' : '应用已创建',
     )
     dialogVisible.value = false
     await load()
@@ -257,7 +257,7 @@ async function confirmDraft(item: AppDefItem): Promise<void> {
 async function removeApp(item: AppDefItem): Promise<void> {
   if (
     !(await confirmDialog(
-      `删除应用「${item.name}」？表结构与数据将保留 30 天后物理清理，删除后立即不可访问。`,
+      `删除应用「${item.name}」？数据会保留 30 天后彻底删除，删除后立即不可访问。`,
       '删除确认',
       { type: 'warning' },
     ))
@@ -398,7 +398,7 @@ function goPages(item: AppDefItem): void {
                   v-if="item.status === 'active' && activeListing[item.appCode]"
                   :content="
                     activeListing[item.appCode] === 'approved'
-                      ? '已在市场在架（可重新提交需先下架）'
+                      ? '已上架（需先下架才能重新提交）'
                       : '已提交，等待审核'
                   "
                 >
@@ -549,7 +549,7 @@ function goPages(item: AppDefItem): void {
               type="success"
               size="small"
             >
-              {{ table.label }}（{{ table.tableCode }}）
+              {{ table.label }}
             </el-tag>
             <span
               v-if="(pubDialog.config?.exposedTables?.length ?? 0) === 0"
@@ -582,7 +582,7 @@ function goPages(item: AppDefItem): void {
           class="market-tip"
         >
           <template #title>
-            提交即冻结结构快照（之后修改源应用不影响该条目），进入人工审核队列
+            提交后会保存当前结构副本（之后修改源应用不影响该条目），进入人工审核
           </template>
         </el-alert>
 
@@ -608,7 +608,7 @@ function goPages(item: AppDefItem): void {
                 :key="table.name"
                 class="market-tables__row"
               >
-                <span>{{ table.label }}（{{ table.name }}）</span>
+                <span>{{ table.label }}</span>
                 <span
                   :class="{
                     'market-tables__count--over':

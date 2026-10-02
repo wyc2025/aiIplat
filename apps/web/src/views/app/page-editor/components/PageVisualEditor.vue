@@ -294,7 +294,7 @@ function fieldsOf(dsName: string): Array<{ name: string; label: string; type: Ap
 
 function fieldOptions(block: BlockEdit) {
   const list = fieldsOf(block.bind).map((field) => ({ value: field.name, label: field.label }))
-  return [{ value: 'rowId', label: 'rowId（行主键）' }, ...list]
+  return [{ value: 'rowId', label: '行标识' }, ...list]
 }
 
 function fieldType(block: BlockEdit, name: string): AppFieldType | undefined {
@@ -352,7 +352,7 @@ const previewDisplaySchema = computed<Record<string, unknown>>(() => {
 <template>
   <div class="v-visual">
     <el-alert
-      :title="isDisplay ? '展示页：只读浏览（filterBar / table / detail），无动作与表单' : '管理页：可含表单与动作（写入走页面动作端点）'"
+      :title="isDisplay ? '展示页：只读浏览（filterBar / table / detail），无动作与表单' : '管理页：可含表单与动作（写入由页面动作负责）'"
       type="info"
       :closable="false"
       show-icon
@@ -372,7 +372,7 @@ const previewDisplaySchema = computed<Record<string, unknown>>(() => {
       </div>
       <el-empty
         v-if="sources.length === 0"
-        description="还没有数据源，区块的 bind 将无可选项"
+        description="还没有数据源，区块的绑定数据源将无可选项"
         :image-size="60"
       />
       <el-card
@@ -487,7 +487,7 @@ const previewDisplaySchema = computed<Record<string, unknown>>(() => {
     <!-- 区块编排 -->
     <section class="v-visual__section">
       <div class="v-visual__head">
-        <span class="v-visual__title">区块（顺序即渲染顺序）</span>
+        <span class="v-visual__title">区块（顺序即显示顺序）</span>
         <div class="v-visual__row">
           <el-button
             v-for="type in blockTypes"
@@ -526,7 +526,7 @@ const previewDisplaySchema = computed<Record<string, unknown>>(() => {
           <el-select
             v-model="block.bind"
             size="small"
-            placeholder="bind 数据源"
+            placeholder="绑定数据源"
             style="width: 160px"
           >
             <el-option
@@ -627,7 +627,7 @@ const previewDisplaySchema = computed<Record<string, unknown>>(() => {
           <el-input
             v-model="block.rowIdParam"
             size="small"
-            placeholder="参数名（默认 rowId）"
+            placeholder="参数名（默认用行标识）"
             style="width: 160px"
           />
         </div>
@@ -731,7 +731,7 @@ const previewDisplaySchema = computed<Record<string, unknown>>(() => {
       class="v-visual__section"
     >
       <div class="v-visual__head">
-        <span class="v-visual__title">动作（表单提交 / 多步事务）</span>
+        <span class="v-visual__title">动作（表单提交 / 多步操作）</span>
         <el-button
           size="small"
           @click="addAction"
@@ -758,7 +758,7 @@ const previewDisplaySchema = computed<Record<string, unknown>>(() => {
             style="width: 200px"
           />
           <el-checkbox v-model="action.tx">
-            事务（多步整体提交）
+            多步一起提交（任一步失败则全部撤销）
           </el-checkbox>
           <el-button
             size="small"
@@ -834,7 +834,7 @@ const previewDisplaySchema = computed<Record<string, unknown>>(() => {
       >
         预览草稿（只读）
       </el-button>
-      <span class="v-visual__hint">预览走登录态直查，不产生写请求；表单提交与动作不执行</span>
+      <span class="v-visual__hint">预览只读取数据、不会修改；表单提交与动作不会执行</span>
     </div>
 
     <el-dialog

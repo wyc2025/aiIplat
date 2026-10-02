@@ -113,13 +113,13 @@
       />
       <el-table-column
         prop="tokensInput"
-        label="输入 tokens"
+        label="输入量"
         width="110"
         align="right"
       />
       <el-table-column
         prop="tokensOutput"
-        label="输出 tokens"
+        label="输出量"
         width="110"
         align="right"
       />

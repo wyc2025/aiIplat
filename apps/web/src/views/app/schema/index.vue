@@ -199,7 +199,7 @@ async function removeField(fieldId: string, label: string): Promise<void> {
     return
   }
   await deleteField(appCode.value, fieldId)
-  ElMessage.success('字段已删除（软删）')
+  ElMessage.success('字段已删除（历史数据保留）')
   await load()
 }
 
@@ -208,7 +208,7 @@ async function removeTable(tableId: string, label: string): Promise<void> {
     return
   }
   await deleteTable(appCode.value, tableId)
-  ElMessage.success('表已删除（软删）')
+  ElMessage.success('表已删除（历史数据保留）')
   await load()
 }
 
@@ -256,12 +256,12 @@ async function submitRelation(): Promise<void> {
   }
   relDialog.submitting = true
   try {
-    const result = await createRelation(appCode.value, {
+    await createRelation(appCode.value, {
       fromTable: relDialog.fromTable,
       fromField: relDialog.fromField.trim(),
       toTable: relDialog.toTable,
     })
-    ElMessage.success(`关系已建立（中间表 ${result.throughTable}）`)
+    ElMessage.success(`关系已建立`)
     relDialog.visible = false
     await load()
   } finally {
@@ -312,7 +312,7 @@ void loadPubInfo()
 
     <el-empty
       v-else-if="userTables.length === 0 && !loading"
-      description="还没有逻辑表，先新建一张"
+      description="还没有数据表，先新建一张"
     />
 
     <div
@@ -394,7 +394,7 @@ void loadPubInfo()
           >
             <template #default="{ row }">
               <span v-if="row.type === 'enum'">
-                枚举：{{ enumLabels(row) }}
+                可选项：{{ enumLabels(row) }}
               </span>
               <span v-else-if="row.type === 'ref'">
                 关联 {{ row.refTableName }}{{ row.refMultiple ? '（多值）' : '' }}
@@ -441,7 +441,7 @@ void loadPubInfo()
         class="v-table-card"
       >
         <div class="v-table-card__name">
-          多对多关系
+          关联关系
         </div>
         <el-table
           :data="bundle?.relations ?? []"
@@ -471,7 +471,7 @@ void loadPubInfo()
     <!-- 新建表 -->
     <el-dialog
       v-model="tableDialog.visible"
-      title="新建逻辑表"
+      title="新建数据表"
       width="720px"
     >
       <el-form label-width="90px">
@@ -643,7 +643,7 @@ void loadPubInfo()
     <!-- 新建关系 -->
     <el-dialog
       v-model="relDialog.visible"
-      title="新建多对多关系"
+      title="新建关联关系"
       width="520px"
     >
       <el-form label-width="90px">

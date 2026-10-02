@@ -104,8 +104,8 @@
           <span
             v-else-if="row.hasPassword"
             class="v-share-mask"
-            title="历史数据以哈希存储无法回显；在「分享管理」里重新设置提取码后即可查看"
-          >已设置（不可回显）</span>
+            title="这是早期创建的分享，提取码不能直接显示；在「分享管理」里重新设置一次即可查看"
+          >已设置（不可查看）</span>
           <span
             v-else
             class="v-share-none"

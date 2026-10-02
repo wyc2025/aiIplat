@@ -85,11 +85,11 @@ export function registerDynamicRoutes(menus: MenuTreeNode[]): void {
  * @returns 菜单是否发生变化（调用方可据此决定是否提示用户）
  */
 export async function reloadMenus(): Promise<boolean> {
-  const { user, roles, perms, menus } = await getUserInfo()
+  const { user, roles, roleLabels, perms, menus } = await getUserInfo()
   const userStore = useUserStore()
   const permissionStore = usePermissionStore()
   const changed = menuSignature(permissionStore.menus) !== menuSignature(menus)
-  userStore.setUserInfo(user, roles)
+  userStore.setUserInfo(user, roles, roleLabels)
   permissionStore.setPermission(perms, menus)
   registerDynamicRoutes(menus)
   permissionStore.setRoutesLoaded(true)

@@ -18,14 +18,14 @@
     </el-form>
     <template #footer>
       <el-button @click="emit('update:modelValue', false)">
-        取 消
+        取消
       </el-button>
       <el-button
         type="primary"
         :loading="submitting"
         @click="handleSubmit"
       >
-        确 定
+        确定
       </el-button>
     </template>
   </el-dialog>

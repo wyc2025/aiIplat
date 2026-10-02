@@ -37,8 +37,8 @@ export async function ensurePermissionLoaded(): Promise<boolean | { path: string
   if (permissionStore.routesLoaded) return true
 
   try {
-    const { user, roles, perms, menus } = await getUserInfo()
-    userStore.setUserInfo(user, roles)
+    const { user, roles, roleLabels, perms, menus } = await getUserInfo()
+    userStore.setUserInfo(user, roles, roleLabels)
     permissionStore.setPermission(perms, menus)
     registerDynamicRoutes(menus)
     permissionStore.setRoutesLoaded(true)

@@ -152,7 +152,7 @@
             maxlength="32"
           />
           <div class="v-sl-tip">
-            将成为访问地址 {{ origin }}/api/open/<b>{{ createForm.slug || '你的标识' }}</b>/ ，创建后可修改
+            将成为站点地址的一部分：<b>{{ createForm.slug || '你的标识' }}</b> ，创建后可修改
           </div>
         </el-form-item>
         <el-form-item
@@ -445,9 +445,9 @@ async function onRemove(row: SiteSiteInfo) {
 
   const confirmed = await confirmDialog(
     `确认删除站点「${row.title}（${row.slug}）」？` +
-      '① 该站的评论将物理删除、文章将从本站下架（文章/栏目/标签本体保留在内容池，可再发表）；' +
+      '① 该站的评论将被彻底删除、文章将从本站下架（文章/栏目/标签本体保留在内容池，可再发表）；' +
       '② 站点文件（含 media/）移入云盘回收站，可还原为普通文件夹；' +
-      `③ 站点标识 ${row.slug} 立即释放，他人可再次注册；` +
+      `③ 站点标识会立即释放，他人可再次注册；` +
       displayNote,
     '删除站点',
     { type: 'warning', confirmButtonText: '确认删除', confirmButtonClass: 'el-button--danger' },

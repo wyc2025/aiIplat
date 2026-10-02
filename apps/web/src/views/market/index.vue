@@ -111,7 +111,7 @@ async function doCopy(code: string): Promise<void> {
           应用市场
         </h3>
         <p class="v-market__desc">
-          浏览他人通过审核上架的数据应用，一键复制为自有应用（结构与可选演示数据，副本全私有起步）。
+          浏览他人通过审核上架的数据应用，一键复制为自己的应用（含结构与可选演示数据，副本默认不公开）。
         </p>
       </div>
     </div>
@@ -215,9 +215,6 @@ async function doCopy(code: string): Promise<void> {
             border
             size="small"
           >
-            <el-descriptions-item label="条目编号">
-              {{ detail.data.code }}
-            </el-descriptions-item>
             <el-descriptions-item label="发布者">
               {{ detail.data.publisherName || '未知' }}
             </el-descriptions-item>
@@ -248,7 +245,7 @@ async function doCopy(code: string): Promise<void> {
               size="small"
               class="v-market-detail__tag"
             >
-              {{ table.label }}（{{ table.name }} · {{ table.fieldCount }} 字段）
+              {{ table.label }}（{{ table.fieldCount }} 个字段）
             </el-tag>
             <span
               v-if="detail.data.tables.length === 0"
@@ -269,7 +266,7 @@ async function doCopy(code: string): Promise<void> {
               :type="item.kind === 'display' ? 'success' : 'info'"
               class="v-market-detail__tag"
             >
-              {{ item.name }}（{{ item.kind }}）
+              {{ item.name }}（{{ item.kind === 'display' ? '展示页' : '管理页' }}）
             </el-tag>
             <span
               v-if="detail.data.pages.length === 0"

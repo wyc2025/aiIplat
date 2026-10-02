@@ -16,6 +16,8 @@ import { clearTokens, getAccessToken } from '@/utils/token'
 export const useUserStore = defineStore('user', () => {
   const userInfo = ref<UserInfo | null>(null)
   const roles = ref<string[]>([])
+/** 角色显示名（与 `roles` 同序）；接口未返回时退化为 code，见 setUserInfo */
+const roleLabels = ref<string[]>([])
   /** 头像展示地址（objectURL；空 = 无头像/加载失败，组件回退首字母） */
   const avatarUrl = ref('')
 
@@ -62,9 +64,11 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
-  function setUserInfo(user: UserInfo, roleCodes: string[]) {
+  function setUserInfo(user: UserInfo, roleCodes: string[], roleNames: string[] = []) {
     userInfo.value = user
     roles.value = roleCodes
+    // 展示用名称：接口未返回时退化为 code（老后端兼容）——界面统一读 roleLabels
+    roleLabels.value = roleNames.length > 0 ? roleNames : roleCodes
     void syncAvatar()
   }
 
@@ -78,6 +82,7 @@ export const useUserStore = defineStore('user', () => {
   function reset() {
     userInfo.value = null
     roles.value = []
+    roleLabels.value = []
     loadedAvatarPath = ''
     releaseAvatarUrl()
     clearTokens()
@@ -86,6 +91,7 @@ export const useUserStore = defineStore('user', () => {
   return {
     userInfo,
     roles,
+    roleLabels,
     avatarUrl,
     isLogin,
     isSuperAdmin,

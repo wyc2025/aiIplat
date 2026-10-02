@@ -14,7 +14,7 @@
       <el-option
         v-for="s in siteStore.sites"
         :key="s.id"
-        :label="`${s.title}（${s.slug}）`"
+        :label="s.title"
         :value="s.id"
       />
     </el-select>
@@ -52,7 +52,7 @@ function onChange(id: string | number) {
  */
 function goManage() {
   if (!router.hasRoute('site-site')) {
-    ElMessage.warning('未找到「站点列表」菜单，请先同步后端菜单数据（seed）后重新登录')
+    ElMessage.warning('暂时打不开「站点列表」页，请联系管理员处理后再重新登录')
     return
   }
   router.push('/site/site')

@@ -27,11 +27,11 @@
       </div>
       <div class="v-profile-roles">
         <el-tag
-          v-for="code in userStore.roles"
-          :key="code"
+          v-for="label in userStore.roleLabels"
+          :key="label"
           size="small"
         >
-          {{ code }}
+          {{ label }}
         </el-tag>
       </div>
       <div class="v-profile-meta">
