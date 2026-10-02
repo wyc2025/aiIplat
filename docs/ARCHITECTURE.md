@@ -296,7 +296,7 @@ apps/api/src/
   - access token：payload `{ sub: userId, username, jti }`，有效期 **2h**
   - refresh token：有效期 **7d**，Redis 存哈希：`refresh:{userId}:{jti}`，TTL 7d
   - 登录失败计数：Redis `login:fail:{username}`，**连续失败 5 次锁定 10 分钟**
-- **userinfo** `GET /api/auth/userinfo` → `{ user, roles, perms, menus }`（menus 为当前用户权限过滤后的菜单树）
+- **userinfo** `GET /api/auth/userinfo` → `{ user, roles, roleLabels, perms, menus }`（menus 为当前用户权限过滤后的菜单树；`roleLabels` 为角色**显示名**、与 `roles` 同源同序，供界面展示「超级管理员」而不是内部标识 `admin` —— 见 `AGENTS.md`「界面文案准则」）
 - **刷新** `POST /api/auth/refresh`：`{ refreshToken }` → 校验 Redis 中存在则签发新 token 对，旧 refresh token 立即失效（rotation）
 - **登出** `POST /api/auth/logout`：access token jti 加入 Redis 黑名单（TTL = 剩余有效期），删除 refresh token
 - **修改密码强制全端下线**（个人中心）：写 Redis `user:pwd:changed:{userId}`（秒级时间戳，TTL = access 有效期），JwtAuthGuard 校验 token 的 iat 早于该时间戳即拒绝（40100"密码已修改"）；同时 SCAN 删除该用户全部 refresh token、清权限缓存
