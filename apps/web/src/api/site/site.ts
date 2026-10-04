@@ -62,6 +62,22 @@ export const deleteSite = (id: string | number) =>
 export const publishSiteRelease = (id: string | number, label?: string) =>
   post<SiteReleaseItem>(`/site/manage/${id}/publish`, label ? { label } : {})
 
+/**
+ * 只发布一个展示页（P20 T168）：以站点当前版本为蓝本，仅替换该展示页的内容，
+ * 线上其它内容（站点页面、别的展示页）原样不动。
+ *
+ * 站点从未发布过时后端返回 40001（局部发布没有蓝本可用）——界面据此提示先完整发布一次。
+ */
+export const publishSiteDisplay = (
+  id: string | number,
+  displayId: string | number,
+  label?: string,
+) =>
+  post<SiteReleaseItem>(`/site/manage/${id}/publish`, {
+    ...(label ? { label } : {}),
+    onlyDisplayId: String(displayId),
+  })
+
 /** 版本列表（按版本号倒序；量小不分页） */
 export const listSiteReleases = (id: string | number) =>
   get<SiteReleaseItem[]>(`/site/manage/${id}/releases`)

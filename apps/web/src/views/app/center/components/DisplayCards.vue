@@ -26,7 +26,7 @@ import {
   type DisplayItem,
 } from '@/api/display'
 import { listApps } from '@/api/app'
-import { listSites } from '@/api/site/site'
+import { listSites, publishSiteDisplay } from '@/api/site/site'
 import { confirmDialog } from '@/utils/confirm'
 import { formatTime } from '@/utils/format'
 import DisplayReleasesDialog from './DisplayReleasesDialog.vue'
@@ -121,6 +121,34 @@ defineExpose({ reload: load })
  * 建展示应用时即创建其工作区目录，故 `folderId` 恒有值、按钮**不再依赖挂靠状态**、
  * 也**不再退化为跳站点根**；仅在目录被手动移入回收站等极端情况为 null。
  */
+/** 正在发布的展示页 id（按钮 loading；同时只允许一个，避免用户连点产生并发发布） */
+const publishingId = ref<string | null>(null)
+
+/**
+ * 把该展示页发布到它挂靠的站点（P20 T168）。
+ *
+ * 语义是「**只发这一个**」：以后端当前版本为蓝本只替换它的内容，站点页面与别的展示页
+ * 一律不受影响——这样用户不必为了更新一个展示页而担心把别的半成品一起推上线。
+ */
+async function submitPublish(item: DisplayItem): Promise<void> {
+  if (!item.siteId || publishingId.value) return
+  const confirmed = await confirmDialog(
+    `「${item.name}」现在的页面内容将替换到「${item.siteTitle ?? '站点'}」上对外生效。` +
+      '站点里其它内容和别的展示页不受影响。',
+    '发布这个展示页？',
+  )
+  if (!confirmed) return
+  publishingId.value = item.id
+  try {
+    const release = await publishSiteDisplay(item.siteId, item.id)
+    ElMessage.success(`已发布，站点当前版本为 v${release.versionNo}`)
+  } catch {
+    // 「站点还没发布过」这类原因由请求层统一提示（需先完整发布一次才能单独发布）
+  } finally {
+    publishingId.value = null
+  }
+}
+
 /** 打开该展示页的版本（检查点）面板（P20 T167） */
 function openVersions(item: DisplayItem): void {
   void releasesDialog.value?.open(item.id, item.name, item.siteTitle ?? null)
@@ -399,6 +427,16 @@ function appNameOf(appCode: string): string {
             @click="openVersions(item)"
           >
             版本
+          </el-button>
+          <el-button
+            v-if="item.siteSlug"
+            size="small"
+            type="success"
+            plain
+            :loading="publishingId === item.id"
+            @click="submitPublish(item)"
+          >
+            发布到站点
           </el-button>
           <el-button
             size="small"
