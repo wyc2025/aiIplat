@@ -6,6 +6,7 @@ import { SiteFacadeModule } from './facade/site-facade.module'
 import { SiteRootModule } from './facade/site-root.module'
 import { SiteManageModule } from './manage/manage.module'
 import { SiteOpenModule } from './open/open.module'
+import { SiteReleaseModule } from './release/site-release.module'
 import { SiteTagModule } from './tag/tag.module'
 import { SiteTemplateModule } from './template/template.module'
 
@@ -27,6 +28,7 @@ import { SiteTemplateModule } from './template/template.module'
     SiteOpenModule,
     SiteTemplateModule,
     SiteManageModule,
+    SiteReleaseModule,
     SiteColumnModule,
     SiteTagModule,
     SiteArticleModule,

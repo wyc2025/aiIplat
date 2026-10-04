@@ -1,7 +1,10 @@
 import { Module } from '@nestjs/common'
+import { StorageModule } from '../../../infra/storage/storage.module'
 import { AppFacadeModule } from '../../app/facade/app-facade.module'
 import { CloudFacadeModule } from '../../cloud/facade/cloud-facade.module'
 import { SiteFacadeModule } from '../../site/facade/site-facade.module'
+import { DisplayReleaseController } from './display-release.controller'
+import { DisplayReleaseService } from './display-release.service'
 import { DisplayController } from './display.controller'
 import { DisplayService } from './display.service'
 
@@ -16,9 +19,9 @@ import { DisplayService } from './display.service'
  * 防环：三者均不依赖本模块（site 开放层依赖的是 DisplayFacadeModule，而非本模块）。
  */
 @Module({
-  imports: [CloudFacadeModule, SiteFacadeModule, AppFacadeModule],
-  controllers: [DisplayController],
-  providers: [DisplayService],
-  exports: [DisplayService],
+  imports: [StorageModule, CloudFacadeModule, SiteFacadeModule, AppFacadeModule],
+  controllers: [DisplayController, DisplayReleaseController],
+  providers: [DisplayService, DisplayReleaseService],
+  exports: [DisplayService, DisplayReleaseService],
 })
 export class DisplayManageModule {}

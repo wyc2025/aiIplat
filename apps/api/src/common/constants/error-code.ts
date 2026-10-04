@@ -186,6 +186,12 @@ export const ErrorCode = {
    */
   SiteUserHasContent: 40120,
 
+  /**
+   * 并发发布抢锁失败（P19 R157/D145）：同站同一时刻只允许一个发布进行中。
+   * 前端提示「发布进行中，请稍后」并禁用按钮至完成。
+   */
+  SitePublishInProgress: 40121,
+
   // ========== app 域（50xxx 段，50001 起；50000 为通用内部错误已占用，见 API.md §18.3） ==========
   /** 应用不存在或无权（统一属主校验；含系统表操作、越权表） */
   AppNotFound: 50001,
@@ -225,6 +231,12 @@ export const ErrorCode = {
   DisplayGrantConflict: 50017,
   /** 展示应用名称冲突（owner 内唯一，D112/R123） */
   DisplayNameConflict: 50018,
+
+  /**
+   * 展示应用检查点状态冲突（P20 T167 / D152）：同一应用正在保存版本、或删除已锁定的版本。
+   * 与 `SitePublishInProgress`（40121）同款语义，仅域不同。
+   */
+  DisplayReleaseConflict: 50022,
 
   // ========== access 域（50xxx 段续：50019 起，P15 D119~D128 / API-P15 §5） ==========
   /**

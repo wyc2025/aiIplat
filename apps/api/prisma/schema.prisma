@@ -518,6 +518,34 @@ model CloudUsage {
 
 // ========== 个人网站域（P4a，表名 site_ 前缀） ==========
 
+/// 站点发布版本（P19 D143/D146/T159）：发布 = 不可变快照 + 指针翻转。
+///
+/// 快照物理目录 `site-releases/{siteId}/{releaseId}/`（StorageService 平台自营区，不经云盘文件树暴露）；
+/// manifest.json 随目录落盘（含 contentHash，供 Phase2 物理去重/长缓存），**不落库**（清单可大）。
+/// 行删除时必须同步清理快照目录（服务层保证，R156）。
+model SiteRelease {
+  id          BigInt   @id @default(autoincrement())
+  siteId      BigInt   @map("site_id")
+  /// 站内递增序号（发布时 max+1，供界面展示与排序）
+  versionNo   Int      @map("version_no")
+  /// 备注（发布时可选填写，如「首页改版上线」）
+  label       String?  @map("label") @db.VarChar(100)
+  /// 快照文件数（不含目录）
+  fileCount   Int      @map("file_count")
+  /// 快照总字节
+  totalBytes  BigInt   @map("total_bytes")
+  /// 1 = 锁定（豁免自动清理与手动删除，R158）/ 0 = 普通
+  pinned      Int      @default(0) @map("pinned") @db.TinyInt
+  /// 发布人（逻辑关联 sys_user，禁 JOIN）
+  createdBy   BigInt   @map("created_by")
+  createTime  DateTime @default(now()) @map("create_time")
+
+  /// 站内序号唯一（并发发布靠 Redis 锁互斥，此处是数据层兜底）
+  @@unique([siteId, versionNo], map: "uk_release_site_version")
+  @@index([siteId, createTime], map: "idx_release_site")
+  @@map("site_release")
+}
+
 /// 站点（P4E D51 起每用户可多站，站点数上限由 site_quota 控制）
 model SiteSite {
   id           BigInt   @id @default(autoincrement())
@@ -538,6 +566,8 @@ model SiteSite {
   commentAudit Int      @default(1) @map("comment_audit") @db.TinyInt
   /// SPA 回退入口（P7 D77/R78：template.json#spaFallback 读入，相对站点根；NULL = 无回退）
   spaFallback  String?  @map("spa_fallback") @db.VarChar(64)
+  /// 当前发布版本 id（P19 D143/D146/T159）：NULL = 从未发布 → 开放层走 legacy 直挂工作副本（D144）
+  activeReleaseId BigInt? @map("active_release_id")
   createTime   DateTime @default(now()) @map("create_time")
   updateTime   DateTime @updatedAt @map("update_time")
 
@@ -974,6 +1004,33 @@ model DispGrant {
   @@unique([appId, displayId], map: "uk_grant_app_display")
   @@index([displayId], map: "idx_grant_display")
   @@map("disp_grant")
+}
+
+/// 展示应用版本检查点（P20 T167，D152）：把工作区复制为不可变快照，可**恢复到工作区**。
+/// 与 `site_release` 同构但独立：展示应用有自己的节奏（不随站点发布），
+/// 且站点版本里的 disp 子树是发布聚合的产物，不能反向当检查点用。
+model DispRelease {
+  id         BigInt   @id @default(autoincrement())
+  /// 展示应用（逻辑关联 disp_display.id，禁 JOIN）
+  displayId  BigInt   @map("display_id")
+  /// 应用内递增序号（保存时 max+1，供界面展示与排序）
+  versionNo  Int      @map("version_no")
+  /// 备注（可选，如「首页改版」）
+  label      String?  @map("label") @db.VarChar(100)
+  /// 快照文件数（不含目录）
+  fileCount  Int      @map("file_count")
+  /// 快照总字节
+  totalBytes BigInt   @map("total_bytes")
+  /// 1 = 锁定（豁免自动清理与手动删除）/ 0 = 普通
+  pinned     Int      @default(0) @map("pinned") @db.TinyInt
+  /// 保存人（逻辑关联 sys_user，禁 JOIN）
+  createdBy  BigInt   @map("created_by")
+  createTime DateTime @default(now()) @map("create_time")
+
+  /// 应用内序号唯一（并发保存靠 Redis 锁互斥，此处是数据层兜底）
+  @@unique([displayId, versionNo], map: "uk_disp_release_version")
+  @@index([displayId, createTime], map: "idx_disp_release")
+  @@map("disp_release")
 }
 
 // ==================== P15：对外开放接入层（D119/D126，表名前缀 acc_） ====================

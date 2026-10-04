@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { RedisService } from '../../../infra/redis/redis.service'
-import { RedisKey } from '../../../common/constants/redis-key'
+import { RedisKey, SITE_PATH_TRACK_LEGACY } from '../../../common/constants/redis-key'
 import { CloudFacade } from '../../cloud/facade/cloud-facade.service'
 
 /** slug 解析缓存 TTL（秒）：站点信息变化频率低，§14.9 约定 300s */
@@ -23,12 +23,15 @@ export interface ResolvedSite {
   commentAudit: number
   /** SPA 回退入口（P7 D77：无扩展名路径回退时静态服务的入口文件；null = 不回退） */
   spaFallback: string | null
+  /**
+   * 当前发布版本 id（P19 D144/T162）：非空 → 开放层走**快照轨**（读 site-releases 快照，不消费 is_public）；
+   * `null` → 从未发布，走 **legacy 轨**（直挂工作副本，公开判定遵循 W12 阻断优先语义）。
+   */
+  activeReleaseId: string | null
 }
 
 /** 路径解析结果 */
-export type ResolvedPath =
-  | { found: true; fileId: string }
-  | { found: false }
+export type ResolvedPath = { found: true; fileId: string } | { found: false }
 
 /**
  * 开放层解析服务（架构增补 §14.4）：
@@ -67,6 +70,7 @@ export class SiteResolveService {
       description: site.description,
       commentAudit: site.commentAudit,
       spaFallback: site.spaFallback,
+      activeReleaseId: site.activeReleaseId ? site.activeReleaseId.toString() : null,
     }
     await this.redis.client
       .set(cacheKey, JSON.stringify(resolved), 'EX', RESOLVE_TTL_SEC)
@@ -78,9 +82,12 @@ export class SiteResolveService {
    * 解析站点内相对路径 → 文件 fileId（目录不算文件命中，交由 controller 走目录语义 R4）。
    * 命中缓存直接返回；未命中经 CloudFacade.resolvePublicPath（R2 上溯公开链校验），
    * 结果（含 "404" 负缓存）写 Redis 60s。
+   *
+   * **P19 轨维（R159）**：本方法只服务 **legacy 轨**（站点从未发布 → 直挂工作副本），
+   * 缓存键带 `legacy` 轨段；快照轨由 `SiteReleaseTrackService` 走文件系统解析、不写本缓存。
    */
   async resolvePath(siteId: string, rootFolderId: string, path: string): Promise<ResolvedPath> {
-    const cacheKey = RedisKey.sitePath(siteId, path)
+    const cacheKey = RedisKey.sitePath(siteId, SITE_PATH_TRACK_LEGACY, path)
     const cached = await this.redis.client.get(cacheKey)
     if (cached === NEGATIVE_CACHE) return { found: false }
     if (cached) return { found: true, fileId: cached }
@@ -89,7 +96,9 @@ export class SiteResolveService {
 
     // 路径完全不存在（非目录）：写 "404" 负缓存（D11 防无效路径穿透 DB）
     if (!file) {
-      await this.redis.client.set(cacheKey, NEGATIVE_CACHE, 'EX', PATH_TTL_SEC).catch(() => undefined)
+      await this.redis.client
+        .set(cacheKey, NEGATIVE_CACHE, 'EX', PATH_TTL_SEC)
+        .catch(() => undefined)
       return { found: false }
     }
 

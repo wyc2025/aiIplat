@@ -18,6 +18,12 @@ import { SiteManageService } from './manage.service'
  * P14 T125 调整：依赖由 `SiteOpenModule` 改为 `SiteResolveModule`（解析服务已抽出）——
  * 否则 open 依赖 display 门面时构成 `SiteFacadeModule → SiteManageModule → SiteOpenModule →
  * DisplayFacadeModule → DisplayManageModule → SiteFacadeModule` 模块环（运行时 TDZ 崩）。
+ *
+ * P20 T166 调整：**移除对 `SiteReleaseModule` 的依赖**——发布侧（P20 B2）需经
+ * `DisplayFacade` 拿展示应用工作区清单，而其反向链
+ * `display.facade → display.manage → SiteFacadeModule → SiteManageModule` 会回指本站点域；
+ * 若此处仍 import release 模块即构成环。删站级联清理已降为纯函数
+ * （`release/release-cleanup.util.ts`），故不需 DI，环断开。
  */
 @Module({
   imports: [StorageModule, CloudModule, SiteResolveModule],

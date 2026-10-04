@@ -9,7 +9,7 @@ const MAX_KB = Math.floor(AI_CLOUD_WRITE_MAX_FILE_BYTES / 1024)
 /**
  * 写入我的云盘文件（write，确认卡；R63 摘要 = 路径 + 大小 + 覆盖与否）。
  * description 边界纪律（R63）：与 write_site_files 互写对方名字做排除式描述——
- * 本工具 = 云盘任意路径、不影响站点；write_site_files = 站点目录内、影响线上站点。
+ * 本工具 = 云盘任意路径、不影响站点；write_site_files = 站点目录内的**工作文件**（对访客生效需先发布版本）。
  */
 export function createWriteCloudFileTool(cloudFacade: CloudFacade): AiTool {
   return {
@@ -18,7 +18,7 @@ export function createWriteCloudFileTool(cloudFacade: CloudFacade): AiTool {
     description:
       '在云盘里新建或覆盖**一个文本文件**。path 为相对云盘根的完整路径（如 notes/a.md、docs/x/y.txt），中间目录不存在会自动创建；同路径已存在同名文件时**温和覆盖**（旧文件移入回收站，可在回收站还原），同名文件夹存在则失败。' +
       `仅文本白名单扩展名（html/htm/css/js/mjs/txt/md/json/svg/xml/yml/yaml/csv），单文件内容 ≤${MAX_KB}KB。` +
-      '本工具作用于**云盘任意路径、不影响任何线上站点**；若要修改个人站点的页面/样式/脚本（站点目录内的文件，影响线上站点），请改用 write_site_files。',
+      '本工具作用于**云盘任意路径、不影响任何线上站点**；若要修改个人站点的页面/样式/脚本（站点目录内的工作文件，对访客生效需先发布版本），请改用 write_site_files。',
     parameters: {
       type: 'object',
       properties: {

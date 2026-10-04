@@ -12,6 +12,9 @@
     "smoke:ai": "tsx scripts/smoke-ai-tools.ts",
     "smoke:ext": "tsx scripts/smoke-ext-access.ts",
     "smoke:mcp": "tsx scripts/smoke-mcp.ts",
+    "scan:pubblock": "tsx scripts/scan-public-blocked.ts",
+    "smoke:site": "tsx scripts/smoke-site.ts",
+    "migrate:display-workdir": "tsx scripts/migrate-display-workdir.ts",
     "clean:app": "tsx scripts/clean-app-drafts.ts"
   },
   "dependencies": {

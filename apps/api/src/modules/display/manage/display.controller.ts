@@ -37,7 +37,9 @@ export class DisplayController {
   @Put(':id/affiliate')
   @OperationLog('展示应用', '挂靠/换挂靠站点')
   @ApiParam({ name: 'id', description: '展示应用 id' })
-  @ApiOperation({ summary: '挂靠 / 换挂靠 / 取消挂靠（目录移动 + 关系更新；中断全回滚，R127）' })
+  @ApiOperation({
+    summary: '挂靠 / 换挂靠 / 取消挂靠（P20 B1：只改归属关系，页面文件始终在原目录不动）',
+  })
   affiliate(
     @CurrentUser('userId') userId: string,
     @Param('id', ParseIntPipe) id: number,

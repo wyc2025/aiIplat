@@ -7,7 +7,12 @@ import { BusinessException } from '../../../common/exceptions/business.exception
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { StorageService } from '../../../infra/storage/storage.service'
 import { SiteRootService } from '../../site/facade/site-root.service'
-import { FileService, AVATAR_PARENT_ID, EDITABLE_TEXT_EXTS, MAX_CHILDREN } from '../file/file.service'
+import {
+  FileService,
+  AVATAR_PARENT_ID,
+  EDITABLE_TEXT_EXTS,
+  MAX_CHILDREN,
+} from '../file/file.service'
 
 /** 头像元数据（由调用方经 StorageService 落盘后传入） */
 export interface AvatarMeta {
@@ -197,26 +202,69 @@ export class CloudFacade {
   }
 
   /**
-   * 公开路径解析（R2 修订·三态继承）：自根目录逐段下行命中 cloud_file 行，再自目标上溯校验公开链。
-   * is_public 三态：0=继承（新建默认）/ 1=显式公开 / 2=显式阻断；
-   * 上溯时遇第一个非继承节点定生死——1 放行（可穿透父级阻断）/ 2 阻断；一路继承到根仍无显式锚点 → 阻断。
-   * 任一不满足返回 null（开放层统一转 40400）。深度有界（≤10 层），防环。
+   * 公开路径解析（R2 修订·三态继承；**W12 修订·阻断优先**）：自根目录逐段下行命中 cloud_file 行，
+   * 再自目标上溯校验公开链。is_public 三态：0=继承（新建默认）/ 1=显式公开 / 2=显式阻断。
+   *
+   * **阻断优先（W12/T165，与 `/api/pub/**` 链统一）**：祖先链（含目标自身）**任一节点 = 2 即阻断**；
+   * 无 2 时，遇第一个非继承节点 = 1 则放行，一路继承（0）到根仍无显式公开锚点 → 阻断。
+   * **收窄点**：目标自身 `1` **不再穿透**父级 `2`（S3 explicit deny 同构，业界通行）——此前两链规则
+   * 相反，同一文件在 `/api/pub` 判不可见、在 `/api/open` 判可见，权限结论不可推理（W12 §1）。
+   *
+   * 任一不满足返回 null（开放层统一转 40400）。深度有界，防环。
    * @param rootFolderId 站点根目录
    * @param path 规范化后的相对路径（段数组或 '/' 分隔字符串）
    */
   async resolvePublicPath(rootFolderId: bigint, path: string): Promise<CloudFile | null> {
-    // 根目录必须存在且未删（公开性由下方上溯统一裁决：根恒为显式 1/2，0 视为异常态阻断）
-    const root = await this.prisma.cloudFile.findFirst({
+    const root = await this.requireRootFolder(rootFolderId)
+    if (!root) return null
+    const current = await this.descendTree(root, path)
+    if (!current) return null
+
+    // 自目标上溯（**W12 修订·阻断优先**）：先扫全链有无显式阻断（2）——任一节点（含自身）为 2 即阻断；
+    // 无 2 时再按继承规则裁决（遇第一个非继承节点 1 → 放行；一路 0 到根仍无显式锚点 → 阻断）。
+    // 必须走完整条链再裁决：不能遇到 1 就提前放行，否则又变回「1 穿透 2」。
+    let cursor: CloudFile | null = current
+    let depth = 0
+    let explicitPublic = false
+    while (cursor && depth <= RESOLVE_MAX_DEPTH) {
+      if (cursor.isPublic === 2) return null
+      if (cursor.isPublic === 1) explicitPublic = true
+      if (cursor.id === rootFolderId) break
+      cursor = await this.prisma.cloudFile.findFirst({
+        where: { userId: root.userId, id: cursor.parentId, deletedAt: null },
+      })
+      depth++
+    }
+    // 深度超限（环/异常链）按未授权处理；站点根建站时恒显式置 1，正常链必在根处裁决
+    if (depth > RESOLVE_MAX_DEPTH) return null
+    return explicitPublic ? current : null
+  }
+
+  /**
+   * 按树解析路径（**不校验公开性**，P19 T162/D149）：站点属主**管理态预览**专用。
+   *
+   * 与 `resolvePublicPath` 共用同一段下行实现（`descendTree`），避免两套路径解析规则漂移；
+   * 公开性裁决刻意跳过——预览读的是**工作副本**，属主对自己站点内的任何文件都应可见
+   * （含未公开页），这与开放层「只出已发布内容」是两个面。鉴权由调用方（管理态控制器）负责。
+   */
+  async resolveOwnTreePath(rootFolderId: bigint, path: string): Promise<CloudFile | null> {
+    const root = await this.requireRootFolder(rootFolderId)
+    if (!root) return null
+    return this.descendTree(root, path)
+  }
+
+  /** 站点根目录行（存在且未软删的目录；不存在返回 null） */
+  private async requireRootFolder(rootFolderId: bigint): Promise<CloudFile | null> {
+    return this.prisma.cloudFile.findFirst({
       where: { id: rootFolderId, deletedAt: null, isDir: 1 },
     })
-    if (!root) return null
+  }
 
-    // 规范化：空路径 = 根目录（默认 index.html 由调用方拼接）
+  /** 规范化相对路径并自根逐段下行（拒 `..`、深度有界；两种解析链共用） */
+  private async descendTree(root: CloudFile, path: string): Promise<CloudFile | null> {
     const segments = path.split('/').filter((s) => s.length > 0 && s !== '.')
     if (segments.some((s) => s === '..')) return null
     if (segments.length > RESOLVE_MAX_DEPTH) return null
-
-    // 自根逐段下行
     let current = root
     for (const seg of segments) {
       const next = await this.prisma.cloudFile.findFirst({
@@ -225,21 +273,7 @@ export class CloudFacade {
       if (!next) return null
       current = next
     }
-
-    // 自目标上溯（R2 修订·三态继承）：遇第一个非继承节点定生死——1 放行 / 2 阻断；
-    // 一路继承（0）回到根仍无显式锚点 → 阻断（站点根恒显式置 1/2，正常链必在根处裁决）
-    let cursor: CloudFile | null = current
-    let depth = 0
-    while (cursor && depth <= RESOLVE_MAX_DEPTH) {
-      if (cursor.isPublic === 1) return current
-      if (cursor.isPublic === 2) return null
-      if (cursor.id === rootFolderId) return null
-      cursor = await this.prisma.cloudFile.findFirst({
-        where: { userId: root.userId, id: cursor.parentId, deletedAt: null },
-      })
-      depth++
-    }
-    return null
+    return current
   }
 
   /** 获取公开文件流（R2 校验通过后由开放静态层管道输出；Range 由调用方传入 { start, end }）。
@@ -292,10 +326,26 @@ export class CloudFacade {
   }
 
   /**
+   * 按**相对路径**建目录（逐级 `mkdir -p`，已存在则复用）——公开入口（P20 B1）。
+   *
+   * 供展示应用在工作区创建自己的目录（目录恒定位、与站点树解耦）。调用方不区分
+   * 「已存在」与「刚创建」——两者都返回可用的末级目录 id。
+   */
+  async ensureUserDirPath(userId: bigint, relPath: string): Promise<bigint> {
+    const segments = this.normalizeUserDirPath(relPath)
+    return this.ensureUserDir(userId, segments)
+  }
+
+  /**
    * 新建文件夹（供 site 域创建站点流程建目录）：R4 同名自动"(1)" + R6 单目录子项上限（500）。
    * @param isPublic 显式公开标记（仅站点根目录需要置 1 作为继承锚点；子目录缺省 0=继承父目录）
    */
-  async createFolder(userId: bigint, parentId: bigint, name: string, isPublic = false): Promise<CloudFile> {
+  async createFolder(
+    userId: bigint,
+    parentId: bigint,
+    name: string,
+    isPublic = false,
+  ): Promise<CloudFile> {
     // R6：单目录直接子项上限（与 mkdir 同口径）
     const count = await this.prisma.cloudFile.count({
       where: { userId, parentId, deletedAt: null },
@@ -305,7 +355,14 @@ export class CloudFacade {
     }
     const finalName = await this.fileService.resolveNameConflict(userId, parentId, name)
     return this.prisma.cloudFile.create({
-      data: { userId, parentId, name: finalName, isDir: 1, size: BigInt(0), isPublic: isPublic ? 1 : 0 },
+      data: {
+        userId,
+        parentId,
+        name: finalName,
+        isDir: 1,
+        size: BigInt(0),
+        isPublic: isPublic ? 1 : 0,
+      },
     })
   }
 
@@ -359,7 +416,9 @@ export class CloudFacade {
     meta: PublicFileMeta,
     isPublic = false,
   ): Promise<CloudFile> {
-    const defaultQuota = BigInt(this.config.get<number>('upload.cloudDefaultQuota', 1024 * 1024 * 1024))
+    const defaultQuota = BigInt(
+      this.config.get<number>('upload.cloudDefaultQuota', 1024 * 1024 * 1024),
+    )
     const [created] = await this.prisma.$transaction([
       this.prisma.cloudFile.create({
         data: {
@@ -422,7 +481,9 @@ export class CloudFacade {
   private async adjustUsed(userId: bigint, delta: bigint) {
     const usage = await this.prisma.cloudUsage.findUnique({ where: { userId } })
     if (!usage) {
-      const defaultQuota = BigInt(this.config.get<number>('upload.cloudDefaultQuota', 1024 * 1024 * 1024))
+      const defaultQuota = BigInt(
+        this.config.get<number>('upload.cloudDefaultQuota', 1024 * 1024 * 1024),
+      )
       await this.prisma.cloudUsage.create({
         data: { userId, quota: defaultQuota, used: delta > BigInt(0) ? delta : BigInt(0) },
       })
@@ -649,7 +710,10 @@ export class CloudFacade {
    * 按路径读文件（管理侧，站点基点）：逐段下行解析（有界 ≤10）；不存在/是目录 → 30001；
    * 读盘返回 Buffer（UTF-8 解码由调用方负责）。
    */
-  async readFileRaw(rootFolderId: bigint, path: string): Promise<{ size: number; content: Buffer }> {
+  async readFileRaw(
+    rootFolderId: bigint,
+    path: string,
+  ): Promise<{ size: number; content: Buffer }> {
     const root = await this.assertRawRoot(rootFolderId)
     return this.readFileByBase(root.userId, root.id, this.rawSegments(path))
   }
@@ -676,7 +740,8 @@ export class CloudFacade {
       throw new BusinessException(ErrorCode.CloudDirLimitExceeded, '超出目录限制（深度>10）')
     }
     // 基点解析：0 = 用户云盘虚拟根（无实体行）；否则实体目录行必须存在
-    const baseParentId = rootFolderId === USER_ROOT_ID ? USER_ROOT_ID : (await this.assertRawRoot(rootFolderId)).id
+    const baseParentId =
+      rootFolderId === USER_ROOT_ID ? USER_ROOT_ID : (await this.assertRawRoot(rootFolderId)).id
     const dirSegments = segments.slice(0, -1)
     const name = segments[segments.length - 1]
     const size = BigInt(content.length)
@@ -954,7 +1019,10 @@ export class CloudFacade {
     const normalized = segments.join('/')
     const ext = extOfName(normalized)
     if (!EDITABLE_TEXT_EXTS.has(ext)) {
-      throw new BusinessException(ErrorCode.CloudFileTypeNotAllowed, '该文件类型不支持读取（仅文本白名单）')
+      throw new BusinessException(
+        ErrorCode.CloudFileTypeNotAllowed,
+        '该文件类型不支持读取（仅文本白名单）',
+      )
     }
     const entry = await this.findEntryByBase(userId, USER_ROOT_ID, segments)
     if (!entry || entry.isDir === 1 || !entry.storageName) {
@@ -1098,7 +1166,10 @@ export class CloudFacade {
     const normalized = segments.join('/')
     const ext = extOfName(normalized)
     if (!EDITABLE_TEXT_EXTS.has(ext)) {
-      throw new BusinessException(ErrorCode.CloudFileTypeNotAllowed, '该文件类型不支持写入（仅文本白名单）')
+      throw new BusinessException(
+        ErrorCode.CloudFileTypeNotAllowed,
+        '该文件类型不支持写入（仅文本白名单）',
+      )
     }
     if (typeof content !== 'string') {
       throw new BusinessException(ErrorCode.ParamInvalid, 'content 必须为字符串')

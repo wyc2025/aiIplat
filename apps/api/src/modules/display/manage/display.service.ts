@@ -107,16 +107,17 @@ export class DisplayService {
         })),
       )
     })
-    // 卡片「打开云盘目录」按钮：仅**已挂靠**的展示应用需要（未挂靠者在云盘暂存区，无站点目录可跳）；
-    // 目录 id 经 CloudFacade 按 writePath 机械解析——目录尚未创建时为 null，前端退回跳站点根
+    // 卡片「打开云盘目录」：P20 B1 起**所有**展示应用（含未挂靠）都有独立工作区目录，
+    // 故无条件下沉解析 —— 按钮恒可直达自己的工作区（不再退化为站点根）。
     return Promise.all(
       views.map(async (view) => {
-        if (view.siteId === null) return view
         const folderId = await this.cloudFacade.resolveUserDirId(userId, view.writePath)
         return {
           ...view,
           folderId: folderId === null ? null : folderId.toString(),
-          siteRootFolderId: siteById.get(view.siteId)?.rootFolderId.toString() ?? null,
+          siteRootFolderId: view.siteId
+            ? (siteById.get(view.siteId)?.rootFolderId.toString() ?? null)
+            : null,
         }
       }),
     )
@@ -135,9 +136,10 @@ export class DisplayService {
     const created = await this.prisma.dispDisplay.create({
       data: { ownerId: userId, name, siteId: null, folderPath: '', status: DISPLAY_STATUS_ACTIVE },
     })
-    const folderPath = site
-      ? this.siteRelPath(created.id)
-      : this.stagingRelPath(userId, created.id)
+    // P20 B1（目录独立）：展示应用目录**恒定位**于用户云盘工作区，与站点树解耦——
+    // 挂靠只是关系字段，换挂靠不动文件；建应用即建目录，`folderId` 恒可解析（卡片「打开目录」可直达）。
+    const folderPath = this.workRelPath(userId, created.id)
+    await this.cloudFacade.ensureUserDirPath(userId, folderPath)
     const updated = await this.prisma.dispDisplay.update({
       where: { id: created.id },
       data: { siteId: site ? site.id : null, folderPath },
@@ -160,33 +162,27 @@ export class DisplayService {
     if (target && display.siteId !== null && target.id === display.siteId) {
       throw new BusinessException(ErrorCode.ParamInvalid, '该展示应用已挂靠此站点')
     }
-    // 原站点已删（`disp_display.site_id` 是逻辑外键、删站不清理该关系）→ **视为未挂靠**，与列表口径一致
-    // （API §21.3）。原先此处直接报错「请先重新挂靠」会把用户锁死——挂靠动作本身正是唯一出路。
-    // 此时 `from` 落到暂存区基点，而页面文件实际在已删站点的目录里（已随删站进回收站）→
-    // `moveDir` 因源不存在而跳过移动（既有语义），只更新挂靠关系；如需保留原文件，先从回收站还原。
-    const currentSite =
-      display.siteId === null ? null : await this.siteFacade.getSiteInfo(userId, display.siteId)
 
-    // 移动基点 = 用户云盘根；from/to 均为「父目录」，目录名（id）保持不变
-    const from = currentSite
-      ? `${currentSite.slug}/${DISP_DIR}`
-      : `${this.stagingRoot()}/${userId.toString()}`
-    const to = target
-      ? `${target.slug}/${DISP_DIR}`
-      : `${this.stagingRoot()}/${userId.toString()}`
-    const nextFolderPath = target ? this.siteRelPath(display.id) : this.stagingRelPath(userId, display.id)
-
-    const moved = await this.moveDir(userId, from, to)
-    try {
-      const updated = await this.prisma.dispDisplay.update({
-        where: { id: display.id },
-        data: { siteId: target ? target.id : null, folderPath: nextFolderPath },
-      })
-      return { ...this.toView(updated, target, []), moved }
-    } catch (error) {
-      if (moved) await this.moveDir(userId, to, from).catch(() => false)
-      throw error
-    }
+    // P20 B1（挂靠改为**纯关系操作**）：
+    // 展示应用目录恒位于用户云盘工作区（`workRelPath`），与站点树解耦 —— 挂靠 / 换挂靠 / 取消挂靠
+    // 都只改 `site_id` 一个字段，**不移动任何文件**。
+    //
+    // 这修掉了旧实现（移动 `{slug}/disp` 父目录）的一类真实缺陷：
+    //   ① 换挂靠后目录落到 `{新slug}/disp/disp/{id}`（`moveUserFiles` 的 `to` 是父目录语义）；
+    //   ② 移动粒度是整个 `disp/`，会连带搬走同站点**其它**展示应用；
+    //   ③ 由 ①② 导致换挂靠后开放层 40400（文件夹际位置与 `folder_path` 不符）。
+    // 附带收益：原「换挂靠中断需反向补偿」的事务复杂度整体消失（不再有中断态），
+    // 且一个展示应用**结构性上可以**挂靠多个站点（未来若需放宽，只是一条校验的事）。
+    const folderPath = this.workRelPath(userId, display.id)
+    const updated = await this.prisma.dispDisplay.update({
+      where: { id: display.id },
+      data: {
+        siteId: target ? target.id : null,
+        // 兼容存量：历史上可能残留旧语义路径（`disp/{id}` 或暂存区），一律归一到恒定位
+        ...(display.folderPath === folderPath ? {} : { folderPath }),
+      },
+    })
+    return { ...this.toView(updated, target, []), moved: false }
   }
 
   /** 软删展示应用（API §21.1-4）：清授权边；目录保留于云盘由用户处置；改名释放唯一槽 */
@@ -301,6 +297,27 @@ export class DisplayService {
   }
 
   /**
+   * 挂靠指定站点的展示应用工作区清单（P20 B2，站点发布侧消费）。
+   *
+   * 路径**恒定位**（`workRelPath`，与站点树无关）；返回空数组表示该站点没有可发布的展示应用。
+   * 只列 `status=1` 且未软删的项——软删中的展示应用不该进入新快照。
+   */
+  async listWorkPathsBySite(
+    siteId: bigint,
+    ownerId: bigint,
+  ): Promise<Array<{ displayId: string; workPath: string }>> {
+    const rows = await this.prisma.dispDisplay.findMany({
+      where: { siteId, ownerId, status: DISPLAY_STATUS_ACTIVE, deletedAt: null },
+      select: { id: true },
+      orderBy: { id: 'asc' },
+    })
+    return rows.map((row) => ({
+      displayId: row.id.toString(),
+      workPath: this.workRelPath(ownerId, row.id),
+    }))
+  }
+
+  /**
    * 开放层静态服务解析（`:slug/disp/:id/**`）：展示应用存在、未软删、且挂靠在本站点
    * → 返回站点内相对路径与属主（未挂靠/挂他站/已删一律 40400；暂存区不对外服务，§30.8 ④）。
    */
@@ -317,7 +334,9 @@ export class DisplayService {
     }
     return {
       displayId: display.id.toString(),
-      relPath: this.siteRelPath(display.id),
+      // 快照内相对路径：发布时工作区内容被聚合到快照的 `disp/{id}/`，
+      // 故开放层路由相对站点根仍是 `disp/{id}`（与工作区物理位置无关，对外 URL 保持不变）
+      relPath: `${DISP_DIR}/${display.id.toString()}`,
       ownerId: display.ownerId.toString(),
     }
   }
@@ -395,7 +414,8 @@ export class DisplayService {
         const row = await this.prisma.dispDisplay.create({
           data: { ownerId: userId, name, siteId: null, folderPath: '', status: DISPLAY_STATUS_ACTIVE },
         })
-        const folderPath = this.stagingRelPath(userId, row.id)
+        const folderPath = this.workRelPath(userId, row.id)
+        await this.cloudFacade.ensureUserDirPath(userId, folderPath)
         await this.prisma.dispDisplay.update({ where: { id: row.id }, data: { folderPath } })
         for (const file of item.files) {
           try {
@@ -436,23 +456,27 @@ export class DisplayService {
     throw new BusinessException(ErrorCode.DisplayNameConflict, `展示应用重名递增超限：${base}`)
   }
 
-  /** 读展示应用目录下文本文件（挂靠态经站点目录；未挂靠返回空清单） */
+  /**
+   * 读展示应用**工作区**的文本文件（P20 B1：内容在独立工作区，不再位于站点树）。
+   * 仅挂靠态参与随包（未挂靠不属于任何站点）；目录不存在 → 空清单。
+   */
   private async readDisplayFiles(
     ownerId: bigint,
     display: { id: bigint; siteId: bigint | null },
   ): Promise<Array<{ path: string; content: string }>> {
     if (display.siteId === null) return []
-    const site = await this.siteFacade.getSiteInfo(ownerId, display.siteId)
-    if (!site) return []
-    const prefix = `${this.siteRelPath(display.id)}/`
-    const { files } = await this.cloudFacade.listSubtreeRaw(site.rootFolderId)
+    const workDirId = await this.cloudFacade.resolveUserDirId(
+      ownerId,
+      this.workRelPath(ownerId, display.id),
+    )
+    if (workDirId === null) return []
+    const { files } = await this.cloudFacade.listSubtreeRaw(workDirId)
     const result: Array<{ path: string; content: string }> = []
     for (const entry of files) {
-      if (entry.isDir || !entry.path.startsWith(prefix)) continue
-      const relative = entry.path.slice(prefix.length)
+      if (entry.isDir) continue
       try {
-        const raw = await this.cloudFacade.readFileRaw(site.rootFolderId, entry.path)
-        result.push({ path: relative, content: raw.content.toString('utf-8') })
+        const raw = await this.cloudFacade.readFileRaw(workDirId, entry.path)
+        result.push({ path: entry.path, content: raw.content.toString('utf-8') })
       } catch (error) {
         // 非文本白名单 / 超读上限：不随包（R128：二进制素材断链自担）
         this.logger.warn(`随包读取跳过（非文本或超限）：${entry.path}｜${String(error)}`)
@@ -462,22 +486,6 @@ export class DisplayService {
   }
 
   // ==================== 内部 ====================
-
-  /** 目录移动（基点 = 用户云盘根）：源不存在返回 false（空目录挂靠）；失败抛 50016 语义错 */
-  private async moveDir(userId: bigint, from: string, to: string): Promise<boolean> {
-    if (from === to) return false
-    const exists = await this.cloudFacade.existsUserPath(userId, from)
-    if (!exists) return false
-    const results = await this.cloudFacade.moveUserFiles(userId, [{ from, to }])
-    const failed = results.find((item) => !item.ok)
-    if (failed) {
-      throw new BusinessException(
-        ErrorCode.DisplayNotFound,
-        `展示应用目录移动失败：${failed.error ?? '未知原因'}`,
-      )
-    }
-    return true
-  }
 
   /** 属主校验（不存在/已删/非属主统一 50016） */
   private async requireOwned(userId: bigint, id: bigint) {
@@ -527,6 +535,8 @@ export class DisplayService {
       siteId: bigint | null
       folderPath: string
       createdAt: Date
+      /** P20 B1：工作区路径按属主组装（恒定位），故视图构造需要 ownerId */
+      ownerId: bigint
     },
     site: MySiteInfo | null,
     grants: Array<{ appId: string; appCode: string }>,
@@ -541,7 +551,8 @@ export class DisplayService {
       siteTitle: site?.title ?? null,
       folderPath: display.folderPath,
       // 写文件基点 = 用户云盘根：挂靠态需拼站点 slug（AI 用云盘写文件工具直接可用）
-      writePath: site ? `${site.slug}/${DISP_DIR}/${display.id.toString()}` : display.folderPath,
+      // P20 B1：工作区路径**恒定位**（不随挂靠变化）——挂靠只是关系字段，换挂靠不动文件
+      writePath: this.workRelPath(display.ownerId, display.id),
       urlPreview: site ? `/api/open/${site.slug}/disp/${display.id.toString()}/` : null,
       grantCount: grants.length,
       grants,
@@ -557,13 +568,19 @@ export class DisplayService {
     return this.config.get<string>('display.stagingPath', 'disp-staging')
   }
 
-  /** 未挂靠目录（相对用户云盘根）：`{stagingPath}/{ownerId}/{displayId}` */
-  private stagingRelPath(userId: bigint, displayId: bigint): string {
-    return `${this.stagingRoot()}/${userId.toString()}/${displayId.toString()}`
+  /**
+   * 展示应用工作区目录（相对用户云盘根，**恒定位**；P20 B1）：
+   * `{workRoot}/{ownerId}/{displayId}`。
+   *
+   * 与站点树**解耦**——挂靠只改关系字段、不动文件；站点发布时由发布管道把本目录内容
+   * **聚合**进站点快照的 `disp/{id}/`，因此对外 URL（`/api/open/{slug}/disp/{id}/**`）保持不变。
+   */
+  private workRelPath(userId: bigint, displayId: bigint): string {
+    return `${this.workRoot()}/${userId.toString()}/${displayId.toString()}`
   }
 
-  /** 挂靠目录（相对**站点根**）：`disp/{displayId}`（开放层静态路由相对站点根，slug 变更不影响） */
-  private siteRelPath(displayId: bigint): string {
-    return `${DISP_DIR}/${displayId.toString()}`
+  /** 工作区根（相对用户云盘根）：沿用 `display.stagingPath` 配置键，语义由「暂存区」升级为「工作区」 */
+  private workRoot(): string {
+    return this.stagingRoot()
   }
 }

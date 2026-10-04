@@ -80,7 +80,7 @@ export const CAPABILITY_MANIFEST: readonly CapabilityRow[] = [
   {
     key: 'site.file',
     perms: 'site:site:manage',
-    text: '站点文件：列目录、读文本文件、改页面与样式（影响线上站点，写入需确认）。',
+    text: '站点文件：列目录、读文本文件、改页面与样式（草稿态，发布后生效；写入需确认）。',
     tools: ['list_site_files', 'read_site_file', 'write_site_files'],
   },
   {

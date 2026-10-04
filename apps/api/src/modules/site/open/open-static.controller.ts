@@ -2,6 +2,7 @@ import { Controller, Get, Logger, Param, Req, Res } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { ApiOperation, ApiTags } from '@nestjs/swagger'
 import type { Request, Response } from 'express'
+import type { Readable } from 'node:stream'
 import { ErrorCode } from '../../../common/constants/error-code'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { RedisService } from '../../../infra/redis/redis.service'
@@ -9,7 +10,8 @@ import { Public } from '../../../gateway/decorators/public.decorator'
 import { SkipTransform } from '../../../gateway/decorators/skip-transform.decorator'
 import { CloudFacade } from '../../cloud/facade/cloud-facade.service'
 import { DisplayFacade } from '../../display/facade/display-facade.service'
-import { SiteResolveService, type ResolvedPath } from './site-resolve.service'
+import { SiteResolveService, type ResolvedPath, type ResolvedSite } from './site-resolve.service'
+import { SiteReleaseTrackService } from './site-release-track.service'
 import { assertRateLimit, extractIp } from './rate-limit.util'
 import { CSP_SANDBOX, resolveMime } from './mime'
 
@@ -17,6 +19,15 @@ import { CSP_SANDBOX, resolveMime } from './mime'
 const SOCKET_IDLE_TIMEOUT_MS = 30_000
 /** 路径段上限（§14.4 有界逐段下行，防环） */
 const MAX_DEPTH = 10
+
+/** 出流元数据（P19 T162 双轨统一形态：legacy 轨来自云盘、快照轨来自 site-releases） */
+interface ServeFileMeta {
+  stream: Readable
+  size: number
+  ext: string | null
+  name: string
+  mtime: Date
+}
 
 /**
  * 开放静态服务（架构增补 §14.4/§14.5，PRD-P4A D5/D6）：
@@ -35,6 +46,8 @@ export class OpenStaticController {
     private readonly redis: RedisService,
     private readonly config: ConfigService,
     private readonly displayFacade: DisplayFacade,
+    /** 快照轨解析（P19 T162）：站点已发布时从 site-releases 出流（D144） */
+    private readonly releaseTrack: SiteReleaseTrackService,
   ) {}
 
   /** 站点入口（= 根目录 index.html） */
@@ -42,7 +55,11 @@ export class OpenStaticController {
   @SkipTransform()
   @Get(':slug')
   @ApiOperation({ summary: '站点入口（根目录 index.html）' })
-  async index(@Param('slug') slug: string, @Req() req: Request, @Res() res: Response): Promise<void> {
+  async index(
+    @Param('slug') slug: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ): Promise<void> {
     await this.serve(slug, '', req, res)
   }
 
@@ -69,7 +86,7 @@ export class OpenStaticController {
       res.status(301).set('Location', `/api/open/${slug}/${prefix}/`).end()
       return
     }
-    await this.serve(slug, `${prefix}/index.html`, req, res)
+    await this.serveDisplay(slug, id, '', req, res)
   }
 
   /**
@@ -93,8 +110,7 @@ export class OpenStaticController {
     if (path.length > 0 && path[0] === 'api') {
       throw new BusinessException(ErrorCode.NotFound, '资源不存在')
     }
-    const prefix = await this.resolveDisplayPrefix(slug, id)
-    await this.serve(slug, `${prefix}/${path.join('/')}`, req, res)
+    await this.serveDisplay(slug, id, path.join('/'), req, res)
   }
 
   /**
@@ -127,8 +143,19 @@ export class OpenStaticController {
     await this.serve(slug, path.join('/'), req, res)
   }
 
-  /** 开放静态核心流程（§14.4） */
-  private async serve(slug: string, rawPath: string, req: Request, res: Response): Promise<void> {
+  /**
+   * 开放静态核心流程（§14.4；P19 T162 双轨）。
+   *
+   * @param track `auto`（默认）= 按站点是否已发布自动选轨；`legacy` = 强制直挂工作副本
+   *              （**`disp/` 展示应用托管链专用**：D150 明确它不随快照，维持现状实时语义）
+   */
+  private async serve(
+    slug: string,
+    rawPath: string,
+    req: Request,
+    res: Response,
+    track: 'auto' | 'legacy' = 'auto',
+  ): Promise<void> {
     // 1. 独立限流（静态桶 120 次/分/IP，site 配置组）
     await assertRateLimit(
       this.redis,
@@ -164,6 +191,13 @@ export class OpenStaticController {
       target = 'index.html'
     }
 
+    // 4.5 快照轨分叉（P19 D144/T162）：站点已发布 → 从不可变快照出流（不消费 is_public，R161）；
+    //     从未发布 → 继续 legacy 直挂工作副本（公开判定为 W12 阻断优先语义）；disp 链显式走 legacy。
+    if (track === 'auto' && site.activeReleaseId) {
+      await this.serveFromRelease(site, rawPath, req, res)
+      return
+    }
+
     let resolved = await this.resolveService.resolvePath(site.siteId, site.rootFolderId, target)
     if (!resolved.found) {
       // 文件未命中：尝试目录语义（index.html 命中 → 按请求形态直出或 301 补斜杠；目录存在但无 index.html → 404）
@@ -181,7 +215,12 @@ export class OpenStaticController {
       }
       if (!dirResult.found) {
         // P7 D77/R78（路径美化）：无扩展名路径再走回退链 —— x.html → 站点 SPA 回退入口；都无 → 404
-        const fallback = await this.tryPrettyFallback(site.siteId, site.rootFolderId, normalized, site.spaFallback)
+        const fallback = await this.tryPrettyFallback(
+          site.siteId,
+          site.rootFolderId,
+          normalized,
+          site.spaFallback,
+        )
         if (!fallback.found) {
           throw new BusinessException(ErrorCode.NotFound, '资源不存在')
         }
@@ -191,9 +230,40 @@ export class OpenStaticController {
       }
     }
 
-    // 5. 解析 Range（先取元数据判断区间，再按区间取流）
-    const fileMeta = await this.cloudFacade.getPublicStream(BigInt(resolved.fileId))
-    const size = Number(fileMeta.size)
+    // 5~10. 统一出流（P19 T162 抽出：legacy 轨与快照轨共用同一套安全头 / ETag / Range / 超时逻辑，
+    //       避免两条轨的头漂移——安全件只写一遍）
+    await this.sendFile(
+      async (range) => {
+        const meta = await this.cloudFacade.getPublicStream(BigInt(resolved.fileId), range)
+        return {
+          stream: meta.stream,
+          size: Number(meta.size),
+          ext: meta.ext,
+          name: meta.name,
+          mtime: meta.updateTime,
+        }
+      },
+      req,
+      res,
+    )
+  }
+
+  /**
+   * 统一出流（P19 T162）：MIME 白名单 + CSP 沙箱 + ETag/304 + Range/416 + 空闲超时 + 流式。
+   *
+   * `load` 负责「按区间取元数据与流」——legacy 轨读云盘、快照轨读 site-releases，
+   * 两条轨只在取流来源上不同，**响应头与安全语义完全同源**。
+   *
+   * Cache-Control 维持 D28/P4b 口径：白名单统一 `no-cache`（ETag/304 协商），
+   * 白名单外 `no-store`（P19 未改缓存策略，长缓存挂 Phase2）。
+   */
+  private async sendFile(
+    load: (range?: { start: number; end: number }) => Promise<ServeFileMeta>,
+    req: Request,
+    res: Response,
+  ): Promise<void> {
+    const meta = await load()
+    const size = meta.size
     const rangeResult = req.headers.range ? this.parseRange(req.headers.range, size) : null
     if (rangeResult === 'unsatisfiable') {
       res.status(416).set('Content-Range', `bytes */${size}`).end()
@@ -201,35 +271,19 @@ export class OpenStaticController {
     }
     // 命中 Range 时按区间重新取流（避免全量读盘）
     const rangeParsed = rangeResult ?? null
-    const file =
-      rangeParsed !== null
-        ? await this.cloudFacade.getPublicStream(BigInt(resolved.fileId), {
-            start: rangeParsed.start,
-            end: rangeParsed.end,
-          })
-        : fileMeta
+    const file = rangeParsed ? await load({ start: rangeParsed.start, end: rangeParsed.end }) : meta
 
-    // 6. MIME 白名单 + 安全头（§14.5）
     const mime = resolveMime(file.ext)
-
-    // 7. ETag / 304（Cache-Control：D28/P4b 修订——全部白名单统一 no-cache，ETag/304 协商保留。
-    //    原 §14.4"白名单 public max-age=3600"在 AI/编辑器高频迭代下不成立：js/css 最长 1 小时旧版，
-    //    "改完立即可见"必然失败；no-cache 下未变资源仅 304 头部零字节体，个人站点量级成本可接受）
-    const etag = `W/"${file.size.toString()}-${file.updateTime.getTime()}"`
-    const ifNoneMatch = req.headers['if-none-match']
-    if (ifNoneMatch === etag) {
+    const etag = `W/"${file.size}-${file.mtime.getTime()}"`
+    if (req.headers['if-none-match'] === etag) {
       res.status(304).set('ETag', etag).end()
       return
     }
 
-    // 白名单（含 html）→ no-cache；白名单外（octet-stream + attachment 下载类）→ no-store
-    const cacheControl = mime.whitelisted ? 'no-cache' : 'no-store'
-
-    // 8. 公共响应头（nosniff 已由 helmet 全局开启；ACAO 由 main.ts CORS 函数式统一）
     res.set({
       ETag: etag,
-      'Last-Modified': file.updateTime.toUTCString(),
-      'Cache-Control': cacheControl,
+      'Last-Modified': file.mtime.toUTCString(),
+      'Cache-Control': mime.whitelisted ? 'no-cache' : 'no-store',
       'Content-Type': mime.contentType,
       'X-Content-Type-Options': 'nosniff',
     })
@@ -245,14 +299,13 @@ export class OpenStaticController {
       )
     }
 
-    // 9. socket 空闲超时（res.setTimeout 仅针对本响应：无数据流动 30s 触发；响应 finish 自动清除，
-    //    不影响 keep-alive 连接复用；防慢连接占 fd，活跃流不受影响）
+    // socket 空闲超时（res.setTimeout 仅针对本响应：无数据流动 30s 触发；响应 finish 自动清除，
+    // 不影响 keep-alive 连接复用；防慢连接占 fd，活跃流不受影响）
     res.setTimeout(SOCKET_IDLE_TIMEOUT_MS, () => {
-      this.logger.warn(`开放静态连接空闲超时，强制关闭：${slug}/${rawPath}`)
+      this.logger.warn(`开放静态连接空闲超时，强制关闭：${req.path}`)
       res.destroy()
     })
 
-    // 10. 流式输出（Range 单区间：206；全量：200）
     if (rangeParsed !== null) {
       res.status(206).set({
         'Accept-Ranges': 'bytes',
@@ -266,6 +319,108 @@ export class OpenStaticController {
       })
     }
     file.stream.pipe(res)
+  }
+
+  /**
+   * 展示应用内容出流（**P20 B3**）：内容源与站点树**解耦**——按站点是否已发布选轨。
+   *
+   * - 已发布 → **快照轨**：发布时已把展示应用工作区聚合进 `快照/disp/{id}/`（B2），此处只换解析根；
+   * - 未发布 → **工作区轨**：直读 `{display.stagingPath}/{userId}/{displayId}/`（管理态实时语义）。
+   *
+   * 对外 URL 恒为 `/api/open/{slug}/disp/{id}/**`（两轨下都不变，契约冻结）。
+   * 挂靠校验沿用 `DisplayFacade.resolveForOpen`（存在 / 未软删 / 挂靠本站点，任一不满足 40400）。
+   */
+  private async serveDisplay(
+    slug: string,
+    rawId: string,
+    subPath: string,
+    req: Request,
+    res: Response,
+  ): Promise<void> {
+    await assertRateLimit(
+      this.redis,
+      'static',
+      extractIp(req),
+      this.config.get<number>('site.siteOpenStaticRateLimit', 120),
+    )
+    const site = await this.resolveService.resolveSite(slug)
+    if (!site) throw new BusinessException(ErrorCode.NotFound, '站点不存在')
+    if (!/^\d{1,20}$/.test(rawId)) throw new BusinessException(ErrorCode.NotFound, '资源不存在')
+
+    const meta = await this.displayFacade.resolveForOpen(BigInt(site.siteId), BigInt(rawId))
+    const rel = subPath ? `${meta.relPath}/${subPath}` : `${meta.relPath}/index.html`
+
+    if (site.activeReleaseId) {
+      const dir = this.releaseTrack.dirOf(site.siteId, site.activeReleaseId)
+      const hit = await this.releaseTrack.resolve(dir, rel, site.spaFallback)
+      if (!hit) throw new BusinessException(ErrorCode.NotFound, '资源不存在')
+      await this.sendFile(
+        async (range) => ({
+          stream: this.releaseTrack.stream(dir, hit.relPath, range),
+          size: hit.size,
+          ext: hit.ext,
+          name: hit.relPath.split('/').pop() ?? 'index.html',
+          mtime: hit.mtime,
+        }),
+        req,
+        res,
+      )
+      return
+    }
+
+    const workRoot = this.config.get<string>('display.stagingPath', 'disp-staging')
+    const workDirId = await this.cloudFacade.resolveUserDirId(
+      BigInt(site.userId),
+      `${workRoot}/${site.userId}/${rawId}`,
+    )
+    if (workDirId === null) throw new BusinessException(ErrorCode.NotFound, '资源不存在')
+    const file = await this.cloudFacade.resolveOwnTreePath(workDirId, subPath || 'index.html')
+    if (!file || file.isDir === 1) throw new BusinessException(ErrorCode.NotFound, '资源不存在')
+    await this.sendFile(
+      async (range) => {
+        const streamed = await this.cloudFacade.getPublicStream(file.id, range)
+        return {
+          stream: streamed.stream,
+          size: Number(streamed.size),
+          ext: streamed.ext,
+          name: streamed.name,
+          mtime: streamed.updateTime,
+        }
+      },
+      req,
+      res,
+    )
+  }
+
+  /**
+   * 快照轨出流（P19 T162 / D144 / R161）：站点已有当前版本 → 从不可变快照
+   * `site-releases/{siteId}/{releaseId}/` 读，**不查云盘、不消费 `is_public`**。
+   *
+   * 回退链（真实文件 → `.html` → 目录 `index.html` → `spaFallback`）与安全件与 legacy 轨**完全一致**；
+   * `disp/` 展示应用托管链不经此轨（独立授权链，`displayIndex`/`displayStatic` 显式走 legacy）。
+   */
+  private async serveFromRelease(
+    site: ResolvedSite,
+    rawPath: string,
+    req: Request,
+    res: Response,
+  ): Promise<void> {
+    const releaseId = site.activeReleaseId
+    if (!releaseId) throw new BusinessException(ErrorCode.NotFound, '资源不存在')
+    const dir = this.releaseTrack.dirOf(site.siteId, releaseId)
+    const hit = await this.releaseTrack.resolve(dir, rawPath, site.spaFallback)
+    if (!hit) throw new BusinessException(ErrorCode.NotFound, '资源不存在')
+    await this.sendFile(
+      async (range) => ({
+        stream: this.releaseTrack.stream(dir, hit.relPath, range),
+        size: hit.size,
+        ext: hit.ext,
+        name: hit.relPath.split('/').pop() ?? 'index.html',
+        mtime: hit.mtime,
+      }),
+      req,
+      res,
+    )
   }
 
   /**
@@ -353,7 +508,10 @@ export class OpenStaticController {
   }
 
   /** 解析单区间 Range（bytes=start-end / start- / -suffix），与 P3 transfer 口径一致 */
-  private parseRange(header: string, size: number): { start: number; end: number } | 'unsatisfiable' | null {
+  private parseRange(
+    header: string,
+    size: number,
+  ): { start: number; end: number } | 'unsatisfiable' | null {
     if (size === 0) return 'unsatisfiable'
     const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim())
     if (!match) return null

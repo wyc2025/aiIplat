@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { ErrorCode } from '../../../common/constants/error-code'
+import { RedisKey } from '../../../common/constants/redis-key'
 import { BusinessException } from '../../../common/exceptions/business.exception'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { RedisService } from '../../../infra/redis/redis.service'
@@ -9,12 +10,24 @@ import { StorageService } from '../../../infra/storage/storage.service'
 import { CloudFacade } from '../../cloud/facade/cloud-facade.service'
 import { SiteResolveService } from '../open/site-resolve.service'
 import { SiteQuotaService } from '../quota/quota.service'
+import { purgeSiteReleaseData } from '../release/release-cleanup.util'
 import { SLUG_PATTERN } from './dto/site.dto'
 import type { CreateSiteDto, UpdateSiteDto } from './dto/site.dto'
 
 /** slug 保留字黑名单（R11：与开放层路由段冲突的标识） */
 const SLUG_BLACKLIST = new Set([
-  'api', 'www', 'admin', 'manage', 'system', 'open', 'static', 'assets', 'public', 'login', 's', 'site',
+  'api',
+  'www',
+  'admin',
+  'manage',
+  'system',
+  'open',
+  'static',
+  'assets',
+  'public',
+  'login',
+  's',
+  'site',
 ])
 
 /** 建站默认模板目录（P4b T44 迁移：assets/site-template → assets/site-templates/default，§15.7） */
@@ -57,6 +70,8 @@ export interface SiteView {
  */
 @Injectable()
 export class SiteManageService {
+  private readonly logger = new Logger(SiteManageService.name)
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly cloudFacade: CloudFacade,
@@ -143,7 +158,11 @@ export class SiteManageService {
         },
       })
       // P7 D73：开站即灌内容——默认把用户内容池里全部已发布文章发表到新站
-      const publishedCount = await this.publishArticlesToSite(userId, site.id, dto.publishArticleIds)
+      const publishedCount = await this.publishArticlesToSite(
+        userId,
+        site.id,
+        dto.publishArticleIds,
+      )
       return this.toSiteView(site, publishedCount)
     } catch (error) {
       // §14.3 第 5 步：任一步失败回滚，不留半成品（行软删 + 物理删除 + used 回退）
@@ -220,9 +239,14 @@ export class SiteManageService {
     // 站点根软删进回收站（R53 内部通道，绕过 R52；used 不动，可还原为普通文件夹 R54）
     await this.cloudFacade.removeSiteRoot(userId, site.rootFolderId)
 
+    // 发布版本级联清理（P19 D146；P20 起走纯函数）：版本行 + 快照目录树（best-effort，失败不阻断删站）
+    await purgeSiteReleaseData(this.prisma, this.storage, site.id).catch((error: unknown) => {
+      this.logger.warn(`清理站点发布版本失败：${String(error)}`)
+    })
+
     // 缓存三族清理（R55）：resolve（slug）+ path/data（siteId）
     await this.resolveService.invalidateSite(site.slug)
-    await this.redis.scanDel(`site:path:${site.id.toString()}:*`).catch(() => undefined)
+    await this.redis.scanDel(RedisKey.sitePathPrefix(site.id.toString())).catch(() => undefined)
     await this.redis.scanDel(`site:data:${site.id.toString()}:*`).catch(() => undefined)
 
     return { unpublishedArticles, deletedComments, recycledRoot: true }

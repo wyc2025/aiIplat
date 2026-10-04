@@ -18,4 +18,9 @@ export default registerAs('site', () => ({
   siteCommentRateLimit: readPositiveInt('SITE_COMMENT_RATE_LIMIT', 10),
   /** 站点数配额默认上限（P4E D51，默认 1 = 与 P4d 单站行为一致） */
   defaultLimit: readPositiveInt('SITE_DEFAULT_LIMIT', 1),
+  /**
+   * 站点版本保留上限（P19 D147/T160）：**未锁定**版本数超过该值时自动清理最旧的；
+   * 当前版本与锁定版本豁免（R158）。默认 20。
+   */
+  releaseKeep: readPositiveInt('SITE_RELEASE_KEEP', 20),
 }))

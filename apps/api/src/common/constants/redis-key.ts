@@ -22,8 +22,20 @@ export const RedisKey = {
   // ========== site 域（P4a 开放层，见架构增补 §14.9） ==========
   /** slug → 站点信息缓存：site:resolve:{slug}，JSON { siteId, rootFolderId, status, title, description, commentAudit }，TTL 300s */
   siteResolve: (slug: string) => `site:resolve:${slug}`,
-  /** 路径 → fileId 缓存：site:path:{siteId}:{path}，"404" 为负缓存，TTL 60s */
-  sitePath: (siteId: string, path: string) => `site:path:${siteId}:${path}`,
+  /**
+   * 路径 → fileId 缓存：`site:path:{siteId}:{track}:{path}`，"404" 为负缓存，TTL 60s。
+   * `track` 取值见文件末 `SITE_PATH_TRACK_LEGACY`。
+   *
+   * P19 R159 加**轨维度**：`track = legacy`（直挂工作副本轨；快照轨走文件系统解析、不写本缓存）。
+   * 发布 / 切换 / 版本删除时按 `sitePathPrefix(siteId)` 精确失效全部轨键。
+   */
+  sitePath: (siteId: string, track: string, path: string) => `site:path:${siteId}:${track}:${path}`,
+  /** site:path 键族前缀（R159 精确失效用）：site:path:{siteId}:* */
+  sitePathPrefix: (siteId: string) => `site:path:${siteId}:`,
+  /** 发布互斥锁（P19 R157）：site:publish:{siteId}，SET NX EX，抢锁失败 → 40121 */
+  sitePublishLock: (siteId: string) => `site:publish:${siteId}`,
+  /** 检查点保存互斥锁（P20 T167）：disp:release:{displayId}，SET NX EX，抢锁失败 → 50022 */
+  dispReleaseLock: (displayId: string) => `disp:release:${displayId}`,
   /** 开放数据热缓存：site:data:{siteId}:{...}，JSON，TTL 60s */
   siteData: (siteId: string, key: string) => `site:data:${siteId}:${key}`,
   /** 查看数去重窗口：site:view:{articleId}:{ip}，SET NX EX 300 */
@@ -70,3 +82,11 @@ export const RedisKey = {
   /** 每凭证活跃令牌索引：acc:token:idx:{credentialId}，成员 = sha256(token)；吊销 / 轮换时按集合级联删除（R154） */
   accTokenIndex: (credentialId: string) => `acc:token:idx:${credentialId}`,
 } as const
+
+/**
+ * `site:path` 缓存的轨维度取值（P19 D144/R159）：
+ * `legacy` = 站点从未发布时的「直挂工作副本」轨。
+ * 快照轨（有 active release）**不写** `site:path` 缓存——快照目录不可变（R156），
+ * 路径解析直接走文件系统，且版本切换靠缓存失效反而会引入一致性面。
+ */
+export const SITE_PATH_TRACK_LEGACY = 'legacy'

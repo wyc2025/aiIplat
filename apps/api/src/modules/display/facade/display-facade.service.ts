@@ -60,6 +60,19 @@ export class DisplayFacade {
     return this.displayService.assertCanRead(appId, principal)
   }
 
+  /**
+   * 挂靠指定站点的展示应用工作区清单（P20 B2：站点发布时聚合为 `快照/disp/{id}/`）。
+   *
+   * 只回「挂靠本站点 + 未软删」的项；工作区路径**恒定位**（B1），故发布侧无需了解站点树结构。
+   * 返回空数组表示该站点当前没有可发布的展示应用（合法状态，不是错误）。
+   */
+  async listWorkPathsBySite(
+    siteId: bigint,
+    ownerId: bigint,
+  ): Promise<Array<{ displayId: string; workPath: string }>> {
+    return this.displayService.listWorkPathsBySite(siteId, ownerId)
+  }
+
   /** 开放层静态服务解析（`:slug/disp/:id/**`）：返回站点内相对路径（未挂靠/挂他站 → 40400） */
   async resolveForOpen(
     siteId: bigint,

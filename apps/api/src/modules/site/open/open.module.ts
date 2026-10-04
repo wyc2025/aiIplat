@@ -3,9 +3,11 @@ import { AccessFacadeModule } from '../../access/facade/access-facade.module'
 import { AppFacadeModule } from '../../app/facade/app-facade.module'
 import { CloudModule } from '../../cloud/cloud.module'
 import { DisplayFacadeModule } from '../../display/facade/display-facade.module'
+import { StorageModule } from '../../../infra/storage/storage.module'
 import { OpenAppDataController } from './open-app-data.controller'
 import { OpenApiController } from './open-api.controller'
 import { OpenStaticController } from './open-static.controller'
+import { SiteReleaseTrackService } from './site-release-track.service'
 import { SiteResolveModule } from './site-resolve.module'
 import { SiteOpenService } from './open.service'
 
@@ -27,6 +29,8 @@ import { SiteOpenService } from './open.service'
 @Module({
   imports: [
     CloudModule,
+    // P19 T162：快照轨读 site-releases 区（StorageService 平台自营区，不经云盘文件树暴露）
+    StorageModule,
     SiteResolveModule,
     DisplayFacadeModule,
     AppFacadeModule,
@@ -34,6 +38,6 @@ import { SiteOpenService } from './open.service'
     AccessFacadeModule,
   ],
   controllers: [OpenAppDataController, OpenApiController, OpenStaticController],
-  providers: [SiteOpenService],
+  providers: [SiteOpenService, SiteReleaseTrackService],
 })
 export class SiteOpenModule {}

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common'
 import { ErrorCode } from '../../../common/constants/error-code'
 import { BusinessException } from '../../../common/exceptions/business.exception'
-import { RedisKey } from '../../../common/constants/redis-key'
+import { RedisKey, SITE_PATH_TRACK_LEGACY } from '../../../common/constants/redis-key'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { RedisService } from '../../../infra/redis/redis.service'
 import {
@@ -9,7 +9,11 @@ import {
   type RawWriteResult,
   type SubtreeEntry,
 } from '../../cloud/facade/cloud-facade.service'
-import type { CreateArticleDto, UpdateArticleDto, UpdateArticleStatusDto } from '../article/dto/article.dto'
+import type {
+  CreateArticleDto,
+  UpdateArticleDto,
+  UpdateArticleStatusDto,
+} from '../article/dto/article.dto'
 import type { FormatOptionsDto } from '../article/dto/article-tools.dto'
 // 注意：以下 Service 必须为值导入（Nest 需构造函数实参做 DI；type-only 导入会被擦除成 Function）
 import { SiteArticleService, ArticleQueryDto } from '../article/article.service'
@@ -55,7 +59,13 @@ export const AI_COMMENT_PAGE_MAX = 20
 /** AI 单次批量审核评论数上限（P6 §21.2 / API-P6 §13.4.2） */
 export const AI_COMMENT_BATCH_MAX = 20
 /** 封面图片扩展名白名单（P6 R72） */
-export const SITE_COVER_IMAGE_EXTS: ReadonlySet<string> = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif'])
+export const SITE_COVER_IMAGE_EXTS: ReadonlySet<string> = new Set([
+  'png',
+  'jpg',
+  'jpeg',
+  'webp',
+  'gif',
+])
 /** 封面校验失败时回喂的可用图片清单条数上限（P6 R72：附前 10 条引导模型换图） */
 export const AI_COVER_HINT_MAX = 10
 
@@ -348,7 +358,10 @@ export class SiteFacade {
   async invalidateSitePaths(siteId: bigint, paths: string[]): Promise<void> {
     const siteIdStr = siteId.toString()
     for (const p of paths) {
-      await this.redis.client.del(RedisKey.sitePath(siteIdStr, p)).catch(() => undefined)
+      // P19 R159：工作副本写盘只影响 **legacy 轨**缓存（快照轨读已发布快照，不消费工作副本，R161）
+      await this.redis.client
+        .del(RedisKey.sitePath(siteIdStr, SITE_PATH_TRACK_LEGACY, p))
+        .catch(() => undefined)
     }
   }
 
@@ -372,7 +385,10 @@ export class SiteFacade {
     const normalized = this.normalizeSitePath(path)
     const ext = extOfName(normalized)
     if (!SITE_FILE_TEXT_EXTS.has(ext)) {
-      throw new BusinessException(ErrorCode.SiteFileTypeNotAllowed, '文件类型不允许（仅文本白名单扩展名）')
+      throw new BusinessException(
+        ErrorCode.SiteFileTypeNotAllowed,
+        '文件类型不允许（仅文本白名单扩展名）',
+      )
     }
 
     // 机械读盘（cloud 段）：不存在/是目录（30001）→ 站点语义层统一 40400（分段归位 §15.3）
@@ -534,7 +550,11 @@ export class SiteFacade {
   }
 
   /** 更新文章（部分更新；tagNames 提供即整体替换，走 ensure 语义） */
-  async updateArticle(userId: bigint, id: bigint, input: UpdateArticleInput): Promise<SiteArticleItem> {
+  async updateArticle(
+    userId: bigint,
+    id: bigint,
+    input: UpdateArticleInput,
+  ): Promise<SiteArticleItem> {
     const dto: UpdateArticleDto = {}
     if (input.title !== undefined) dto.title = input.title
     if (input.contentMd !== undefined) dto.contentMd = input.contentMd
@@ -616,7 +636,11 @@ export class SiteFacade {
    * 其中 availableImages = 该站 media/ 下已有图片（前 10 条），引导模型换图（不抛栈）。
    * 说明：仅站点根直连的 media/ 路径有效（路径规范化复用 CloudFacade 逐段下行解析，≤10 层）。
    */
-  async resolveCoverPath(userId: bigint, siteId: bigint, coverPath: string): Promise<CoverResolveResult> {
+  async resolveCoverPath(
+    userId: bigint,
+    siteId: bigint,
+    coverPath: string,
+  ): Promise<CoverResolveResult> {
     const site = await this.requireOwnedSite(userId, siteId)
     const path = (coverPath ?? '').trim()
     const fail = async (message: string): Promise<CoverResolveResult> => ({
@@ -635,7 +659,9 @@ export class SiteFacade {
     }
     const hit = await this.cloudFacade.resolvePublicPath(site.rootFolderId, path)
     if (!hit || hit.isDir === 1) {
-      return fail('封面文件不存在、是目录或当前不可公开访问（站点 media/ 下的图片才会被站点页面加载）')
+      return fail(
+        '封面文件不存在、是目录或当前不可公开访问（站点 media/ 下的图片才会被站点页面加载）',
+      )
     }
     return { ok: true, path }
   }
@@ -649,7 +675,9 @@ export class SiteFacade {
     if (siteId !== undefined) await this.requireOwnedSite(userId, siteId)
     const parentId = input.parentId ?? 0
     const columns = await this.columnService.list(userId)
-    const hit = columns.find((c) => c.name === input.name && String(c.parentId) === String(parentId))
+    const hit = columns.find(
+      (c) => c.name === input.name && String(c.parentId) === String(parentId),
+    )
     if (hit) return { id: String(hit.id), name: hit.name, created: false }
     const created = await this.columnService.create(userId, {
       // P7 D73：siteIds 缺省 = 全部站点可见；指定站点时只在该站展示
@@ -662,7 +690,9 @@ export class SiteFacade {
   }
 
   /** 标签列表（AI 工具确认卡摘要「复用/新建」预判用；P7 D73 用户级） */
-  async listTags(userId: bigint): Promise<Array<{ id: string; name: string; articleCount: number }>> {
+  async listTags(
+    userId: bigint,
+  ): Promise<Array<{ id: string; name: string; articleCount: number }>> {
     const tags = await this.tagService.list(userId)
     return tags.map((t) => ({ id: String(t.id), name: t.name, articleCount: t.articleCount }))
   }
@@ -753,7 +783,10 @@ export class SiteFacade {
       throw new BusinessException(ErrorCode.ParamInvalid, '请至少提供一条评论 id')
     }
     if (unique.length > AI_COMMENT_BATCH_MAX) {
-      throw new BusinessException(ErrorCode.ParamInvalid, `单次最多处理 ${AI_COMMENT_BATCH_MAX} 条评论`)
+      throw new BusinessException(
+        ErrorCode.ParamInvalid,
+        `单次最多处理 ${AI_COMMENT_BATCH_MAX} 条评论`,
+      )
     }
     const results: CommentBatchResult[] = []
     for (const id of unique) {
@@ -852,7 +885,10 @@ export class SiteFacade {
     try {
       const { files } = await this.cloudFacade.listSubtreeRaw(rootFolderId)
       return files
-        .filter((f) => !f.isDir && f.path.startsWith('media/') && SITE_COVER_IMAGE_EXTS.has(extOfName(f.path)))
+        .filter(
+          (f) =>
+            !f.isDir && f.path.startsWith('media/') && SITE_COVER_IMAGE_EXTS.has(extOfName(f.path)),
+        )
         .slice(0, AI_COVER_HINT_MAX)
         .map((f) => f.path)
     } catch {
@@ -882,7 +918,10 @@ export class SiteFacade {
   }
 
   /** 文章行 → 出域条目（tagIds 经映射补 tagNames，未命中回退原 id；sites 为已发表站点集合） */
-  private toArticleItem(item: Record<string, unknown>, tagNames: Map<string, string>): SiteArticleItem {
+  private toArticleItem(
+    item: Record<string, unknown>,
+    tagNames: Map<string, string>,
+  ): SiteArticleItem {
     const tagIds = Array.isArray(item.tagIds) ? (item.tagIds as string[]).map(String) : []
     const rawSites = Array.isArray(item.sites) ? (item.sites as Record<string, unknown>[]) : []
     return {
@@ -970,7 +1009,10 @@ export class SiteFacade {
     const segments = path.split('/')
     for (const seg of segments) {
       if (seg.length === 0 || seg === '.' || seg === '..') {
-        throw new BusinessException(ErrorCode.SiteFilePathInvalid, '站点文件路径非法（含空段/./..）')
+        throw new BusinessException(
+          ErrorCode.SiteFilePathInvalid,
+          '站点文件路径非法（含空段/./..）',
+        )
       }
       if (seg.length > 64) {
         throw new BusinessException(ErrorCode.SiteFilePathInvalid, '站点文件路径非法（单段超长）')
