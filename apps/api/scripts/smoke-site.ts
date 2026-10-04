@@ -459,6 +459,136 @@ async function main(): Promise<void> {
       existsSync(join(UPLOAD_DIR, 'site-releases', siteId, row.id.toString())),
     )
     check('每个版本行都有对应快照目录（无孤儿行）', dirOk, `n=${finalRows.length}`)
+    // ==================== 12. 展示应用：目录独立 + 聚合发布 + 局部发布（P20）====================
+    console.log('12. 展示应用：目录独立（挂靠不动文件）/ 聚合发布 / 局部发布')
+    {
+      const dStamp = Date.now().toString().slice(-6)
+      const owner = await siteOwner(siteId)
+      let dispA: { id: string; folderId: string | null; writePath: string } | null = null
+      let dispB: { id: string; folderId: string | null; writePath: string } | null = null
+      let sideId = ''
+      try {
+        dispA = await ok<typeof dispA>('/api/display', {
+          method: 'POST',
+          json: { name: `冒烟甲${dStamp}`, siteSlug: slug },
+          token,
+        })
+        dispB = await ok<typeof dispB>('/api/display', {
+          method: 'POST',
+          json: { name: `冒烟乙${dStamp}`, siteSlug: slug },
+          token,
+        })
+        // 目录 id 只有**列表接口**才解析（创建接口为省一次遍历返回 null），故基准从列表取
+        const before = (await ok<Array<DisplayRow>>('/api/display', { token })).find(
+          (item) => item.id === dispA?.id,
+        )
+        check(
+          '12.1 建展示应用即建工作区目录（目录独立于站点树）',
+          before?.folderId != null,
+          `folderId=${before?.folderId}`,
+        )
+        check(
+          '12.2 工作区路径恒定位（disp-staging/…，不含站点 slug）',
+          before?.writePath.startsWith('disp-staging/') ?? false,
+          `writePath=${before?.writePath}`,
+        )
+
+        await writeDispFile(token, owner, dispA, 'index.html', html('DISP-A-V1'))
+        await writeDispFile(token, owner, dispB, 'index.html', html('DISP-B-V1'))
+
+        // 12.3 换挂靠只改关系：路径与目录 id 均不变（P20 B1 之前会整目录搬迁，牵连同站其它应用）
+        const side = await ok<{ id: string }>('/api/site/manage', {
+          method: 'POST',
+          json: { slug: `sm2${dStamp}`, title: `副站${dStamp}`, publishArticleIds: [] },
+          token,
+        })
+        sideId = side.id
+        const sideSlug = `sm2${dStamp}`
+        await ok(`/api/display/${dispA.id}/affiliate`, {
+          method: 'PUT',
+          json: { siteSlug: sideSlug },
+          token,
+        })
+        const moved = (await ok<Array<DisplayRow>>('/api/display', { token })).find(
+          (item) => item.id === dispA?.id,
+        )
+        check(
+          '12.3 换挂靠不移动文件（路径与目录 id 均不变）',
+          moved?.writePath === before?.writePath && moved?.folderId === before?.folderId,
+          `writePath=${moved?.writePath} folderId=${moved?.folderId}`,
+        )
+        await ok(`/api/display/${dispA.id}/affiliate`, {
+          method: 'PUT',
+          json: { siteSlug: slug },
+          token,
+        })
+
+        // 12.4 完整发布：两个展示页的内容随站点聚合上线
+        await ok(`/api/site/manage/${siteId}/publish`, { method: 'POST', json: {}, token })
+        const openA1 = await call(`/api/open/${slug}/disp/${dispA.id}/`)
+        const openB1 = await call(`/api/open/${slug}/disp/${dispB.id}/`)
+        check(
+          '12.4 发布聚合：展示页内容随站点上线',
+          openA1.text.includes('DISP-A-V1') && openB1.text.includes('DISP-B-V1'),
+          `A=${openA1.status} B=${openB1.status}`,
+        )
+
+        // 12.5 局部发布：只替换甲；乙的未发布改动**不得**被顺手带上线（本段核心断言）
+        await writeDispFile(token, owner, dispA, 'index.html', html('DISP-A-V2'))
+        await writeDispFile(token, owner, dispB, 'index.html', html('DISP-B-V2'))
+        await ok(`/api/site/manage/${siteId}/publish`, {
+          method: 'POST',
+          json: { onlyDisplayId: dispA.id },
+          token,
+        })
+        const openA2 = await call(`/api/open/${slug}/disp/${dispA.id}/`)
+        const openB2 = await call(`/api/open/${slug}/disp/${dispB.id}/`)
+        check(
+          '12.5 局部发布：目标页内容更新',
+          openA2.text.includes('DISP-A-V2'),
+          `status=${openA2.status}`,
+        )
+        check(
+          '12.6 局部发布：其它展示页的未发布改动未被带上线',
+          openB2.text.includes('DISP-B-V1') && !openB2.text.includes('DISP-B-V2'),
+          `实际=${openB2.text.includes('DISP-B-V2') ? 'DISP-B-V2（漏带）' : 'DISP-B-V1'}`,
+        )
+
+        // 12.7 无蓝本（站点从未发布）时局部发布被拒
+        const fresh = await ok<{ id: string }>('/api/site/manage', {
+          method: 'POST',
+          json: { slug: `sm3${dStamp}`, title: `空站${dStamp}`, publishArticleIds: [] },
+          token,
+        })
+        const noBase = await call(`/api/site/manage/${fresh.id}/publish`, {
+          method: 'POST',
+          json: { onlyDisplayId: dispA.id },
+          token,
+        })
+        check(
+          '12.7 站点从未发布过 → 局部发布 40001（没有蓝本可用）',
+          noBase.body?.code === 40001,
+          `code=${noBase.body?.code}`,
+        )
+        await call(`/api/site/manage/${fresh.id}`, { method: 'DELETE', token })
+      } catch (error) {
+        check('展示应用目录独立与局部发布（P20）', false, (error as Error).message)
+      } finally {
+        for (const item of [dispA, dispB]) {
+          if (item) {
+            await call(`/api/display/${item.id}`, { method: 'DELETE', token }).catch(
+              () => undefined,
+            )
+          }
+        }
+        if (sideId) {
+          await call(`/api/site/manage/${sideId}`, { method: 'DELETE', token }).catch(
+            () => undefined,
+          )
+        }
+      }
+    }
+
     console.log('')
   } catch (error) {
     check('站点发布链路（P19）', false, (error as Error).message)
@@ -480,6 +610,65 @@ async function main(): Promise<void> {
 
   console.log(`\n结果：通过 ${passed} 项，失败 ${failed} 项`)
   process.exit(failed > 0 ? 1 : 0)
+}
+
+/**
+ * 往展示应用工作区写文件（P20 B1：工作区为 `disp-staging/{属主}/{展示应用 id}`，与站点树无关）。
+ *
+ * 同名文件先删再传——云盘遇重名会自动改名成 `index(1).html`，入口页会停留在旧内容上，
+ * 让「发布后内容应更新」这类断言出现假失败（本脚本 2026-10-04 实测踩到）。
+ */
+async function writeDispFile(
+  token: string,
+  ownerId: bigint,
+  display: { id: string; writePath: string },
+  relPath: string,
+  content: string,
+): Promise<void> {
+  const segments = display.writePath.split('/').filter(Boolean)
+  let parentId = BigInt(0)
+  for (const name of segments) {
+    const existingDir = await prisma.cloudFile.findFirst({
+      where: { userId: ownerId, parentId, name, isDir: 1, deletedAt: null },
+      select: { id: true },
+    })
+    if (existingDir) {
+      parentId = existingDir.id
+      continue
+    }
+    const created = await ok<{ id: string }>('/api/cloud/file/mkdir', {
+      method: 'POST',
+      json: { parentId: Number(parentId), name },
+      token,
+    })
+    parentId = BigInt(created.id)
+  }
+  const old = await prisma.cloudFile.findFirst({
+    where: { userId: ownerId, parentId, name: relPath, isDir: 0, deletedAt: null },
+    select: { id: true },
+  })
+  if (old) {
+    await call(`/api/cloud/file/${old.id.toString()}`, { method: 'DELETE', token })
+  }
+  const form = new FormData()
+  form.append('file', new Blob([content], { type: 'text/html' }), relPath)
+  const response = await fetch(`${BASE}/api/cloud/file/upload?parentId=${parentId.toString()}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  })
+  const payload = (await response.json()) as Envelope
+  if (payload.code !== 0) {
+    throw new Error(`上传展示页文件 ${relPath} 失败：code=${payload.code} ${payload.message ?? ''}`)
+  }
+}
+
+/** 展示应用列表行（只取本段用到的字段） */
+interface DisplayRow {
+  id: string
+  writePath: string
+  /** 目录节点 id：只有列表接口解析（创建接口返回 null） */
+  folderId: string | null
 }
 
 /** 站点属主（夹具用） */
