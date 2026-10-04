@@ -77,8 +77,18 @@ export class SiteReleaseService {
 
   // ==================== 对外（管理态） ====================
 
-  /** 发布当前工作副本为新版本并置为当前（发布即上线，FR1） */
-  async publish(userId: bigint, siteId: bigint, label?: string): Promise<ReleaseView> {
+  /**
+   * 发布当前工作副本为新版本并置为当前（发布即上线，FR1）。
+   *
+   * `onlyDisplayId` 提供时走**局部发布**（P20 T168）：以站点当前版本快照为蓝本，只替换
+   * 该展示应用的子树——线上其它内容原样不动。站点从未发布过 → 40001（局部发布没有蓝本可用）。
+   */
+  async publish(
+    userId: bigint,
+    siteId: bigint,
+    label?: string,
+    onlyDisplayId?: bigint,
+  ): Promise<ReleaseView> {
     const site = await this.requireOwnedSite(userId, siteId)
     const lockKey = RedisKey.sitePublishLock(site.id.toString())
     const acquired = await this.redis.client.set(lockKey, '1', 'EX', PUBLISH_LOCK_TTL_SEC, 'NX')
@@ -97,14 +107,12 @@ export class SiteReleaseService {
       // 防御性清理：同 releaseId 不可能复用（自增主键），残留只可能来自异常退出
       await this.storage.removeDir(tmpDir)
 
-      // ② 全量子树复制（含 media/，排除 disp 顶层）+ 逐文件 sha256 → manifest
+      // ② 内容装配：局部发布以「当前版本快照」为蓝本，全量发布则从工作区重建
       const manifest: Record<string, ManifestEntry> = {}
-      const stats = await this.copyTree(site.userId, site.rootFolderId, '', manifest, tmpDir)
-
-      // ②b 聚合挂靠本站的展示应用工作区（P20 B2）
-      const displayStats = await this.appendDisplayContents(site.id, site.userId, manifest, tmpDir)
-      stats.fileCount += displayStats.fileCount
-      stats.totalBytes += displayStats.totalBytes
+      const stats =
+        onlyDisplayId !== undefined
+          ? await this.seedFromActiveRelease(site, onlyDisplayId, manifest, tmpDir)
+          : await this.buildFullSnapshot(site, manifest, tmpDir)
 
       // ③ manifest 随目录落盘（发布侧清点/审计 + 未来去重与长缓存输入）
       await this.storage.writeInto(
@@ -286,6 +294,92 @@ export class SiteReleaseService {
         createdBy: userId,
       },
     })
+  }
+
+  /** 全量装配：站点工作区子树（排除 `disp/`）+ 各挂靠展示应用的工作区（P20 B2） */
+  private async buildFullSnapshot(
+    site: { id: bigint; userId: bigint; rootFolderId: bigint },
+    manifest: Record<string, ManifestEntry>,
+    tmpDir: string,
+  ): Promise<{ fileCount: number; totalBytes: number }> {
+    const stats = await this.copyTree(site.userId, site.rootFolderId, '', manifest, tmpDir)
+    const displayStats = await this.appendDisplayContents(site.id, site.userId, manifest, tmpDir)
+    return {
+      fileCount: stats.fileCount + displayStats.fileCount,
+      totalBytes: stats.totalBytes + displayStats.totalBytes,
+    }
+  }
+
+  /**
+   * 局部装配（P20 T168「只发布这一个展示页」）：以站点**当前版本快照**为蓝本，
+   * 只替换该应用的 `disp/{id}/` 子树。
+   *
+   * 为什么必须以快照为蓝本：站点工作区里可能还有**其它未发布的改动**（别的展示页、站点页面本身），
+   * 若直接重跑一次全量发布，会把那些半成品一并推上线。以快照为蓝本 = 线上内容原样保留，
+   * 只有这一个应用的页面换新；其它条目的 `contentHash` 直接沿用，不重算 sha256（省一次全量读盘）。
+   */
+  private async seedFromActiveRelease(
+    site: { id: bigint; userId: bigint; activeReleaseId: bigint | null },
+    displayId: bigint,
+    manifest: Record<string, ManifestEntry>,
+    tmpDir: string,
+  ): Promise<{ fileCount: number; totalBytes: number }> {
+    if (site.activeReleaseId === null) {
+      throw new BusinessException(
+        ErrorCode.ParamInvalid,
+        '这个站点还没有发布过：请先完整发布一次，之后才能单独发布某个展示页',
+      )
+    }
+    const baseDir = this.storage.releaseDirOf(site.id, site.activeReleaseId, false)
+    if (!(await this.storage.dirExists(baseDir))) {
+      throw new BusinessException(
+        ErrorCode.ParamInvalid,
+        '站点的当前版本内容已不存在，请重新完整发布一次',
+      )
+    }
+
+    // ① 蓝本：整份快照照搬（站点页面与其它展示应用一并原样保留）
+    await this.storage.copyDir(baseDir, tmpDir)
+
+    // ② 旧清单读回：该应用子树之外的条目直接沿用
+    const baseManifest = await this.readReleaseManifest(baseDir)
+    const dispPrefix = `${DISP_DIR}/${displayId.toString()}/`
+    for (const [relPath, entry] of Object.entries(baseManifest)) {
+      if (!relPath.startsWith(dispPrefix)) manifest[relPath] = entry
+    }
+
+    // ③ 摘掉该应用的旧子树，再从它的工作区铺新内容
+    const dispDir = `${tmpDir}/${DISP_DIR}/${displayId.toString()}`
+    await this.storage.removeDir(dispDir)
+    const target = await this.displayFacade.resolveForRelease(site.id, displayId)
+    if (target) {
+      const workDirId = await this.cloudFacade.resolveUserDirId(target.ownerId, target.workPath)
+      if (workDirId !== null) {
+        await this.copyTree(
+          target.ownerId,
+          workDirId,
+          `${DISP_DIR}/${displayId.toString()}`,
+          manifest,
+          tmpDir,
+          false,
+        )
+      }
+    }
+
+    let totalBytes = 0
+    for (const entry of Object.values(manifest)) totalBytes += entry.size
+    return { fileCount: Object.keys(manifest).length, totalBytes }
+  }
+
+  /** 读某个已落位版本的 manifest（缺失 / 损坏 → 空清单） */
+  private async readReleaseManifest(dir: string): Promise<Record<string, ManifestEntry>> {
+    const text = await this.storage.readInto(dir, MANIFEST_NAME)
+    if (text === null) return {}
+    try {
+      return JSON.parse(text) as Record<string, ManifestEntry>
+    } catch {
+      return {}
+    }
   }
 
   /**

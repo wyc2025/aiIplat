@@ -318,6 +318,23 @@ export class DisplayService {
   }
 
   /**
+   * 取某个展示应用的工作区定位（P20 T168，站点局部发布侧消费）。
+   *
+   * 必须**挂靠在本站点**且未软删；否则返回 `null`（局部发布会因此摘掉该子树，而非报错）。
+   */
+  async resolveForRelease(
+    siteId: bigint,
+    displayId: bigint,
+  ): Promise<{ ownerId: bigint; workPath: string } | null> {
+    const row = await this.prisma.dispDisplay.findFirst({
+      where: { id: displayId, siteId, status: DISPLAY_STATUS_ACTIVE, deletedAt: null },
+      select: { id: true, ownerId: true },
+    })
+    if (!row) return null
+    return { ownerId: row.ownerId, workPath: this.workRelPath(row.ownerId, row.id) }
+  }
+
+  /**
    * 开放层静态服务解析（`:slug/disp/:id/**`）：展示应用存在、未软删、且挂靠在本站点
    * → 返回站点内相对路径与属主（未挂靠/挂他站/已删一律 40400；暂存区不对外服务，§30.8 ④）。
    */

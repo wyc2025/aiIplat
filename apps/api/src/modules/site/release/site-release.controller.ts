@@ -36,7 +36,13 @@ export class SiteReleaseController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: PublishSiteDto,
   ) {
-    return this.releases.publish(BigInt(userId), BigInt(id), dto.label)
+    const only = dto.onlyDisplayId ?? dto.displayId
+    return this.releases.publish(
+      BigInt(userId),
+      BigInt(id),
+      dto.label,
+      only ? BigInt(only) : undefined,
+    )
   }
 
   @Get(':id/releases')

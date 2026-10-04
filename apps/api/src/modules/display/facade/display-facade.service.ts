@@ -73,6 +73,19 @@ export class DisplayFacade {
     return this.displayService.listWorkPathsBySite(siteId, ownerId)
   }
 
+  /**
+   * 取某个展示应用的工作区定位信息（P20 T168：站点「只发布这一个展示页」时用）。
+   *
+   * 返回 `null` 表示该应用未挂靠本站点或已不可用 —— 局部发布此时**摘掉它的子树**即止，
+   * 不报错（调用方语义是「把线上该应用的内容换成它现在的样子」，已删除的应用自然为空）。
+   */
+  async resolveForRelease(
+    siteId: bigint,
+    displayId: bigint,
+  ): Promise<{ ownerId: bigint; workPath: string } | null> {
+    return this.displayService.resolveForRelease(siteId, displayId)
+  }
+
   /** 开放层静态服务解析（`:slug/disp/:id/**`）：返回站点内相对路径（未挂靠/挂他站 → 40400） */
   async resolveForOpen(
     siteId: bigint,

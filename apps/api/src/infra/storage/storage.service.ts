@@ -1,5 +1,5 @@
 import { createReadStream, createWriteStream } from 'node:fs'
-import { copyFile, mkdir, readFile, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
+import { cp, copyFile, mkdir, readFile, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import type { WriteStream } from 'node:fs'
 import type { Readable } from 'node:stream'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
@@ -227,6 +227,26 @@ export class StorageService implements OnModuleInit {
     const to = this.resolveStorage(toRel)
     await mkdir(dirname(to), { recursive: true })
     await rename(this.resolveStorage(fromRel), to)
+  }
+
+  /**
+   * 目录整体复制（P20 T168：「以当前版本快照为蓝本 + 局部替换」的起点）。
+   *
+   * 只在快照区内部使用（`site-releases/` → `site-releases/`，同卷），故用递归复制而非 rename。
+   * 目标目录会先清空，避免残留导致蓝本与新内容混叠。
+   */
+  async copyDir(fromRel: string, toRel: string): Promise<void> {
+    await rm(this.resolveStorage(toRel), { recursive: true, force: true })
+    await cp(this.resolveStorage(fromRel), this.resolveStorage(toRel), { recursive: true })
+  }
+
+  /** 读快照目录内的文本文件（manifest 等生成物；不存在 / 非文本 → null） */
+  async readInto(relDir: string, relPath: string): Promise<string | null> {
+    try {
+      return await readFile(this.resolveInside(relDir, relPath), 'utf-8')
+    } catch {
+      return null
+    }
   }
 
   /** 删除目录树（版本删除 / 保留清理 / 发布失败清理 .tmp；不存在静默） */
