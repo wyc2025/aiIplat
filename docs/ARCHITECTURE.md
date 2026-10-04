@@ -3429,3 +3429,96 @@ ExtAuthGuard.canActivate → resolvePrincipal
    smoke 因此分两条断言（属主侧正例 + `ownerId=0` 直查负例）。
 5. **运维提示**：`prisma generate` 在 Windows 下可能因引擎 DLL 被占用报 `EPERM`（不阻断，类型已生成）；
    `nest build` 可能触发 safe-delete 大量文件确认（清 `dist` 后重建即可）。
+
+---
+
+## 35. P19：站点发布与版本管理（不可变快照 + 指针翻转）+ W12 公开判定链统一
+
+> 站点内容模型升级：**云盘站点目录 = 工作区**，「发布」= 生成**不可变快照** + 翻转指针。
+> 一举解决三件事——**权限平面耦合**（快照轨不消费 `is_public`）、**写入非原子**（快照 + 指针翻转）、
+> **无回滚且故障域耦合**（云盘改动不再直达公网）。同时合入前置安全补丁 **W12**（公开判定链统一为阻断优先）。
+> 编号：D143~~D151 / R156~~R161 / T159~T164（W12 为清单外 T165）。
+
+### 35.1 双轨模型（D143/D144）
+
+```
+站点内容
+├── 工作区（云盘 site.root_folder_id 子树）        ← 编辑器 / AI 写入；管理态预览读这里
+└── 快照区（StorageService 自营区，不经云盘文件树）
+    └── site-releases/{siteId}/{releaseId}/       ← 开放层正式位读这里（不可变，R156）
+
+开放层路由（GET /api/open/:slug/**）
+  site.active_release_id 非空 → 快照轨（不消费 is_public，R161）
+  为空                       → legacy 轨（直挂工作副本；公开判定 = W12 阻断优先）
+  :slug/disp/{id}/**        → 恒走 legacy（展示应用独立授权链，不进快照，D150）
+```
+
+### 35.2 发布管道（D145/R157）
+
+```
+① 建版本行（version_no = 站内 max+1）           ← 先建行以取得 releaseId 作目录名
+② 全量子树复制 → site-releases/{siteId}/.tmp-{releaseId}/（含 media/，排除顶层 disp/）
+   逐文件 sha256 → manifest（{ 相对路径 → {fileId, contentHash, size, mime} }，随目录落盘，不落库）
+③ rename .tmp- → {releaseId}                     ← 同卷原子落位
+④ 统计回写 + UPDATE site.active_release_id       ← **最后一步**；此前线上不受影响
+⑤ 失效缓存（slug + path）→ 保留策略清理
+任一步失败：清理 .tmp- 并删除刚建的版本行（不留半成品）
+并发：Redis SET NX（site:publish:{siteId}，TTL 300s 防死锁）抢锁失败 → 40121
+```
+
+- **同卷保证原子**：`releasesRoot` 与工作区同在 `UPLOAD_DIR` 下（StorageService 抽象内保证）。
+- **行 ↔ 目录同生共死**：删版 / 保留清理 / 删站（`purgeForSite`）都同时清理两者，避免孤儿。
+
+### 35.3 开放层双轨（D148/R159/R160）
+
+- **只换根目录，解析与安全件全部复用**：抽出 `sendFile(load, req, res)` 统一出流（MIME 白名单 + CSP 沙箱 +
+  nosniff + ETag/304 + Range/416 + 空闲超时 + 流式），两条轨仅在「取流来源」上不同 —— 安全件只写一遍，不会漂移。
+- **`serve()` 增 `track` 参数**：`auto`（默认按站点发布状态选轨）/ `legacy`（展示应用两路由强制）。
+- **`site:path` 缓存加轨维度**（`site:path:{siteId}:{track}:{path}`）：legacy 轨写缓存；**快照轨不写**
+  （目录不可变，fs `stat` 足够轻，且省掉按轨失效的一致性面）。
+- **`.tmp-` 对解析不可见**：中转目录名不同且解析只接受校验过的相对路径，任何探测落 40400。
+
+### 35.4 权限平面解耦（R161，本期的核心安全收益）
+
+`cloud_file.is_public` 原先**同时承担两个信任域的语义**：「云盘分享可见吗」与「站点可访问吗」——
+用户为了让页面能访问必须显式公开，同时也暴露给了云盘公开链，属**权限放大**。
+
+快照轨落地后：**站点可见性 = 快照里有什么**，与 `is_public` 彻底分家；`is_public` 回归纯粹的云盘分享语义。
+副产物是云盘侧的任何误操作（移动 / 删除 / 改公开性）**都不再直达公网**。
+
+### 35.5 前端（T161）
+
+站点列表页操作列新增「发布与版本」抽屉：发布按钮（可填备注）+ 版本列表（版本号 / 备注 / 文件数 / 大小 /
+时间 / 锁定 / 在线标记）+「切到此版」（回滚）+ 锁定 / 删除；**从未发布的站点顶部提示「当前为草稿直出，建议发布」**。
+文案遵守界面准则（不出现 `releaseId` / `.tmp` 等内部词）。
+
+### 35.6 W12 公开判定链统一（T165，先行补丁）
+
+**问题**：两条链规则相反 —— `/api/open`（`resolvePublicPath`）遇第一个非 0 节点定生死，**文件自身 `1` 可穿透父级 `2`**；
+`/api/pub`（`assertAncestorsNotBlocked`）任一祖先 `2` 即阻断。同一文件两链结论相反 → **权限结论不可推理**（属规格诱导）。
+
+**修复**：统一为**阻断优先**（S3 explicit deny 同构）——`/api/open` 改为「祖先链（含自身）任一节点 = 2 即阻断，
+无 2 时遇第一个 `1` 放行」。`/api/pub` 不动（本就是阻断优先）。「取消公开落库为 2」的既有语义维持。
+附带前端文案两处：取消公开的确认语说明**这是显式阻断**（非回默认）；公开链接弹窗区分「公开」与「生成分享链接」。
+
+**存量扫描（合入门禁）**：`pnpm scan:pubblock`（`scripts/scan-public-blocked.ts`）扫描「祖先链含阻断且自身显式公开」
+的文件，退出码 1 表示存在受影响文件（收紧类变更须用户确认后合入）。本次实测：340 行未删文件、5 行显式公开、
+**0 行显式阻断 → 影响面为零，直接合入**。
+
+**待澄清事实的回写**：站点静态限流档值为 **120/min/IP**（代码事实；主文档旧口径 60 已按此回写）；
+`site:path` 负缓存**仅在路径完全不存在时写入**，目录命中不写 —— 未越界 P4a T35 纪律，无需收窄。
+
+### 35.7 演进预留（本期不做，挂 Phase2）
+
+- 快照 **nginx / 对象存储直出 + 长缓存（immutable）**：与 StorageService MinIO/OSS 切换同行；
+- 快照**物理去重**（manifest 已记 `contentHash`，Phase2 只做存储层）；
+- 独立沙箱域服务用户站点（github.io 式，彻底解决同源债）；版本 diff 视图；公网草稿预览环境。
+
+### 35.8 资产登记
+
+`site/release/`（service / controller / preview / module / dto）/ `site/open/site-release-track.service`（快照轨解析）/
+`site/open/open-static.controller.serveFile`（双轨统一出流）/ `infra/storage`（快照区：`releaseDirOf` / `copyStorageInto` /
+`renameDir` / `removeDir` / `statInDir` / `createDirReadStream`）/ `site/manage`（删站级联 `purgeForSite`）/
+`cloud-facade.resolveOwnTreePath`（预览用无公开性解析）/ 站点列表页「发布与版本」抽屉 /
+`scripts/smoke-site.ts`（`pnpm smoke:site`，35 项）/ `scripts/scan-public-blocked.ts`（`pnpm scan:pubblock`）
+—— 明细见 §9 公共资产表。
