@@ -368,6 +368,24 @@ export interface SiteQuotaInfo {
   used: number
 }
 
+/** 站点发布版本（P19 D146 / API-P19 §2.1；管理侧出域形态，bigint 已字符串化） */
+export interface SiteReleaseItem {
+  id: string
+  /** 站内递增序号（界面展示用） */
+  versionNo: number
+  label: string | null
+  /** 快照文件数 */
+  fileCount: number
+  /** 快照总字节（字符串，避免大数精度丢失） */
+  totalBytes: string
+  /** 是否锁定（锁定版豁免自动清理与删除） */
+  pinned: boolean
+  createdBy: string
+  createdAt: string
+  /** 是否为站点当前版本（在线版本） */
+  active: boolean
+}
+
 /** 模板列表项（P4b T44；id = 模板目录名；previewUrl 见 P6 T80） */
 export interface SiteTemplateItem {
   id: string
@@ -489,14 +507,7 @@ export interface AppDefItem {
 }
 
 /** 字段类型七类（R88） */
-export type AppFieldType =
-  | 'text'
-  | 'number'
-  | 'datetime'
-  | 'bool'
-  | 'enum'
-  | 'attachment'
-  | 'ref'
+export type AppFieldType = 'text' | 'number' | 'datetime' | 'bool' | 'enum' | 'attachment' | 'ref'
 
 /** 字段定义视图 */
 export interface AppFieldView {

@@ -13,6 +13,7 @@ import type {
   ArticleSiteRef,
   ColumnSiteRef,
   PageResult,
+  SiteReleaseItem,
 } from '@/types/api'
 
 // ========== 站点 CRUD（site:site:manage，P4E API §10.2；命名空间 /site/manage/*） ==========
@@ -55,6 +56,28 @@ export const deleteSite = (id: string | number) =>
     `/site/manage/${id}`,
   )
 
+// ========== 站点发布与版本（P19 D143~D147 / API-P19 §1~§2） ==========
+
+/** 发布版本（发布即上线：工作副本快照 + 指针翻转；并发发布 → 40121） */
+export const publishSiteRelease = (id: string | number, label?: string) =>
+  post<SiteReleaseItem>(`/site/manage/${id}/publish`, label ? { label } : {})
+
+/** 版本列表（按版本号倒序；量小不分页） */
+export const listSiteReleases = (id: string | number) =>
+  get<SiteReleaseItem[]>(`/site/manage/${id}/releases`)
+
+/** 切换当前版本（**回滚 = 切旧版**；即时生效，可反复横跳） */
+export const activateSiteRelease = (id: string | number, rid: string | number) =>
+  post<SiteReleaseItem>(`/site/manage/${id}/releases/${rid}/activate`, {})
+
+/** 锁定 / 解锁版本（锁定版豁免自动清理与手动删除） */
+export const pinSiteRelease = (id: string | number, rid: string | number, pinned: boolean) =>
+  post<SiteReleaseItem>(`/site/manage/${id}/releases/${rid}/pin`, { pinned })
+
+/** 删除版本（当前版本 / 锁定版后端拒绝 40001；同时清理快照目录） */
+export const deleteSiteRelease = (id: string | number, rid: string | number) =>
+  del<{ ok: true; id: string }>(`/site/manage/${id}/releases/${rid}`)
+
 // ========== 站点配额（admin，site:admin:quota，P4E API §10.4） ==========
 
 /** 查询用户站点配额（limit/used，used = 当前站点数） */
@@ -87,8 +110,10 @@ export const createColumn = (data: {
   siteIds?: number[]
 }) => post<{ id: string; name: string }>('/site/column', data)
 
-export const updateColumn = (id: number, data: { name?: string; sort?: number; parentId?: number }) =>
-  put<{ id: string; name: string; parentId: string }>(`/site/column/${id}`, data)
+export const updateColumn = (
+  id: number,
+  data: { name?: string; sort?: number; parentId?: number },
+) => put<{ id: string; name: string; parentId: string }>(`/site/column/${id}`, data)
 
 export const removeColumn = (id: number) => del(`/site/column/${id}`)
 
@@ -140,8 +165,7 @@ export interface ArticleSaveDto {
   status: number
 }
 
-export const createArticle = (data: ArticleSaveDto) =>
-  post<{ id: string }>('/site/article', data)
+export const createArticle = (data: ArticleSaveDto) => post<{ id: string }>('/site/article', data)
 
 /** 编辑：siteIds 提供即替换式更新发表集合（不传 = 不动；空数组 = 全站下架） */
 export const updateArticle = (id: number, data: Partial<ArticleSaveDto>) =>

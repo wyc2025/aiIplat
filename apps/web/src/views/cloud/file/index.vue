@@ -220,13 +220,13 @@
         <el-table-column
           label="大小"
           width="120"
-          :formatter="(r: CloudFile) => r.isDir ? '-' : formatSize(Number(r.size))"
+          :formatter="(r: CloudFile) => (r.isDir ? '-' : formatSize(Number(r.size)))"
         />
         <el-table-column
           label="修改时间"
           width="180"
           prop="updateTime"
-          :formatter="(r: CloudFile) => r.updateTime ? formatTime(r.updateTime) : '-'"
+          :formatter="(r: CloudFile) => (r.updateTime ? formatTime(r.updateTime) : '-')"
         />
         <el-table-column
           label="操作"
@@ -454,7 +454,9 @@
       <div v-loading="shareLoading">
         <template v-if="shareMode === 'create'">
           <p class="v-cf-tip">
-            确认后将生成分享链接，访客凭链接免登录访问该{{ shareFile?.isDir ? '文件夹' : '文件' }}（可设 4~8 位提取码）。
+            确认后将生成分享链接，访客凭链接免登录访问该{{
+              shareFile?.isDir ? '文件夹' : '文件'
+            }}（可设 4~8 位提取码）。
           </p>
           <div class="v-cf-share-row">
             <span class="v-cf-share-label">有效期：</span>
@@ -517,7 +519,9 @@
             </el-button>
           </div>
           <p class="v-cf-tip">
-            当前：{{ shareHasPassword ? '已设置提取码' : '无提取码' }}（修改后已通过验证的访客需重新输入）
+            当前：{{
+              shareHasPassword ? '已设置提取码' : '无提取码'
+            }}（修改后已通过验证的访客需重新输入）
           </p>
         </template>
       </div>
@@ -670,7 +674,9 @@
       append-to-body
     >
       <p class="v-cf-tip">
-        公开「{{ pubDirRow?.name }}」后，访客可凭公开链接在线访问该文件夹及其中内容（其中的子文件夹是否可见，跟随本文件夹设置）。
+        公开「{{
+          pubDirRow?.name
+        }}」后，访客可凭公开链接在线访问该文件夹及其中内容（其中的子文件夹是否可见，跟随本文件夹设置）。
       </p>
       <el-checkbox v-model="pubDirAllowListing">
         允许访客浏览文件列表（关闭后仅知道完整路径可访问）
@@ -708,6 +714,7 @@
       </el-input>
       <p class="v-cf-tip">
         访客免登录打开可在线查看 / 播放；取消公开后旧链接立即失效，重新公开会生成新链接。
+        「公开」与「生成分享链接」是两条独立通道：公开影响站点内容的可访问性，分享链接是把这份文件单独发给别人。
       </p>
       <template #footer>
         <el-button
@@ -752,7 +759,15 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { confirmDialog } from '@/utils/confirm'
 import { useClipboard } from '@vueuse/core'
-import { Upload, FolderAdd, Refresh, FolderOpened, Document, Select, DocumentCopy } from '@element-plus/icons-vue'
+import {
+  Upload,
+  FolderAdd,
+  Refresh,
+  FolderOpened,
+  Document,
+  Select,
+  DocumentCopy,
+} from '@element-plus/icons-vue'
 import ProTable from '@/components/ProTable/index.vue'
 import FileEditorDialog from '../components/FileEditorDialog.vue'
 import UploadQueue from './UploadQueue.vue'
@@ -814,7 +829,9 @@ const {
 const selectionMode = ref(false)
 const selectedIds = ref<string[]>([])
 const selectedRows = computed(() => list.value.filter((r) => selectedIds.value.includes(r.id)))
-const allSelected = computed(() => list.value.length > 0 && selectedIds.value.length === list.value.length)
+const allSelected = computed(
+  () => list.value.length > 0 && selectedIds.value.length === list.value.length,
+)
 const batchBusy = ref(false)
 const packing = ref(false)
 const pasting = ref(false)
@@ -917,7 +934,19 @@ const previewRetried = ref(false)
 // ========== 在线编辑（P4b T43） ==========
 /** 在线编辑文本扩展名白名单（§15.12：与后端 EDITABLE_TEXT_EXTS / site 域 SITE_FILE_TEXT_EXTS 同集，以架构增补为准对齐） */
 const EDITABLE_EXTS: ReadonlySet<string> = new Set([
-  'html', 'htm', 'css', 'js', 'mjs', 'txt', 'md', 'json', 'svg', 'xml', 'yml', 'yaml', 'csv',
+  'html',
+  'htm',
+  'css',
+  'js',
+  'mjs',
+  'txt',
+  'md',
+  'json',
+  'svg',
+  'xml',
+  'yml',
+  'yaml',
+  'csv',
 ])
 /** 在线编辑内容上限（§15.12：1MB，按钮显示条件） */
 const EDIT_MAX_BYTES = 1024 * 1024
@@ -978,7 +1007,14 @@ onMounted(() => {
 
 // 预览类型判断：mime 优先；历史数据 mime 缺失/落成 octet-stream 时按扩展名兜底，
 // 避免本可预览的文件被误判为「不支持在线预览」
-const PREVIEW_IMAGE_EXTS: ReadonlySet<string> = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'])
+const PREVIEW_IMAGE_EXTS: ReadonlySet<string> = new Set([
+  'jpg',
+  'jpeg',
+  'png',
+  'gif',
+  'webp',
+  'bmp',
+])
 const PREVIEW_VIDEO_EXTS: ReadonlySet<string> = new Set(['mp4', 'webm', 'ogg', 'ogv', 'mov', 'm4v'])
 function isImage(r?: CloudFile | null) {
   if (r?.mime?.startsWith('image/')) return r.mime !== 'image/svg+xml'
@@ -1126,7 +1162,8 @@ async function submitRename() {
 
 // 删除（软删入回收站）
 async function onRemove(row: CloudFile) {
-  if (!(await confirmDialog(`确认删除「${row.name}」？将移入回收站`, '提示', { type: 'warning' }))) return
+  if (!(await confirmDialog(`确认删除「${row.name}」？将移入回收站`, '提示', { type: 'warning' })))
+    return
   await removeFile(Number(row.id))
   ElMessage.success('已删除')
   reload()
@@ -1161,7 +1198,10 @@ async function submitSetPublic(row?: CloudFile) {
   if (!target) return
   pubSubmitting.value = true
   try {
-    const res = await createPublicLink(Number(target.id), target.isDir ? pubDirAllowListing.value : undefined)
+    const res = await createPublicLink(
+      Number(target.id),
+      target.isDir ? pubDirAllowListing.value : undefined,
+    )
     pubLinkUrl.value = `${window.location.origin}${res.viewUrl}`
     pubDirVisible.value = false
     pubLinkVisible.value = true
@@ -1185,10 +1225,10 @@ async function onCopyPublicLink(row: CloudFile) {
   }
 }
 
-/** 取消公开（R27：token 轮换，旧链接立即失效；重新公开生成新链接） */
+/** 取消公开（R27：token 轮换，旧链接立即失效；重新公开生成新链接；W12：语义为「显式阻断」） */
 async function onCancelPublic(row: CloudFile) {
   const confirmed = await confirmDialog(
-    `确认取消公开「${row.name}」？旧公开链接将立即失效，重新公开会生成新链接`,
+    `确认取消公开「${row.name}」？取消公开会显式阻断该位置（不是回到默认状态），其中曾被单独公开的子项也会一并不可见；旧公开链接立即失效，重新公开会生成新链接。`,
     '提示',
     { type: 'warning' },
   )
@@ -1257,7 +1297,11 @@ async function submitShare() {
   }
   shareSubmitting.value = true
   try {
-    const res = await createShare(Number(shareFile.value.id), shareDays.value, password || undefined)
+    const res = await createShare(
+      Number(shareFile.value.id),
+      shareDays.value,
+      password || undefined,
+    )
     shareId.value = res.id
     shareUrl.value = `${window.location.origin}${res.url}`
     shareExpireText.value = res.expireAt ? new Date(res.expireAt).toLocaleString() : '永久'

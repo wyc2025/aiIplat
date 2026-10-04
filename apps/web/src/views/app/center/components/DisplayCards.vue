@@ -29,6 +29,7 @@ import { listApps } from '@/api/app'
 import { listSites } from '@/api/site/site'
 import { confirmDialog } from '@/utils/confirm'
 import { formatTime } from '@/utils/format'
+import DisplayReleasesDialog from './DisplayReleasesDialog.vue'
 
 interface SiteOption {
   id: string
@@ -44,6 +45,10 @@ interface AppOption {
 }
 
 const router = useRouter()
+/** 版本（检查点）面板（P20 T167）：由卡片按钮按需打开 */
+const releasesDialog = ref<{
+  open: (id: string, name: string, site: string | null) => void
+} | null>(null)
 
 const loading = ref(false)
 const loadError = ref(false)
@@ -111,14 +116,22 @@ defineExpose({ reload: load })
 // ==================== 云盘目录直达 ====================
 
 /**
- * 打开该展示应用在云盘的目录（仅挂靠时有意义）。
- * 目录节点 id 由后端按 `{slug}/disp/{id}` 解析；**目录尚未创建**（挂靠本身不建目录，写文件时才
- * `mkdir -p`）时退回站点根目录，让用户仍能看到站点目录结构。
+ * 打开该展示页在云盘的工作区目录（P20 B1：目录**独立于站点树**）。
+ *
+ * 建展示应用时即创建其工作区目录，故 `folderId` 恒有值、按钮**不再依赖挂靠状态**、
+ * 也**不再退化为跳站点根**；仅在目录被手动移入回收站等极端情况为 null。
  */
+/** 打开该展示页的版本（检查点）面板（P20 T167） */
+function openVersions(item: DisplayItem): void {
+  void releasesDialog.value?.open(item.id, item.name, item.siteTitle ?? null)
+}
+
 function openCloudDir(item: DisplayItem): void {
-  const dir = item.folderId ?? item.siteRootFolderId
+  const dir = item.folderId
   if (dir === null) {
-    ElMessage.warning('这个展示页的文件目录还没有创建：在对话里写入第一个页面文件后会出现')
+    ElMessage.warning(
+      '这个展示页的文件目录当前不可用（可能已被移入回收站）：在对话里写入页面文件可重新创建',
+    )
     return
   }
   void router.push({ path: '/cloud/file', query: { dir } })
@@ -209,7 +222,8 @@ async function submitGrant(): Promise<void> {
   try {
     for (const appCode of toGrant) {
       const result = await grantDisplay(grantDialog.id, appCode)
-      if (result.isPublic !== 1) notes.push(`${appNameOf(appCode)} 尚未开启「可被读取」，授权后站点仍读不到数据`)
+      if (result.isPublic !== 1)
+        notes.push(`${appNameOf(appCode)} 尚未开启「可被读取」，授权后站点仍读不到数据`)
     }
     for (const appCode of toRevoke) {
       await revokeDisplay(grantDialog.id, appCode)
@@ -335,9 +349,10 @@ function appNameOf(appCode: string): string {
 
         <!-- 状态说明：只讲用户关心的事，不出现目录写路径、接口地址这类实现细节 -->
         <div class="v-disp-card__meta">
-          <span v-if="!item.siteSlug">页面文件暂存在云盘，挂到站点后才能对外访问。</span>
-          <span v-else-if="item.folderId">页面文件在站点目录里，可点「打开目录」查看。</span>
-          <span v-else>页面文件还没开始写，写入后会自动出现在站点目录里。</span>
+          <span v-if="item.folderId">
+            页面文件在它自己的云盘目录里，可点「打开目录」查看；挂到站点并发布后才会对外访问。
+          </span>
+          <span v-else>页面文件还没开始写，写入后会出现在它的云盘目录里。</span>
           <span v-if="item.urlPreview">访问地址已生成，点「复制链接」即可分享。</span>
           <span v-else>挂到站点后才会生成访问地址。</span>
           <span>创建于 {{ formatTime(item.createdAt) }}</span>
@@ -363,7 +378,6 @@ function appNameOf(appCode: string): string {
 
         <div class="v-disp-card__actions">
           <el-button
-            v-if="item.siteSlug"
             size="small"
             type="primary"
             plain
@@ -378,6 +392,13 @@ function appNameOf(appCode: string): string {
             @click="copyUrl(item)"
           >
             复制链接
+          </el-button>
+          <el-button
+            size="small"
+            plain
+            @click="openVersions(item)"
+          >
+            版本
           </el-button>
           <el-button
             size="small"
@@ -539,6 +560,8 @@ function appNameOf(appCode: string): string {
         </el-button>
       </template>
     </el-dialog>
+
+    <DisplayReleasesDialog ref="releasesDialog" />
   </div>
 </template>
 

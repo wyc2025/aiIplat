@@ -54,3 +54,46 @@ export const grantDisplay = (id: string, appCode: string) =>
 /** 撤销授权（授权不存在 50017） */
 export const revokeDisplay = (id: string, appCode: string) =>
   del(`/display/${id}/grants/${appCode}`)
+
+/**
+ * 版本检查点（P20 T167 / API §28.3）。
+ *
+ * 定位是**存档**而非上线：把当前页面内容存成一个可回退的版本，随时恢复到工作区。
+ * 与站点发布分治——展示页不必随站点发布；对外访问仍由站点版本决定。
+ */
+export interface DisplayReleaseItem {
+  id: string
+  versionNo: number
+  label: string | null
+  fileCount: number
+  totalBytes: string
+  pinned: boolean
+  createdBy: string
+  createTime: string
+}
+
+/** 版本列表（新 → 旧） */
+export const listDisplayReleases = (id: string) =>
+  get<DisplayReleaseItem[]>(`/display/${id}/releases`)
+
+/** 把当前页面内容保存为一个版本（还没有页面文件 → 40001；正在保存 → 50022） */
+export const saveDisplayRelease = (id: string, label?: string) =>
+  post<DisplayReleaseItem>(`/display/${id}/releases`, { label })
+
+/**
+ * 恢复到工作区：现有内容先软删进回收站，再写回该版本。
+ * 恢复错了可从云盘回收站撤回，所以这是一个**可反悔**的操作。
+ */
+export const restoreDisplayRelease = (id: string, releaseId: string) =>
+  post<{ ok: true; restoredFiles: number; removedFiles: number }>(
+    `/display/${id}/releases/${releaseId}/restore`,
+    {},
+  )
+
+/** 锁定 / 解锁版本（锁定后豁免删除） */
+export const pinDisplayRelease = (id: string, releaseId: string, pinned: boolean) =>
+  put<DisplayReleaseItem>(`/display/${id}/releases/${releaseId}/pin`, { pinned })
+
+/** 删除版本（已锁定的需先解锁，否则 50022） */
+export const deleteDisplayRelease = (id: string, releaseId: string) =>
+  del(`/display/${id}/releases/${releaseId}`)
