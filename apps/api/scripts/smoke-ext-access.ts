@@ -596,18 +596,31 @@ async function main(): Promise<void> {
     {
       let uploadedId: string | null = null
       try {
-        // 目录**按需创建**：挂靠本身不建目录（P14 §30.3——AI 或上传写文件时才 mkdir -p）
+        // P20 B1 起：展示应用目录**恒存在**于独立工作区（建应用时即建目录），
+        // 挂靠只改关系字段、不移动文件；此处取站点属主以定位工作区路径
         const siteRow = await prisma.siteSite.findFirstOrThrow({
           where: { slug },
-          select: { rootFolderId: true },
+          select: { rootFolderId: true, userId: true },
         })
-        const dispDirId = await ensureFolder(
-          token,
-          (siteRow.rootFolderId ?? BigInt(0)).toString(),
-          'disp',
-        )
-        const appDirId = await ensureFolder(token, dispDirId, displayA.id)
-        check('展示应用目录可由写文件按需创建（{站点根}/disp/{id}）', !!appDirId)
+        // P20 B1：展示应用内容位于**独立工作区**（`disp-staging/{ownerId}/{displayId}/`），
+        // 已不在站点树内 —— 用例改为往工作区写（与产品口径一致；站点发布时才聚合进快照）
+        const stagingRootList = (await ok<{ list?: Array<{ id: string; name: string }> }>(
+          '/api/cloud/file/list?parentId=0',
+          { token },
+        )) as { list?: Array<{ id: string; name: string }> }
+        const stagingItem = (stagingRootList.list ?? []).find((item) => item.name === 'disp-staging')
+        const stagingRootId = stagingItem
+          ? stagingItem.id
+          : (
+              await ok<{ id: string }>('/api/cloud/file/mkdir', {
+                method: 'POST',
+                json: { parentId: 0, name: 'disp-staging' },
+                token,
+              })
+            ).id
+        const dispUserDirId = await ensureFolder(token, stagingRootId, siteRow.userId.toString())
+        const appDirId = await ensureFolder(token, dispUserDirId, displayA.id)
+        check('展示应用工作区目录可由写文件按需创建（disp-staging/{属主}/{id}）', !!appDirId)
 
         const html = [
           '<!doctype html><html><head><meta charset="utf-8"><title>冒烟展示页</title></head><body>',
@@ -1359,6 +1372,49 @@ async function main(): Promise<void> {
           ),
           `n=${summaries.length}`,
         )
+
+        // ⑬ 令牌自然过期（**销 P18 走查 C1**）：TTL 到点即 401 + `invalid_token` + 50019。
+        // 常规环境 TTL=3600 等不起，故仅在把 ACCESS_TOKEN_TTL_SECONDS 调小（≤3）时实测——
+        // 与保留策略同款「条件断言」：调小环境变量后本段自动生效，无需改脚本。
+        const ttl = Number(process.env.ACCESS_TOKEN_TTL_SECONDS ?? '3600')
+        if (Number.isFinite(ttl) && ttl > 0 && ttl <= 3) {
+          const expCred = await ok<{ id: string; apiKey: string }>('/api/access/credentials', {
+            method: 'POST',
+            json: { appCode, name: `过期${stamp}`, type: 'oauth', scope: { tables: ['post'] } },
+            token,
+          })
+          credIds.push(expCred.id)
+          const expDot = expCred.apiKey.indexOf('.')
+          const expGrant = await call(tokenPath, {
+            method: 'POST',
+            form: {
+              grant_type: 'client_credentials',
+              client_id: expCred.apiKey.slice(0, expDot),
+              client_secret: expCred.apiKey.slice(expDot + 1),
+            },
+          })
+          const expToken =
+            (expGrant.body as unknown as { access_token?: string })?.access_token ?? ''
+          const beforeExpiry = await call(`/api/ext/v1/app/${appCode}/tables/post/records?size=1`, {
+            apiKey: expToken,
+          })
+          await new Promise((resolve) => setTimeout(resolve, (ttl + 1) * 1000))
+          const afterExpiry = await call(`/api/ext/v1/app/${appCode}/tables/post/records?size=1`, {
+            apiKey: expToken,
+          })
+          check(
+            `令牌自然过期（TTL=${ttl}s）→ 过期前可用、过期后 401 + invalid_token + 50019`,
+            beforeExpiry.status === 200 &&
+              afterExpiry.status === 401 &&
+              afterExpiry.body?.code === 50019 &&
+              (afterExpiry.headers.get('www-authenticate') ?? '').includes('invalid_token'),
+            `before=${beforeExpiry.status} after=${afterExpiry.status} code=${afterExpiry.body?.code}`,
+          )
+        } else {
+          console.log(
+            `  · 跳过令牌自然过期实测（ACCESS_TOKEN_TTL_SECONDS=${ttl}，调小到 ≤3 后本段自动生效）`,
+          )
+        }
       } catch (error) {
         check('OAuth2 端到端（P18）', false, (error as Error).message)
       }
