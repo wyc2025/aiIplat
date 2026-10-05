@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common'
-import OpenAI from 'openai'
+import OpenAI, { APIConnectionError, APIError } from 'openai'
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions/completions'
 import type {
   EngineChatMessage,
@@ -21,6 +21,19 @@ export class ProviderService {
   /** 按厂商配置创建 OpenAI 兼容 client（不缓存，随用随建，apiKey 变更即时生效） */
   createClient(baseUrl: string, apiKey: string): OpenAI {
     return new OpenAI({ baseURL: baseUrl, apiKey })
+  }
+
+  /**
+   * 上游瞬时错误判定（P21 T174）：429 / 5xx / 连接层错误（含超时）可安全重试；
+   * 400/401/403/404 等参数与鉴权类错误重试无意义。
+   * 引擎层是唯一感知 openai SDK 异常类型的地方，chat 层据此决定是否重试。
+   */
+  isRetryableUpstreamError(error: unknown): boolean {
+    if (error instanceof APIConnectionError) return true
+    if (error instanceof APIError) {
+      return error.status === 429 || (typeof error.status === 'number' && error.status >= 500)
+    }
+    return false
   }
 
   /**

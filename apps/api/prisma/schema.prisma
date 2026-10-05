@@ -327,6 +327,8 @@ model AiMessage {
   credits       Int       @default(0) @map("credits")
   /// 1 正常 2 失败（流中断/上游错误）
   status        Int       @default(1) @map("status") @db.TinyInt
+  /// 上游调用失败详情（P21 T174：status=2 时记录 [status=…] 前缀详情，终端日志外可追溯 429/400 等）
+  errorMsg      String?   @map("error_msg") @db.VarChar(500)
   createdAt     DateTime  @default(now()) @map("created_at")
   deletedAt     DateTime? @map("deleted_at")
 

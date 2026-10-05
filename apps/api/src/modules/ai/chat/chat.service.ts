@@ -52,13 +52,6 @@ const HISTORY_TAKE = 50
 /** write 工具确认单 TTL（10 分钟） */
 const CONFIRM_TTL_SEC = 600
 /**
- * 工具往返累计字符占 max_context 的比例上限（P10 T100）。
- * 背景：多轮工具结果（tool 消息）**不参与历史截取预算**，大文件分段读取会把上下文推向上限——
- * 实测 admin 会话 #377 的 tokens_input 已达 118,865 / 128,000（读 6 段 PROGRESS.md），
- * 再读一两轮就会被上游以超出上下文拒绝（400）。故超过该比例即停止继续调工具、进入收尾轮。
- */
-const TOOL_ROUNDTRIP_BUDGET_RATIO = 0.4
-/**
  * 收尾轮指令（P10 T100）：轮次或往返预算耗尽后**不携带 tools** 再调一次上游，
  * 强制模型基于已获取的信息作答——否则用户看到的是「AI 读完文件就莫名其妙停了」
  * （旧行为：轮次用尽即 break，模型从未见到最后一批工具结果，也没有机会总结）。
@@ -66,6 +59,24 @@ const TOOL_ROUNDTRIP_BUDGET_RATIO = 0.4
 const FINAL_ROUND_INSTRUCTION =
   '（系统提示：本轮工具调用次数已达上限，接下来不再提供任何工具。请立即基于你已经获取到的信息给出结论或阶段性总结；' +
   '若仍有未读完的内容，请明确说明还缺什么、以及建议用户如何继续。）'
+
+/**
+ * 工具往返累计字符占 max_context 的比例上限（P10 T100 起；**P21 T173 起仅作观测阈值**，
+ * 不再作为硬断依据——旧逻辑在工具结果回喂后才检查，超限内容已不可撤回、收尾轮仍会硬发；
+ * 硬约束改为「调用前预估 + 截断」，见 projectedInputChars / truncateToolResultsToFit）。
+ */
+const TOOL_ROUNDTRIP_BUDGET_RATIO = 0.4
+/** 输入硬预算比例（P21 T173）：与历史截取同口径，给输出预留 25%；工具往返后的总输入不得超过 */
+const INPUT_BUDGET_RATIO = 1 - OUTPUT_RESERVE_RATIO
+/** 工具结果截断占位符（P21 T173）：超预算时替换最旧的 tool 消息 content */
+const TOOL_RESULT_TRUNCATED_PLACEHOLDER = '（此结果过长已省略，如需完整内容请重新调用相应工具读取）'
+/** 上游瞬时错误重试退避（P21 T174）：1s、2s 各一次（各含 ±30% 抖动） */
+const UPSTREAM_RETRY_DELAYS_MS = [1000, 2000]
+/** 重试退避抖动比例 */
+const UPSTREAM_RETRY_JITTER = 0.3
+/** 确认单携带的同批 read 结果容量上限（P21 T175）：单条 / 合计字符，超限截断 */
+const PRIOR_RESULT_MAX_CHARS = 20_000
+const PRIOR_TOTAL_MAX_CHARS = 50_000
 
 /** 模型（含厂商）精简类型 */
 interface ChatModel {
@@ -85,6 +96,24 @@ interface RoundResult {
   failed: boolean
   /** DeepSeek 思考模式的 reasoning_content（多轮工具调用回喂需回传） */
   reasoningContent: string
+  /** 失败时的原始异常（重试判定用，交 engine 层 isRetryableUpstreamError 分类） */
+  error: unknown
+  /** 失败详情（[status=…] 前缀；P21 T174 落库 ai_message.error_msg 追溯用） */
+  errorDetail: string | null
+}
+
+/**
+ * 确认单携带的同批 read 调用（P21 T175）：write 触发确认卡时，同一批 tool_calls 里
+ * 已执行的 read 结果随确认单存 Redis，确认链路重建上下文时回喂——修复「read 在前、
+ * write 在后」时 read 结果被丢弃、确认总结缺上下文的问题。
+ */
+interface PriorToolCallEntry {
+  /** 上游返回的 tool_call id（重建 assistant.tool_calls 时保持协议对应） */
+  id: string
+  name: string
+  arguments: string
+  /** 工具执行结果（JSON 序列化，含失败兜底形态） */
+  result: string
 }
 
 /**
@@ -196,7 +225,15 @@ export class ChatService {
     if (!confirmRaw) {
       throw new BusinessException(ErrorCode.AiToolConfirmExpired, '确认单不存在或已过期')
     }
-    const confirm = JSON.parse(confirmRaw) as { userId: string; conversationId: string; toolName: string; params: Record<string, unknown> }
+    const confirm = JSON.parse(confirmRaw) as {
+      userId: string
+      conversationId: string
+      toolName: string
+      params: Record<string, unknown>
+      /** P21 T175：同批 read 上下文与被暂停调用（旧确认单无此字段，按缺省兼容） */
+      priorToolCalls?: PriorToolCallEntry[]
+      skippedToolCalls?: string[]
+    }
     if (confirm.userId !== user.userId) {
       throw new BusinessException(ErrorCode.AiToolConfirmExpired, '确认单不存在或已过期')
     }
@@ -257,6 +294,8 @@ export class ChatService {
       originalMessage,
       tools,
       routing,
+      confirm.priorToolCalls ?? [],
+      confirm.skippedToolCalls ?? [],
     )
 
     // 8. 建新 assistant 消息（总结独立落库 + 独立结算）
@@ -299,6 +338,7 @@ export class ChatService {
       rounds.hasUsage ? { inputTokens: rounds.inputTokens, outputTokens: rounds.outputTokens } : null,
       !streamFailed,
       rounds.reasoningContent,
+      streamFailed ? rounds.errorDetail : undefined,
     )
 
     if (streamFailed) {
@@ -356,6 +396,10 @@ export class ChatService {
   /**
    * 重建确认回喂上下文：system prompt + 历史（按实测预算从最早丢弃，R67）+
    * 原 assistant 消息带 tool_calls + tool 结果消息。
+   *
+   * P21 T175：原 assistant 消息带**整批** tool_calls（同批 read + 本次 write，id 分别用上游
+   * tool_call id 与消息 id），后跟同序 tool 消息——修复「read 在前、write 在后」的混合调用中
+   * read 结果被丢弃、确认总结缺上下文的问题；write 之后被暂停的调用以系统提示告知（防误以为已完成）。
    */
   private async buildConfirmContext(
     user: AuthUser,
@@ -370,6 +414,8 @@ export class ChatService {
     originalMessage: { content: string; reasoningContent: string | null },
     tools: EngineTool[],
     routing: ToolRoutingResult,
+    priorToolCalls: PriorToolCallEntry[],
+    skippedToolCalls: string[],
   ): Promise<EngineChatMessage[]> {
     // 历史消息（正序，排除原 assistant 占位消息）
     const history = await this.prisma.aiMessage.findMany({
@@ -387,6 +433,13 @@ export class ChatService {
     // P10 R84：会话可读清单随每轮组装刷新（确认回填链路同样注入；附件正文按最新文件内容重读，§26.7）
     const manifest = await this.buildAttachmentManifest(BigInt(user.userId), record.conversationId)
     const systemContent = manifest ? `${systemPrompt}\n\n${manifest}` : systemPrompt
+    // P21 T175：本轮必然回喂的 tool 结果 = write 结果 + 同批 read 结果合计 + 暂停告知
+    const skippedNote =
+      skippedToolCalls.length > 0
+        ? `\n（系统提示：以下工具调用因需逐一确认已暂停、本轮未执行：${skippedToolCalls.join('、')}；如仍需要请在总结后再次提出。）`
+        : ''
+    const fedToolChars =
+      toolResult.length + priorToolCalls.reduce((sum, p) => sum + p.result.length, 0) + skippedNote.length
     const picked = await this.pickHistoryWithAttachments(
       BigInt(user.userId),
       history,
@@ -394,7 +447,7 @@ export class ChatService {
         model,
         systemContent.length,
         this.toolsCharsOf(tools),
-        toolResult.length,
+        fedToolChars,
         tools.length,
         routing,
       ),
@@ -415,11 +468,13 @@ export class ChatService {
     return [
       { role: 'system', content: systemContent },
       ...picked,
-      // 原 assistant 消息带 tool_calls（用 ai_tool_call.id 作为 tool_call_id）+ reasoning_content 回传
+      // 原 assistant 消息带整批 tool_calls（同批 read 用上游 tool_call id、write 用消息 id）
+      // + reasoning_content 回传；tool 消息与 tool_calls 一一保持同序
       {
         role: 'assistant',
         content: originalContent,
         tool_calls: [
+          ...priorToolCalls.map((p) => ({ id: p.id, name: p.name, arguments: p.arguments })),
           {
             id: record.messageId.toString(),
             name: record.toolName,
@@ -428,7 +483,8 @@ export class ChatService {
         ],
         ...(originalMessage.reasoningContent ? { reasoning_content: originalMessage.reasoningContent } : {}),
       },
-      { role: 'tool', tool_call_id: record.messageId.toString(), content: toolResult },
+      ...priorToolCalls.map((p) => ({ role: 'tool' as const, tool_call_id: p.id, content: p.result })),
+      { role: 'tool', tool_call_id: record.messageId.toString(), content: toolResult + skippedNote },
     ]
   }
 
@@ -546,6 +602,7 @@ export class ChatService {
       rounds.hasUsage ? { inputTokens: rounds.inputTokens, outputTokens: rounds.outputTokens } : null,
       !streamFailed,
       rounds.reasoningContent,
+      streamFailed ? rounds.errorDetail : undefined,
     )
 
     // 14. 收尾事件
@@ -585,9 +642,15 @@ export class ChatService {
     failed: boolean
     /** 由 write 工具确认卡终止（后续交由 /ai/tool/confirm 链路接管） */
     awaitingConfirm: boolean
+    /** 最终失败轮的上游错误详情（P21 T174：随结算落 ai_message.error_msg） */
+    errorDetail: string | null
   }> {
     const { user, userId, conversationId, assistantMessageId, model, res, signal } = params
     const toolRoundTripBudget = Math.floor(model.maxContext * TOOL_ROUNDTRIP_BUDGET_RATIO)
+    // P21 T173：输入硬预算（与历史截取同口径）——每次调上游**前**预估，超限先截断再发，
+    // 取代旧「回喂后才发现超预算」的检查（旧逻辑下历史 75% + 往返 40% 可叠加到 115%，
+    // admin 会话 #377 tokens_input 118,865/128,000 即此路径逼近上限的实证）
+    const inputBudget = Math.floor(model.maxContext * INPUT_BUDGET_RATIO)
 
     let content = ''
     let reasoningContent = ''
@@ -598,11 +661,28 @@ export class ChatService {
     let roundMessages = params.messages
     let needFinale = false
     let awaitingConfirm = false
+    let errorDetail: string | null = null
 
     for (let round = 0; round < this.maxToolRounds; round++) {
+      // P21 T173：调用前预估（content + reasoning_content + tools schema 全口径）
+      if (this.projectedInputChars(roundMessages, params.tools) > inputBudget) {
+        const removed = this.truncateToolResultsToFit(roundMessages, inputBudget, params.tools)
+        roundTripChars = Math.max(0, roundTripChars - removed)
+        this.logger.warn(
+          `工具往返超出输入预算 ${inputBudget}（maxContext ${model.maxContext}），已截断 ${removed} 字符的旧工具结果`,
+        )
+        if (removed > 0) {
+          // 已动过刀：不再允许继续调工具，防下一轮再次膨胀——直接进收尾轮
+          needFinale = true
+          break
+        }
+        // 无可截断（如首轮即超限的 MIN_HISTORY 保底场景）：维持现状硬发，交由上游裁决
+      }
+
       const roundResult = await this.callUpstream(model, roundMessages, params.tools, res, signal)
       if (roundResult.failed) {
-        return { content, reasoningContent, inputTokens, outputTokens, hasUsage, roundTripChars, failed: true, awaitingConfirm }
+        errorDetail = roundResult.errorDetail
+        return { content, reasoningContent, inputTokens, outputTokens, hasUsage, roundTripChars, failed: true, awaitingConfirm, errorDetail }
       }
 
       content += roundResult.content
@@ -642,15 +722,15 @@ export class ChatService {
       roundTripChars +=
         roundResult.content.length + processed.toolMessages.reduce((sum, m) => sum + m.content.length, 0)
 
-      // 轮次用尽 或 工具往返字符超预算 → 收尾轮（不再允许调工具，强制给结论）
+      // 轮次用尽 → 收尾轮（不再允许调工具，强制给结论）；
+      // 往返观测阈值（P21 T173 起仅告警不再硬断，硬约束已前移到调用前预估）
       if (round === this.maxToolRounds - 1) {
         needFinale = true
       }
       if (roundTripChars > toolRoundTripBudget) {
-        this.logger.warn(
-          `工具往返字符 ${roundTripChars} 超过预算 ${toolRoundTripBudget}（maxContext ${model.maxContext} × ${TOOL_ROUNDTRIP_BUDGET_RATIO}），提前收尾`,
+        this.logger.debug(
+          `工具往返字符 ${roundTripChars} 超过观测阈值 ${toolRoundTripBudget}（maxContext ${model.maxContext} × ${TOOL_ROUNDTRIP_BUDGET_RATIO}，硬约束已改为调用前预估截断）`,
         )
-        needFinale = true
       }
       if (needFinale) break
     }
@@ -659,6 +739,12 @@ export class ChatService {
       this.logger.warn(
         `工具轮次/往返预算耗尽 → 追加收尾轮（上限 ${this.maxToolRounds} 轮，往返 ${roundTripChars} 字符）`,
       )
+      // P21 T173：收尾轮同样先预估（不带 tools，schema 占用已释放但仍可能超）
+      if (this.projectedInputChars(roundMessages, []) > inputBudget) {
+        const removed = this.truncateToolResultsToFit(roundMessages, inputBudget, [])
+        roundTripChars = Math.max(0, roundTripChars - removed)
+        this.logger.warn(`收尾轮输入仍超预算 ${inputBudget}，已再截断 ${removed} 字符的旧工具结果`)
+      }
       const finale = await this.callUpstream(
         model,
         [...roundMessages, { role: 'user', content: FINAL_ROUND_INSTRUCTION }],
@@ -667,7 +753,8 @@ export class ChatService {
         signal,
       )
       if (finale.failed) {
-        return { content, reasoningContent, inputTokens, outputTokens, hasUsage, roundTripChars, failed: true, awaitingConfirm }
+        errorDetail = finale.errorDetail
+        return { content, reasoningContent, inputTokens, outputTokens, hasUsage, roundTripChars, failed: true, awaitingConfirm, errorDetail }
       }
       content += finale.content
       if (finale.reasoningContent) reasoningContent = finale.reasoningContent
@@ -679,11 +766,47 @@ export class ChatService {
       roundTripChars += finale.content.length
     }
 
-    return { content, reasoningContent, inputTokens, outputTokens, hasUsage, roundTripChars, failed: false, awaitingConfirm }
+    return { content, reasoningContent, inputTokens, outputTokens, hasUsage, roundTripChars, failed: false, awaitingConfirm, errorDetail: null }
   }
 
-  /** 单轮上游调用：累积 delta 下发、tool_calls 收集、usage 返回 */
+  /**
+   * 单轮上游调用（P21 T174 加固外壳）：瞬时错误（429/5xx/连接层）自动重试退避。
+   * 重试安全前提（硬约束）：本轮尚无任何 delta 下发且未收到 tool_calls——否则客户端会看到
+   * 重复文本；参数/鉴权类 4xx 重试无意义；客户端已断开（signal.aborted）不重试。
+   */
   private async callUpstream(
+    model: ChatModel,
+    messages: EngineChatMessage[],
+    tools: EngineTool[],
+    res: Response,
+    signal: AbortSignal,
+  ): Promise<RoundResult> {
+    let result: RoundResult | null = null
+    for (let attempt = 0; ; attempt++) {
+      result = await this.callUpstreamOnce(model, messages, tools, res, signal)
+      if (!result.failed) break
+      const delay = UPSTREAM_RETRY_DELAYS_MS[attempt]
+      if (
+        delay === undefined ||
+        result.content.length > 0 ||
+        result.toolCalls.length > 0 ||
+        signal.aborted ||
+        !this.providerService.isRetryableUpstreamError(result.error)
+      ) {
+        break
+      }
+      const jittered = delay * (1 + (Math.random() * 2 - 1) * UPSTREAM_RETRY_JITTER)
+      this.logger.warn(
+        `上游瞬时错误（模型 ${model.model}，第 ${attempt + 1}/${UPSTREAM_RETRY_DELAYS_MS.length + 1} 次尝试），` +
+          `${Math.round(jittered)}ms 后重试：${result.errorDetail ?? ''}`,
+      )
+      await new Promise((resolve) => setTimeout(resolve, jittered))
+    }
+    return result
+  }
+
+  /** 单次上游尝试：累积 delta 下发、tool_calls 收集、usage 返回（原 callUpstream 主体） */
+  private async callUpstreamOnce(
     model: ChatModel,
     messages: EngineChatMessage[],
     tools: EngineTool[],
@@ -695,6 +818,7 @@ export class ChatService {
     let usage: EngineUsage | null = null
     let failed = false
     let reasoningContent = ''
+    let caughtError: unknown = null
 
     let heartbeat: NodeJS.Timeout | null = null
     const resetHeartbeat = () => {
@@ -725,12 +849,21 @@ export class ChatService {
       }
     } catch (error) {
       failed = true
+      caughtError = error
       this.logger.error(`上游调用失败（模型 ${model.model}）：${this.describeError(error)}`)
     } finally {
       if (heartbeat) clearInterval(heartbeat)
     }
 
-    return { content, toolCalls, usage, failed, reasoningContent }
+    return {
+      content,
+      toolCalls,
+      usage,
+      failed,
+      reasoningContent,
+      error: caughtError,
+      errorDetail: failed ? this.describeError(caughtError) : null,
+    }
   }
 
   /** 提取上游错误的关键信息（便于日志定位） */
@@ -747,6 +880,10 @@ export class ChatService {
    * 处理工具调用：
    * - read 工具：执行 handler → 留痕 → 发 tool_result 事件 → 结果回喂
    * - write 工具：留痕 pending → 写确认单 → 发 tool_confirm 事件 → 标记 stop 结束本轮
+   *
+   * P21 T175：同批 write 之前已执行的 read 结果（priorToolCalls）与 write 之后被暂停的调用
+   * （skippedToolCalls）一并收集——随确认单存 Redis，确认链路重建上下文时回喂；旧逻辑直接
+   * break 丢弃（read 结果无法进入确认总结、被暂停的调用模型也不知情，会误以为已完成）。
    */
   private async processToolCalls(
     user: AuthUser,
@@ -755,11 +892,21 @@ export class ChatService {
     assistantMessageId: bigint,
     toolCalls: EngineToolCall[],
     res: Response,
-  ): Promise<{ stop: boolean; toolMessages: EngineChatMessage[] }> {
+  ): Promise<{
+    stop: boolean
+    toolMessages: EngineChatMessage[]
+    /** 同批 write 之前已执行的 read 调用（含失败兜底形态） */
+    priorToolCalls: PriorToolCallEntry[]
+    /** write 之后被暂停未执行的调用名（回喂告知模型） */
+    skippedToolCalls: string[]
+  }> {
     const toolMessages: EngineChatMessage[] = []
+    const priorToolCalls: PriorToolCallEntry[] = []
+    const skippedToolCalls: string[] = []
     let stop = false
 
-    for (const tc of toolCalls) {
+    for (let i = 0; i < toolCalls.length; i++) {
+      const tc = toolCalls[i]
       const tool = this.toolRegistry.get(tc.name)
       // 工具不存在
       if (!tool) {
@@ -777,16 +924,31 @@ export class ChatService {
       if (tool.risk === 'read') {
         // read 自动执行
         const result = await this.executeReadTool(user, userId, conversationId, assistantMessageId, tool, tc, params, res)
-        toolMessages.push({ role: 'tool', content: JSON.stringify(result), tool_call_id: tc.id })
+        const resultJson = JSON.stringify(result)
+        toolMessages.push({ role: 'tool', content: resultJson, tool_call_id: tc.id })
+        priorToolCalls.push({ id: tc.id, name: tool.name, arguments: tc.arguments, result: resultJson })
       } else {
-        // write：留痕 pending + 确认单 + tool_confirm 事件，本轮结束
-        await this.emitWriteToolConfirm(user, userId, conversationId, assistantMessageId, tool, tc, params, res)
+        // write：留痕 pending + 确认单 + tool_confirm 事件，本轮结束；
+        // 同批后续调用一并暂停（记录名称，随确认单回喂告知模型）
+        skippedToolCalls.push(...toolCalls.slice(i + 1).map((t) => t.name))
+        await this.emitWriteToolConfirm(
+          user,
+          userId,
+          conversationId,
+          assistantMessageId,
+          tool,
+          tc,
+          params,
+          res,
+          priorToolCalls,
+          skippedToolCalls,
+        )
         stop = true
         break
       }
     }
 
-    return { stop, toolMessages }
+    return { stop, toolMessages, priorToolCalls, skippedToolCalls }
   }
 
   /** 执行 read 工具：handler + 留痕 + tool_result 事件；返回结果（含失败兜底） */
@@ -858,6 +1020,8 @@ export class ChatService {
     tc: EngineToolCall,
     params: Record<string, unknown>,
     res: Response,
+    priorToolCalls: PriorToolCallEntry[],
+    skippedToolCalls: string[],
   ): Promise<void> {
     // P4b §15.6：工具有 summarize → 结构化确认卡摘要（返回 null/抛错则回退 P2b 现状字符串）；
     // 既有 7 个工具未实现钩子，走现状分支，零改动。params 始终存原始参数（content 全文）留痕，摘要只进确认单与事件。
@@ -882,6 +1046,17 @@ export class ChatService {
       },
     })
 
+    // P21 T175：同批 read 上下文随确认单带回（单条 2 万 / 合计 5 万字符上限，超限截断）
+    let remaining = PRIOR_TOTAL_MAX_CHARS
+    const priorForTicket = priorToolCalls
+      .map((p) => {
+        const cap = Math.max(0, Math.min(PRIOR_RESULT_MAX_CHARS, remaining))
+        const result = p.result.length > cap ? `${p.result.slice(0, cap)}…` : p.result
+        remaining -= result.length
+        return { id: p.id, name: p.name, arguments: p.arguments, result }
+      })
+      .filter((p) => p.result.length > 0)
+
     // 写确认单（TTL 10 分钟，含 summary：过期前刷新页面恢复卡片用）
     await this.redis.client.set(
       RedisKey.aiConfirm(record.id.toString()),
@@ -891,6 +1066,9 @@ export class ChatService {
         toolName: tool.name,
         params,
         summary,
+        // P21 T175：确认链路重建上下文所需（旧确认单无此字段，确认链路按缺省兼容）
+        priorToolCalls: priorForTicket,
+        skippedToolCalls,
       }),
       'EX',
       CONFIRM_TTL_SEC,
@@ -1209,6 +1387,40 @@ export class ChatService {
   }
 
   /**
+   * 预估一次上游调用的输入字符（P21 T173）：消息 content + **reasoning_content**（思考模式
+   * 回传占输入，旧预算口径漏算）+ tools schema。字符口径与历史截取一致（1 token ≈ 1 字符，保守）。
+   */
+  private projectedInputChars(messages: EngineChatMessage[], tools: EngineTool[]): number {
+    const messageChars = messages.reduce(
+      (sum, m) => sum + m.content.length + (m.reasoning_content?.length ?? 0),
+      0,
+    )
+    return messageChars + this.toolsCharsOf(tools)
+  }
+
+  /**
+   * 超限截断（P21 T173）：只缩短 tool 消息的 content（从最旧开始换占位符），
+   **不动** assistant.tool_calls 结构——保证「tool 消息与 tool_calls 一一对应」的上游协议
+   * 不被破坏。算法必然终止（占位符极短）；全部截完仍超预算则交由上游裁决（保留告警）。
+   * @returns 被移除的字符数（供结算基数与往返观测修正）
+   */
+  private truncateToolResultsToFit(
+    messages: EngineChatMessage[],
+    budget: number,
+    tools: EngineTool[],
+  ): number {
+    const placeholder = TOOL_RESULT_TRUNCATED_PLACEHOLDER
+    let removed = 0
+    while (this.projectedInputChars(messages, tools) > budget) {
+      const idx = messages.findIndex((m) => m.role === 'tool' && m.content.length > placeholder.length * 2)
+      if (idx === -1) break
+      removed += messages[idx].content.length - placeholder.length
+      messages[idx].content = placeholder
+    }
+    return removed
+  }
+
+  /**
    * 历史截取预算（P5 R67）：max_context − 输出预留(25%) − system prompt 实测 − tools schema 实测
    * − 当前消息（本轮必然入参，故同样先从预算中扣除）。
    * 不足下限（MIN_HISTORY_CHARS）时保底并告警（提示调大模型上下文或精简工具/手册）。
@@ -1254,6 +1466,8 @@ export class ChatService {
     upstreamUsage: { inputTokens: number; outputTokens: number } | null,
     success: boolean,
     reasoningContent = '',
+    /** 失败详情（P21 T174：status=2 时落 ai_message.error_msg，[status=…] 前缀可判 429/400） */
+    errorMsg?: string | null,
   ): Promise<{ credits: number; remainingCredits: bigint }> {
     const inputTokens = upstreamUsage?.inputTokens ?? inputChars
     const outputTokens = upstreamUsage?.outputTokens ?? fullContent.length
@@ -1278,6 +1492,8 @@ export class ChatService {
         credits,
         status: success ? 1 : 2,
         ...(reasoningContent ? { reasoningContent } : {}),
+        // P21 T174：失败详情落库（此前只进终端日志，事后无法从库里判定 429 还是 400）
+        ...(errorMsg ? { errorMsg: this.truncate(errorMsg, 500) } : {}),
       },
     })
 

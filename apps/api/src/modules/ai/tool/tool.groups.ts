@@ -14,14 +14,22 @@
  */
 
 /**
- * 恒随「命中组」下发的组（P20 T171 / R162）：「从零造东西」的创建类 + 系统管理类。
- * 部分命中裁剪时这些组不参与裁剪——见 `resolveToolGroups` 内注释。
- *
- * `system` 一并豁免的权衡：其 4 个工具仅 admin 持权限（普通用户在权限过滤这关就被裁光，
- * 豁免零开销）；若不豁免，「能力行承诺在线用户/踢人、命中别组时 tools 里没有」的错位
- * 对管理员依然存在（T172 护栏 2026-10-05 实测抓到）。
+ * 恒随「命中组」下发的组（P20 T171 / R162 建，P21 T176 修订）：`system` + `common`。
+ * - `system`：其 4 个工具仅 admin 持权限（普通用户在权限过滤这关就被裁光，豁免零开销）；
+ *   不豁免会让「能力行承诺在线用户/踢人、命中别组时 tools 里没有」的错位对管理员存在（T172 护栏）。
+ * - `app` / `siteLifecycle` **不再恒豁免**：旧规则使任意命中都附带 17 个豁免组工具，
+ *   组路由裁剪近乎失效（工具 schema 约占输入 1/3，放大 429 限流风险）——改为
+ *   **创建意图触发**（见 `CREATE_INTENT_KEYWORDS`）。
  */
-const EAGER_GROUPS: readonly ToolGroupName[] = ['app', 'siteLifecycle', 'system']
+const ALWAYS_GROUPS: readonly ToolGroupName[] = ['system', 'common']
+
+/**
+ * 创建意图词根（P21 T176）：消息命中任一词根，或直接命中 app / siteLifecycle 本组词根时，
+ * app + siteLifecycle 随任意命中组一并下发。
+ * 词根纪律同 KEYWORD_TO_GROUPS：宁多勿漏——漏命中最坏后果 = 该轮未豁免（AI 需用户补一句
+ * 创建诉求才能拿到工具），多命中只是多下发几个工具（不高于旧「恒豁免」的基线）。
+ */
+const CREATE_INTENT_KEYWORDS = '做|建|创建|生成|搭|开发|搞|弄|想要|需要一个|来一个'
 
 /** 工具组名（P6：create 组自本期起称 site 组 / CMS 与文件分开；P11 新增 app 数据应用组） */
 export type ToolGroupName =
@@ -153,14 +161,18 @@ export function resolveToolGroups(message?: string): ToolRoutingResult {
   }
 
   if (hitGroups.size === 0) {
-  return { matchedKeywords: [], groups: [...ALL_TOOL_GROUPS], fallback: true }
+    return { matchedKeywords: [], groups: [...ALL_TOOL_GROUPS], fallback: true }
   }
-  // P20 T171 / R162：创建类组（app / siteLifecycle）**豁免裁剪**，随任意命中一并下发。
-  // 原因：真实需求常跨域混述（「把云盘里的字帖整理成应用」命中 cloud 而漏 app），
-  // 而建站/建应用是平台核心理念，裁掉会让 AI 在最自然的表达下「失能」。
-  const eager = [...hitGroups, ...EAGER_GROUPS, 'common' as const]
+  // P20 T171 / R162 建，P21 T176 修订：创建类组（app / siteLifecycle）按**创建意图**豁免裁剪。
+  // 原因不变：真实需求常跨域混述（「把云盘里的字帖整理成应用」命中 cloud 而漏 app），
+  // 建站/建应用是平台核心理念，裁掉会让 AI 在最自然的表达下「失能」；
+  // 但由「恒豁免」改为意图触发，恢复组路由对纯查询类消息的裁剪收益（工具 schema 成本）。
+  const hitCreateIntent = CREATE_INTENT_KEYWORDS.split('|').some((kw) => text.includes(kw.toLowerCase()))
+  const eagerCreate: ToolGroupName[] =
+    hitCreateIntent || hitGroups.has('app') || hitGroups.has('siteLifecycle') ? ['app', 'siteLifecycle'] : []
+  const eager = [...hitGroups, ...eagerCreate, ...ALWAYS_GROUPS]
   return { matchedKeywords, groups: [...new Set(eager)], fallback: false }
-  }
+}
 
 /** 工具名 → 组（未归组返回 null） */
 export function groupOfTool(toolName: string): ToolGroupName | null {
