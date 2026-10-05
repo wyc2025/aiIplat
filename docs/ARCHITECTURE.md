@@ -502,18 +502,19 @@ apps/api/src/
 
 ### ai_message —— 消息
 
-| 字段                         | 类型        | 说明                                                                                                              |
-| ---------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------- |
-| id                           | bigint PK   |                                                                                                                   |
-| conversation_id              | bigint      |                                                                                                                   |
-| role                         | varchar(20) | user / assistant（system 不持久化，由后端拼装）                                                                   |
-| content                      | longtext    |                                                                                                                   |
-| model_id                     | bigint      | assistant 消息记录所用模型，可空                                                                                  |
-| tokens_input / tokens_output | int         | assistant 消息记录实际用量                                                                                        |
-| credits                      | int         | 本条消息扣减积分（user 消息为 0）                                                                                 |
-| status                       | tinyint     | 1 正常 2 失败（流中断/上游错误）                                                                                  |
-| attachments                  | json        | P10 附件元信息 `[{fileId,name,ext,size,chars,mode,path}]`（mode=inject\|listed）；**只存元信息不存内容**（§26.1） |
-| created_at / deleted_at      | datetime    |                                                                                                                   |
+| 字段                         | 类型              | 说明                                                                                                              |
+| ---------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------- |
+| id                           | bigint PK         |                                                                                                                   |
+| conversation_id              | bigint            |                                                                                                                   |
+| role                         | varchar(20)       | user / assistant（system 不持久化，由后端拼装）                                                                   |
+| content                      | longtext          |                                                                                                                   |
+| model_id                     | bigint            | assistant 消息记录所用模型，可空                                                                                  |
+| tokens_input / tokens_output | int               | assistant 消息记录实际用量                                                                                        |
+| credits                      | int               | 本条消息扣减积分（user 消息为 0）                                                                                 |
+| status                       | tinyint           | 1 正常 2 失败（流中断/上游错误）                                                                                  |
+| error_msg                    | varchar(500) NULL | P21 T174：上游失败详情（`[status=…]` 前缀，status=2 时记录；终端日志外可追溯 429/400 等）                         |
+| attachments                  | json              | P10 附件元信息 `[{fileId,name,ext,size,chars,mode,path}]`（mode=inject\|listed）；**只存元信息不存内容**（§26.1） |
+| created_at / deleted_at      | datetime          |                                                                                                                   |
 
 索引：(conversation_id, created_at)
 
@@ -860,7 +861,7 @@ P11 增补（app 配置组，见 `apps/api/src/config/app.config.ts`，§27.8）
 | R14 字数口径转出 | api/src/modules/site/facade/site-facade.service.ts | `export { countWordsR14 }`（口径单一来源仍在 article.service.ts）：AI 工具确认卡需在**执行前**展示字数，经门面模块转出而非跨域直插站点域内部文件（铁律 6） | 已建（T73） |
 | prompt.sections.ts | api/src/modules/ai/chat | system prompt 分段拼装纯函数（助手设定文案 + composeSystemPrompt + textLength；零 Nest 依赖，供核查脚本直接 import，§21.1） | 已建（T77） |
 | capability.manifest.ts | api/src/modules/ai/chat | **能力清单常量表**（17 行：能力名 + 注入权限 + 一行文案 + 覆盖工具；`pickCapabilityRows` 按权限过滤 / `renderCapabilityList` 渲染）；与工具注册表三方同源，机械核查 | 已建（T77） |
-| tool.groups.ts | api/src/modules/ai/tool | **工具分组与确定性路由**（TOOL_GROUPS 6 组 30 工具 / KEYWORD_TO_GROUPS 词根 / resolveToolGroups / checkToolGroupCoverage 孤儿与陈旧校验） | 已建（T77，P9 T92 补两工具） |
+| tool.groups.ts | api/src/modules/ai/tool | **工具分组与确定性路由**（TOOL_GROUPS 7 组 43 工具 / KEYWORD_TO_GROUPS 词根 / resolveToolGroups / checkToolGroupCoverage 孤儿与陈旧校验；P21 T176 起豁免口径 = ALWAYS_GROUPS 恒下发 + app/siteLifecycle 创建意图触发，见 §37.4） | 已建（T77，P9 T92 补两工具） |
 | check-ai-prompt（`pnpm check:ai`） | apps/api/scripts/check-ai-prompt.ts | 手册分段三阈值 + 工具归组全覆盖 + 能力清单同源 + 路由样例机械核查（失败退出码 1；`pnpm --filter @iplat/api check:ai`） | 已建（T77） |
 | smoke-ai-tools（`pnpm smoke:ai`） | apps/api/scripts/smoke-ai-tools.ts | **AI 工具链路冒烟**（真实对话 → `ai_tool_call` / `ai_message` 落库断言：F 排版 / I 导入 / J 附件 inject / K 附件 listed 自读；退出码 0 全过 / 1 失败 / 2 前置不满足；单用例重试 3 次 + 3s 间隔；附件夹具见 §26.9-7）；「何时必跑」清单见 PROGRESS「AI 冒烟清单」 | 已建（T95，P10 T99 扩两用例） |
 | SiteFacade 评论层扩展（P6） | api/src/modules/site/facade | listComments / auditComments（≤20 逐条独立成败）/ replyComment / getCommentBrief（全部收 siteId；SiteFacadeModule 增 imports SiteCommentModule） | 已建（T78） |
@@ -972,7 +973,7 @@ export interface AiTool {
    - 执行前再次校验 perms（防缓存间隙），无权限 → 20015 结果回喂模型告知。权限判定逻辑不得复制：从 PermissionGuard 抽出共用的 PermissionService（gateway 层），守卫与工具层都调它
    - read：执行 handler → 结果作为 `role: "tool"` 消息追加 → 再次调用上游（**轮次上限取 `ai.maxToolRounds`，P5 起配置化、默认 3、上限 10**，超限截断并提示）
    - write：写 ai_tool_call（status=pending）+ Redis 确认单 → SSE 下发 `tool_confirm` 事件 → 本轮流结束（done 照常下发并结算本轮；该 assistant 消息 content 允许为空，仅承载卡片）
-3. 确认链路：`POST /api/ai/tool/confirm` → 前置校验（套餐/积分预检 20001/20002、并发流锁与 /ai/chat 共用 ai:chatting 冲突 20007、确认单归属与有效期 20016、工具权限二次校验 20015）→ approved=true 执行 handler（status=executed/failed）→ 结果回喂上游 → **本接口同样以 SSE 流式返回**模型的后续自然语言总结（含 15s 心跳），**总结落库为新的 assistant 消息并独立结算**——避免与首轮共用 message_id 撞 ai_usage_log 的 unique 幂等键
+3. 确认链路：`POST /api/ai/tool/confirm` → 前置校验（套餐/积分预检 20001/20002、并发流锁与 /ai/chat 共用 ai:chatting 冲突 20007、确认单归属与有效期 20016、工具权限二次校验 20015）→ approved=true 执行 handler（status=executed/failed）→ 结果回喂上游 → **本接口同样以 SSE 流式返回**模型的后续自然语言总结（含 15s 心跳），**总结落库为新的 assistant 消息并独立结算**——避免与首轮共用 message_id 撞 ai_usage_log 的 unique 幂等键。**P21 T175 增补**：确认单额外携带同批 read 结果（`priorToolCalls`，单条 2 万 / 合计 5 万字符上限）与 write 之后被暂停的调用名（`skippedToolCalls`）；确认链路重建上下文时，原 assistant 消息带**整批** tool_calls（同批 read + 本次 write）+ 同序 tool 消息，暂停调用以系统提示回喂告知模型——修复「read 在前、write 在后」的混合调用中 read 结果被丢弃、被暂停调用模型不知情的问题
 4. 一次用户消息引发的所有上游调用，tokens 累加进同一条 assistant 消息，统一结算一次；**role=tool 的工具消息不持久化**（只在本轮调用链内存中传递），上下文重建仍只用 ai_message 的 user/assistant 消息，工具结果由 assistant 的最终自然语言回答承载。
    **P5 真机修复（§20.6 第 9 条）**：确认链路重建上下文时，**禁止出现「文本 assistant」直接紧跟「带 tool_calls 的 assistant」**——确认总结落库为独立 assistant 消息，与上一轮答复形成连续 assistant，DeepSeek 思考模式会以 400 拒绝；故 `buildConfirmContext` 会把紧邻的历史 assistant 文本并入原消息，合并为单条 assistant（content + tool_calls）
 5. 工具参数校验：handler 入口按 parameters schema 校验（模型可能生成非法参数），失败结果回喂让模型自我修正（计入轮次）
@@ -2322,6 +2323,7 @@ system prompt = 助手设定（静态，prompt.sections.ASSISTANT_IDENTITY）
 
 - 命中 = **当前用户消息**（不含历史）经 `KEYWORD_TO_GROUPS` 词根匹配 → 命中组并集 ∪ common；**无命中 = 全量兜底**（宁可多花 token，不让 AI 说不会）；
   未归组工具（孤儿）出于安全一律保留（启动 warn + 核查脚本硬失败）
+- **部分命中的豁免规则（P20 R162 建 → P21 T176 修订）**：`system` + `common` 恒下发；`app` + `siteLifecycle` 改为**创建意图触发**（消息命中 `CREATE_INTENT_KEYWORDS` 词根或直接命中本组词根时才随命中组下发）——旧「恒豁免」使任意命中都附带 17 个豁免组工具，裁剪近乎失效（工具 schema 约占输入 1/3，放大 429 风险）。实测：纯 CMS 查询 19/43，app 相关查询 23/43 完整可达
 - 确认回填链路（`/ai/tool/confirm`）的 routingText = 该会话**最近一条 user 消息**（与 chat 链路同一路由函数，行为一致）
 - **观测日志**：每轮 info `[AI] tools injected: groups=… count=x/28`；`DEBUG_AI=1` 时 debug 补记命中关键字与权限内工具数；
   历史预算 debug 行同步记 `groups=`（与 toolsBudget/historyBudget 同一条，R67 口径扩展）
@@ -3563,6 +3565,7 @@ ExtAuthGuard.canActivate → resolvePrincipal
   助手设定换「无工具」版（原设定在 tools 为空时是谎言）；
 - **R162 豁免**：部分命中时 `EAGER_GROUPS = [app, siteLifecycle, system]` 随命中组下发——
   「把云盘里的字帖整理成应用」这类跨域混述不再裁掉创建类能力；
+  **（P21 T176 修订：app/siteLifecycle 的豁免改为创建意图触发，system/common 保持恒下发，见 §37.4）**；
 - **护栏**：`check-ai-prompt` 新增「能力行工具不跨组」（20 项）——行内纯度保证同源收窄时
   整行随组进退，不出现「行注入了、行内工具缺一半」的中间态。
 
@@ -3572,3 +3575,58 @@ ExtAuthGuard.canActivate → resolvePrincipal
 `display-release.dto` / `release-cleanup.util` / `site-release.seedFromActiveRelease`（局部装配）/
 `display-facade.{listWorkPathsBySite,resolveForRelease}` / 前端 `DisplayReleasesDialog.vue` +
 卡片「版本 / 发布到站点」/ `scripts/smoke-site.ts` 第 12 段（40 项）—— 明细见 §9 公共资产表。
+
+---
+
+## 37. P21：AI 上游调用加固（预算预估截断 + 重试落库 + 确认链上下文 + 路由豁免收窄）
+
+> 来源：2026-10-05 AI 提示词工程与工具调用架构走查（用户指令「分析确认架构是否有问题」）。
+> 结论：骨架健康（分层 / 同源纪律 / read-write 分级 / 确认卡 / 预算管理），但 4 个执行层缺陷
+> 构成「偶发上游失败」的放大器。T173~~T176。
+
+### 37.1 预算预估与截断（T173）
+
+- **旧缺陷**：工具往返预算（`maxContext × 40%`）在工具结果**回喂之后**才检查——超限内容已不可
+  撤回，收尾轮仍会硬发；且历史预算（75% 口径）与往返预算（40%）独立计算，理论可叠加到
+  **115% maxContext**（admin 会话 #377 tokens_input 118,865/128,000 为逼近上限实证）。
+- **新约束**：每次调上游（含收尾轮）**前**预估 `projectedInputChars`（消息 content +
+  **reasoning_content**（旧口径漏算）+ tools schema），超过 `maxContext × 75%` 即截断——
+  **只缩短 tool 消息 content**（从最旧开始换占位符，算法必然终止），**不动 assistant.tool_calls
+  结构**（保证 tool 消息与 tool_calls 一一对应的协议不被破坏）；截断发生即强制进收尾轮（防再膨胀）。
+  旧 40% 阈值降级为 debug 观测。结算基数按截断后实发内容修正。
+
+### 37.2 上游重试与错误落库（T174）
+
+- **重试**：`callUpstream` 拆为「重试外壳 + callUpstreamOnce」；瞬时错误（**429 / 5xx / 连接层**，
+  由引擎层 `ProviderService.isRetryableUpstreamError` 按 openai SDK 异常分类）重试 2 次
+  （1s / 2s，±30% 抖动）。**安全前提（硬约束）**：本轮尚无任何 delta 下发且未收到 tool_calls
+  （否则客户端看到重复文本）；`signal.aborted` 不重试；400/401 等参数类不重试。
+- **落库**：`ai_message` 新增 `error_msg varchar(500) null`（迁移
+  `20261005061037_ai_message_error_msg`），status=2 时随结算写入 `[status=…]` 详情——
+  此后任何上游失败免翻终端日志即可判定 429 vs 400（遗留 30 的「错误详情不落库」销项）。
+- **明示不做**：失败轮扣费规则（如 out=0 全额失败按比例减免）属产品决策，**未修**，待拍板。
+
+### 37.3 确认链上下文完整回喂（T175）
+
+- **旧缺陷**：同批 tool_calls 中「read 在前、write 在后」时，write 触发确认卡即 break——
+  ① 已执行的 read 结果被丢弃（确认总结缺上下文）；② write 之后的调用被**静默**暂停
+  （模型不知情，总结时会误以为已完成）。
+- **修法**：确认单（Redis）增 `priorToolCalls`（同批 read 的 id/name/arguments/result，
+  单条 2 万 / 合计 5 万字符上限）+ `skippedToolCalls`（被暂停调用名）；`buildConfirmContext`
+  重建时原 assistant 带**整批** tool_calls（同批 read 用上游 tool_call id、write 用消息 id），
+  后跟同序 tool 消息，暂停调用以系统提示回喂；历史预算的 currentChars 口径同步改为
+  「全部回喂 tool 结果合计」。
+
+### 37.4 路由豁免收窄（T176）
+
+- `EAGER_GROUPS = [app, siteLifecycle, system]` 恒豁免 → **`ALWAYS_GROUPS = [system, common]`
+  恒下发 + `app`/`siteLifecycle` 创建意图触发**（`CREATE_INTENT_KEYWORDS` 词根命中或直接命中
+  本组词根）。词根纪律：宁多勿漏（漏命中最坏 = 未豁免，不劣于「AI 需用户补一句」；
+  多命中只是多下发，不高于旧基线）。`check:ai` 20/20，纯 CMS 查询 19/43、app 查询 23/43。
+- **观察期**：上线后观察一周 `ai_usage_log.tokens_input` 分布再决定是否进一步收紧。
+
+### 37.5 资产登记
+
+`ProviderService.isRetryableUpstreamError`（引擎层错误分类）/ `projectedInputChars` /
+`truncateToolResultsToFit`（chat.service 预算硬约束对）/ `PriorToolCallEntry`（确认单扩展）/
+`ALWAYS_GROUPS` + `CREATE_INTENT_KEYWORDS`（tool.groups 豁免新口径）。
