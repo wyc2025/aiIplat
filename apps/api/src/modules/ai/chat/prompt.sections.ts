@@ -13,23 +13,39 @@
 
 /** 助手设定（固定文案） */
 export const ASSISTANT_IDENTITY =
-  '你是 iplat 平台内置 AI 助手，可使用提供的工具帮助用户查询信息、操作系统。'
+'你是 iplat 平台内置 AI 助手，可使用提供的工具帮助用户查询信息、操作系统。'
+
+/**
+ * 无工具可用时的助手设定（P20 T170 / R161：`supportTool ≠ 1` 或过滤后工具为空时使用）。
+ *
+ * 此时**绝不能**沿用上面的设定——「可使用提供的工具」在 tools 为空时是谎言，
+ * AI 会因此产出「我应该有工具却没有」的病态自白（2026-10-05 实测踩到）。
+ * 能力清单段同样不注入（见 `composeSystemPrompt` 的 parts 约定）。
+ */
+export const ASSISTANT_IDENTITY_NO_TOOLS =
+  '你是 iplat 平台内置 AI 助手。当前对话使用的模型不支持工具调用，你无法代替用户执行任何操作——' +
+  '涉及建站、建应用、改文件等诉求时，请说明原因并引导用户在平台界面上自行操作。'
 
 /** system prompt 分段（拼装顺序固定，不得调整） */
 export interface SystemPromptParts {
-  /** 通用版手册（静态段，读 docs/PLATFORM-GUIDE.md） */
-  guide: string
-  /** 能力清单段（动态段，按权限注入；无可用能力时传空串） */
-  capabilityList: string
-  /** 用户上下文段（昵称/角色/当前日期） */
-  userContext: string
+/** 通用版手册（静态段，读 docs/PLATFORM-GUIDE.md） */
+guide: string
+/** 能力清单段（动态段，按权限注入；无可用能力时传空串） */
+capabilityList: string
+/** 用户上下文段（昵称/角色/当前日期） */
+userContext: string
+/**
+ * 助手设定（P20 T170）：缺省用 `ASSISTANT_IDENTITY`；
+ * 无工具可用时传 `ASSISTANT_IDENTITY_NO_TOOLS`（见该常量注释）
+ */
+identity?: string
 }
 
 /** 分段拼装完整 system prompt（空段自动跳过，靠空行分隔） */
 export function composeSystemPrompt(parts: SystemPromptParts): string {
-  return [ASSISTANT_IDENTITY, parts.guide, parts.capabilityList, parts.userContext]
-    .filter((segment) => segment && segment.trim().length > 0)
-    .join('\n\n')
+return [parts.identity ?? ASSISTANT_IDENTITY, parts.guide, parts.capabilityList, parts.userContext]
+.filter((segment) => segment && segment.trim().length > 0)
+.join('\n\n')
 }
 
 /** 分段字数统计口径（与手册核查脚本、PROGRESS 记录一致：按 UTF-8 字符数） */

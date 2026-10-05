@@ -379,7 +379,11 @@ export class ChatService {
     })
 
     const paramsObj = (record.params ?? {}) as Record<string, unknown>
-    const systemPrompt = await this.systemPromptService.build(user)
+    // P20 R161（能力同源）：system prompt 的能力清单按本轮**实发**工具集收窄
+    const systemPrompt = await this.systemPromptService.build(
+      user,
+      new Set(tools.map((tool) => tool.function.name)),
+    )
     // P10 R84：会话可读清单随每轮组装刷新（确认回填链路同样注入；附件正文按最新文件内容重读，§26.7）
     const manifest = await this.buildAttachmentManifest(BigInt(user.userId), record.conversationId)
     const systemContent = manifest ? `${systemPrompt}\n\n${manifest}` : systemPrompt
@@ -1050,7 +1054,11 @@ export class ChatService {
       take: HISTORY_TAKE,
     })
 
-    const systemPrompt = await this.systemPromptService.build(user)
+    // P20 R161（能力同源）：能力清单按本轮实发工具集收窄——与 tools 永远同源
+    const systemPrompt = await this.systemPromptService.build(
+      user,
+      new Set(tools.map((tool) => tool.function.name)),
+    )
     // P10 R84：会话可读清单（动态段，不计手册 2000 字帽）
     const manifest = await this.buildAttachmentManifest(BigInt(user.userId), conversationId)
     const systemContent = manifest ? `${systemPrompt}\n\n${manifest}` : systemPrompt

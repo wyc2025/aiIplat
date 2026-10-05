@@ -137,9 +137,31 @@ function main(): void {
   const writeTools = tools.filter((t) => t.risk === 'write')
   const writeUncovered = writeTools.filter((t) => !capabilityCovered.has(t.name))
   check(
-    '写工具全部登记能力行',
-    writeUncovered.length === 0,
-    writeUncovered.length ? `缺失：${writeUncovered.map((t) => t.name).join('、')}` : `${writeTools.length} 个写工具均已登记`,
+  '写工具全部登记能力行',
+  writeUncovered.length === 0,
+  writeUncovered.length ? `缺失：${writeUncovered.map((t) => t.name).join('、')}` : `${writeTools.length} 个写工具均已登记`,
+  )
+
+  // P20 T172（R161 配套护栏）：能力行与路由的**组内纯度**——
+  // 每行的 tools 必须落在**同一个工具组**内。理由：
+  // - 行内工具全在恒下发组（common/app/siteLifecycle/system，R162）→ 恒可达，安全；
+  // - 行内工具全在同一个非恒下发组（如 cloud）→ R161 同源收窄时**整行一起消失**，安全；
+  // - 行内工具**跨组** → 可能出现「行注入了、行内工具却缺一半」的中间态（清单与 tools
+  //   的错位在行内复活）——这是要抓的。
+  console.log('C2. 能力行与路由组纯度（P20 R161/R162）')
+  const mixedRows: string[] = []
+  for (const row of CAPABILITY_MANIFEST) {
+    const groupsOfRow = new Set(row.tools.map((toolName) => groupOfTool(toolName) ?? '(未归组)'))
+    if (groupsOfRow.size > 1) {
+      mixedRows.push(`${row.key} 跨组：${[...groupsOfRow].join(' + ')}`)
+    }
+  }
+  check(
+  '能力行工具不跨组',
+  mixedRows.length === 0,
+  mixedRows.length
+    ? `同源收窄会产生行内半缺：${mixedRows.join('；')}`
+    : `${CAPABILITY_MANIFEST.length} 个能力行均为组内纯（整行随组进退）`,
   )
 
   console.log('D. 路由样例（验收 2/3）')

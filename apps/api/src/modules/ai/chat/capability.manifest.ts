@@ -191,13 +191,25 @@ export const CAPABILITY_MANIFEST: readonly CapabilityRow[] = [
 export type PermissionChecker = (perms: string) => boolean | Promise<boolean>
 
 /**
- * 按权限过滤能力行（保持常量表顺序）。
+ * 按权限过滤能力行，并（可选）按**实际下发的工具集**收窄（P20 T170 / R161）。
+ *
  * @param has 权限判定（同步或异步）；perms 为 null 的行恒通过
+ * @param toolNames 本轮**实际下发给上游**的工具名集合；提供时，行内工具与该集合
+ *   **交集非空**才注入——保证 system prompt 只承诺「这一轮真拿得到工具」的能力，
+ *   根治「清单说能做、tools 里没有」的自我认知错位（D67 的承诺在两条通道同时成立）。
+ *   传 `undefined` = 不按工具收窄（仅供离线核查脚本等无对话上下文的场景）。
  */
-export async function pickCapabilityRows(has: PermissionChecker): Promise<CapabilityRow[]> {
+export async function pickCapabilityRows(
+  has: PermissionChecker,
+  toolNames?: ReadonlySet<string>,
+): Promise<CapabilityRow[]> {
   const picked: CapabilityRow[] = []
   for (const row of CAPABILITY_MANIFEST) {
-    if (!row.perms || (await has(row.perms))) picked.push(row)
+    if (!row.perms || (await has(row.perms))) {
+      if (toolNames === undefined || row.tools.some((name) => toolNames.has(name))) {
+        picked.push(row)
+      }
+    }
   }
   return picked
 }

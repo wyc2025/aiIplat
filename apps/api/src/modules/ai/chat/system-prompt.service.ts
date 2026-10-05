@@ -10,7 +10,7 @@ import {
   renderCapabilityList,
   type CapabilityRow,
 } from './capability.manifest'
-import { composeSystemPrompt, textLength } from './prompt.sections'
+import { ASSISTANT_IDENTITY_NO_TOOLS, composeSystemPrompt, textLength } from './prompt.sections'
 
 /**
  * System Prompt 服务（T23；P6 T77 改两段式 / D67 / R69，ARCHITECTURE §21.1）。
@@ -48,15 +48,34 @@ export class SystemPromptService implements OnModuleInit {
 
   /**
    * 拼装完整 system prompt（顺序固定：助手设定 → 通用版 → 能力清单 → 用户上下文）。
-   * 能力清单按当前用户权限逐项注入（R69）：无权限的能力行不出现，AI 不会向用户承诺做不到的事。
+   *
+   * P20 T170 / R161（能力同源）：`toolNames` = 本轮**实际下发**的工具名集合。提供时能力清单
+   * 按该集合收窄——AI 的自我认知（prompt 承诺）与实际能力（tools）永远同源，不再出现
+   * 「清单说能做、tools 里没有」的错位。集合为**空**（模型不支持工具 / 过滤后为空）时：
+   * 能力清单**不注入**，且助手设定换成「无工具」版本（`ASSISTANT_IDENTITY_NO_TOOLS`）。
    */
-  async build(user: AuthUser): Promise<string> {
-    const [rows, context] = await Promise.all([this.capabilitiesFor(user), this.buildUserContext(user)])
-    const capabilityList = renderCapabilityList(rows)
-    const prompt = composeSystemPrompt({ guide: this.guide, capabilityList, userContext: context })
+  async build(user: AuthUser, toolNames?: ReadonlySet<string>): Promise<string> {
+    const noTools = toolNames !== undefined && toolNames.size === 0
+    const [rows, context] = await Promise.all([
+      toolNames === undefined
+        ? this.capabilitiesFor(user)
+        : pickCapabilityRows(
+            (perms) => this.permissionService.hasPermission(user.userId, perms),
+            toolNames,
+          ),
+      this.buildUserContext(user),
+    ])
+    const capabilityList = noTools ? '' : renderCapabilityList(rows)
+    const prompt = composeSystemPrompt({
+      guide: this.guide,
+      capabilityList,
+      userContext: context,
+      ...(noTools ? { identity: ASSISTANT_IDENTITY_NO_TOOLS } : {}),
+    })
     this.logger.debug(
       `system prompt 分段：通用版=${textLength(this.guide)} 能力清单=${textLength(capabilityList)}` +
-        `（${rows.length}/${CAPABILITY_MANIFEST.length} 项）总长=${textLength(prompt)}`,
+        `（${rows.length}/${CAPABILITY_MANIFEST.length} 项${noTools ? '，无工具已跳过' : ''}）` +
+        `总长=${textLength(prompt)}`,
     )
     return prompt
   }

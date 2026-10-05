@@ -13,6 +13,16 @@
  * - 本文件不改权限语义：先权限过滤、再组路由（R70）。
  */
 
+/**
+ * 恒随「命中组」下发的组（P20 T171 / R162）：「从零造东西」的创建类 + 系统管理类。
+ * 部分命中裁剪时这些组不参与裁剪——见 `resolveToolGroups` 内注释。
+ *
+ * `system` 一并豁免的权衡：其 4 个工具仅 admin 持权限（普通用户在权限过滤这关就被裁光，
+ * 豁免零开销）；若不豁免，「能力行承诺在线用户/踢人、命中别组时 tools 里没有」的错位
+ * 对管理员依然存在（T172 护栏 2026-10-05 实测抓到）。
+ */
+const EAGER_GROUPS: readonly ToolGroupName[] = ['app', 'siteLifecycle', 'system']
+
 /** 工具组名（P6：create 组自本期起称 site 组 / CMS 与文件分开；P11 新增 app 数据应用组） */
 export type ToolGroupName =
   | 'common'
@@ -143,10 +153,14 @@ export function resolveToolGroups(message?: string): ToolRoutingResult {
   }
 
   if (hitGroups.size === 0) {
-    return { matchedKeywords: [], groups: [...ALL_TOOL_GROUPS], fallback: true }
+  return { matchedKeywords: [], groups: [...ALL_TOOL_GROUPS], fallback: true }
   }
-  return { matchedKeywords, groups: [...hitGroups, 'common'], fallback: false }
-}
+  // P20 T171 / R162：创建类组（app / siteLifecycle）**豁免裁剪**，随任意命中一并下发。
+  // 原因：真实需求常跨域混述（「把云盘里的字帖整理成应用」命中 cloud 而漏 app），
+  // 而建站/建应用是平台核心理念，裁掉会让 AI 在最自然的表达下「失能」。
+  const eager = [...hitGroups, ...EAGER_GROUPS, 'common' as const]
+  return { matchedKeywords, groups: [...new Set(eager)], fallback: false }
+  }
 
 /** 工具名 → 组（未归组返回 null） */
 export function groupOfTool(toolName: string): ToolGroupName | null {
