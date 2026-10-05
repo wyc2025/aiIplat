@@ -3522,3 +3522,53 @@ ExtAuthGuard.canActivate → resolvePrincipal
 `cloud-facade.resolveOwnTreePath`（预览用无公开性解析）/ 站点列表页「发布与版本」抽屉 /
 `scripts/smoke-site.ts`（`pnpm smoke:site`，35 项）/ `scripts/scan-public-blocked.ts`（`pnpm scan:pubblock`）
 —— 明细见 §9 公共资产表。
+
+---
+
+## 36. P20：展示应用目录独立 + 版本检查点 + 局部发布 + AI 能力同源
+
+> 主题是**展示应用的内容归属**：目录从站点树独立（B1）、发布时聚合进快照（B2）、开放层双轨（B3）、
+> 属主检查点（B4/T167）、局部发布（T168）；附带修复 AI 助手「说没有建应用工具」的
+> 提示词-工具错位（T170~~T172）。D152~~D153 / R161~~R162 / T165~~T172。
+
+### 36.1 目录独立（B1）与挂靠纯关系化
+
+- 工作区恒定位 `disp-staging/{ownerId}/{displayId}`（建应用即建目录），**与站点树无关**；
+- 挂靠 = 只改 `disp_display.site_id`，零文件操作——原「目录随挂靠搬迁」及其三个缺陷
+  （`disp/disp/` 双层、整树搬迁牵连、中断后 404）一并移除；
+- 存量数据迁移：`scripts/migrate-display-workdir.ts`（含历史缺陷目录兼容）。
+
+### 36.2 发布聚合与开放层双轨（B2/B3）
+
+- 站点发布把各挂靠展示应用的工作区复制进 `快照/disp/{id}/`——对外 URL 不变，站点版本**自包含**
+  （回滚站点时展示页内容随之回滚，云盘改动不直达公网）；遍历复用 `common/utils/cloud-tree-copy.util`
+  （与检查点同一「工作区 → 不可变快照」实现，防两份遍历漂移）；
+- 开放层：已发布 → 快照轨；未发布 → 直读工作区（不再经站点树）。
+
+### 36.3 检查点（T167/D152）与局部发布（T168）
+
+- 检查点 = 存档（可反复写回工作区），与站点发布 = 上线**分治**，不共用表；
+  `restore` 先软删进回收站再写回（「恢复错了」可撤）；
+- 局部发布 = 以当前版本快照为蓝本只替换一个 `disp/{id}/` 子树——蓝本必须是**已上线那份**
+  （工作区可能有别的未发布改动，从工作区重建会把半成品带上线）；
+- 模块环处理：删站级联清理降为纯函数（`release/release-cleanup.util.ts`），
+  使 `site.release → display.facade` 的聚合依赖不构成环。
+
+### 36.4 AI 能力同源（T170~~T172 / R161~~R162，2026-10-05）
+
+**病根**：能力清单（system prompt）按【权限】过滤，tools 按【权限+路由+模型支持】过滤——
+两条通道各自为政，AI 会「知道能做却说没有工具」（用户实测报告）。
+
+- **R161 同源**：清单按本轮**实发工具集**收窄（交集非空才注入）；`supportTool≠1` 时清单不注入、
+  助手设定换「无工具」版（原设定在 tools 为空时是谎言）；
+- **R162 豁免**：部分命中时 `EAGER_GROUPS = [app, siteLifecycle, system]` 随命中组下发——
+  「把云盘里的字帖整理成应用」这类跨域混述不再裁掉创建类能力；
+- **护栏**：`check-ai-prompt` 新增「能力行工具不跨组」（20 项）——行内纯度保证同源收窄时
+  整行随组进退，不出现「行注入了、行内工具缺一半」的中间态。
+
+### 36.5 资产登记
+
+`cloud-tree-copy.util` / `storage.dispReleaseDirOf` / `display-release.{service,controller}` /
+`display-release.dto` / `release-cleanup.util` / `site-release.seedFromActiveRelease`（局部装配）/
+`display-facade.{listWorkPathsBySite,resolveForRelease}` / 前端 `DisplayReleasesDialog.vue` +
+卡片「版本 / 发布到站点」/ `scripts/smoke-site.ts` 第 12 段（40 项）—— 明细见 §9 公共资产表。
