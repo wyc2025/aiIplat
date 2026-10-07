@@ -2323,7 +2323,8 @@ system prompt = 助手设定（静态，prompt.sections.ASSISTANT_IDENTITY）
 
 - 命中 = **当前用户消息**（不含历史）经 `KEYWORD_TO_GROUPS` 词根匹配 → 命中组并集 ∪ common；**无命中 = 全量兜底**（宁可多花 token，不让 AI 说不会）；
   未归组工具（孤儿）出于安全一律保留（启动 warn + 核查脚本硬失败）
-- **部分命中的豁免规则（P20 R162 建 → P21 T176 修订）**：`system` + `common` 恒下发；`app` + `siteLifecycle` 改为**创建意图触发**（消息命中 `CREATE_INTENT_KEYWORDS` 词根或直接命中本组词根时才随命中组下发）——旧「恒豁免」使任意命中都附带 17 个豁免组工具，裁剪近乎失效（工具 schema 约占输入 1/3，放大 429 风险）。实测：纯 CMS 查询 19/43，app 相关查询 23/43 完整可达
+- **部分命中的豁免规则（P20 R162 建 → P21 T176 修订 → T177 补 cloud）**：`system` + `common` 恒下发；`app` + `siteLifecycle` 改为**创建意图触发**（消息命中 `CREATE_INTENT_KEYWORDS` 词根或直接命中本组词根时才随命中组下发）——旧「恒豁免」使任意命中都附带 17 个豁免组工具，裁剪近乎失效（工具 schema 约占输入 1/3，放大 429 风险）。**T177 起**：创建意图命中时 **cloud 一并豁免**（创建链路末段「写展示页文件」依赖 write_cloud_file——展示应用工作区 `disp-staging/` 属云盘树；app 组直接命中的纯查询不带 cloud）。实测：纯 CMS 查询 19/43，纯 app 查询 23/43，创建意图 28/43。
+- **确认回填链路的阶段感知路由（P21 T178 方案 B）**：路由输入 = 最近 user 消息 + **原 assistant 消息文本**，且**锚定**本次确认工具与同批已执行 read 工具所在组（`getAvailableTools` 的 `anchorToolNames`，确定性并入）——多阶段任务（「创建应用 → 挂靠 → 写文件」）的语义演进不再被首条 user 消息的词根锁死（实测会话 #288 根因）。
 - 确认回填链路（`/ai/tool/confirm`）的 routingText = 该会话**最近一条 user 消息**（与 chat 链路同一路由函数，行为一致）
 - **观测日志**：每轮 info `[AI] tools injected: groups=… count=x/28`；`DEBUG_AI=1` 时 debug 补记命中关键字与权限内工具数；
   历史预算 debug 行同步记 `groups=`（与 toolsBudget/historyBudget 同一条，R67 口径扩展）
@@ -3630,3 +3631,24 @@ ExtAuthGuard.canActivate → resolvePrincipal
 `ProviderService.isRetryableUpstreamError`（引擎层错误分类）/ `projectedInputChars` /
 `truncateToolResultsToFit`（chat.service 预算硬约束对）/ `PriorToolCallEntry`（确认单扩展）/
 `ALWAYS_GROUPS` + `CREATE_INTENT_KEYWORDS`（tool.groups 豁免新口径）。
+
+### 37.6 追加：路由盲区修复（T177/T178，2026-10-07）
+
+> 来源：实测会话 #288（「帮我创建一个字帖应用」）——数据侧全链路打通后，AI 在最后一步
+> 「写展示页文件」如实说「没有 write_cloud_file 这类工具」。排查定案：**不是 P21 豁免收窄的
+> 回归**（cloud 组任何版本都不豁免，必须命中词根），是**组路由的固有盲区**：路由只看最近一条
+> user 消息的关键字，而多阶段任务的语义会演进（创建 → 挂靠 → 授权 → 发布 → 写文件），
+> 三条 user 消息均无云盘词根 → cloud 组全程缺席。AI 的「如实说没有」恰是 R161 能力同源
+> 正确工作的表现——机制没撒谎，是路由粒度不够。
+
+- **T177 方案 A（创建意图豁免补 cloud）**：`CREATE_INTENT_KEYWORDS` 命中时豁免组扩为
+  `app + siteLifecycle + cloud`；app 组直接命中（纯查询）不带 cloud。已知误触：含「公开发布」
+  的句子因子串「开发」误触创建意图而带 cloud——按「宁多勿漏」纪律接受（多带 5 个工具无行为害处）。
+- **T178 方案 B（确认链阶段感知路由）**：`runToolConfirm` 的路由输入从「最近 user 消息」改为
+  「最近 user 消息 + 原 assistant 消息文本」联合匹配，并锚定本次确认工具 + 同批已执行 read
+  工具所在组（`getAvailableTools` 新增 `anchorToolNames` 参数，`groupOfTool` 确定性并入，
+  不依赖词根）——正在用/刚用过的工具必须仍可达。
+- **护栏**：`check:ai` 20 → 22 项——新增「创建字帖应用」回归样例（app+cloud 必达）与
+  「纯应用查询不带 cloud」边界样例。
+- **未做（有意）**：cloud 不进 `ALWAYS_GROUPS`（5 工具成本，纯查询无写文件需求）；
+  meta-tool 搜索路由（§21.6 形态 B）仍按 `toolsBudget > max_context × 20%` 阈值演进。
