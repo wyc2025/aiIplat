@@ -19,7 +19,8 @@ export function createCreateDisplayAppTool(displayFacade: DisplayFacade): AiTool
       'siteSlug 可选：填站点 slug 则创建即挂靠该站点（站点须是自己的）；不填则创建在云盘暂存区（稍后可换挂靠）。' +
       '创建成功后返回 writePath（写文件的云盘路径）与 urlPreview（挂靠后的访问入口）：' +
       '用 write_cloud_file 把页面文件写到 writePath 下（建议 index.html 作入口，页面内用相对路径引用素材），' +
-      '再用 authorize_data_app 授权数据应用，页面内即可经同源相对路径读取该应用已暴露的数据（只读）。',
+      '再用 authorize_data_app 授权数据应用，页面内即可经同源相对路径读取该应用已暴露的数据（只读）。' +
+      '访客可见性：站点发布过版本时，文件写好后还需用户点「发布到站点」才生效；未发布过的站点写好即生效。',
     parameters: {
       type: 'object',
       properties: {
@@ -59,7 +60,7 @@ export function createCreateDisplayAppTool(displayFacade: DisplayFacade): AiTool
             `用 write_cloud_file 把页面文件写到 ${view.writePath}/（建议 index.html）`,
             '需要数据时用 authorize_data_app 把数据应用授权给本展示应用（displayId=' + view.id + '）',
             view.siteSlug
-              ? `挂靠已完成，文件写好即可访问 ${view.urlPreview}`
+              ? `挂靠已完成，入口 ${view.urlPreview}。注意：若该站点发布过版本，访客看到的是发布快照——文件写好后还需用户在「应用中心 → 展示应用」点「发布到站点」才对外可见（站点从未发布过则写好即生效）`
               : '当前在云盘暂存区（不对外访问）：挂靠站点后才可访问',
           ],
         }

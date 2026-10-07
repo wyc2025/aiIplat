@@ -28,6 +28,11 @@ export interface DisplayItem {
   folderId: string | null
   /** 挂靠站点根目录 id（仅列表返回；未挂靠为 null）——目录尚未创建时退回跳站点根 */
   siteRootFolderId: string | null
+  /**
+   * 访客是否已可见（仅列表返回）：挂靠且内容已进站点当前发布快照。
+   * false = 未挂靠或未发布——访客打不开链接，需「发布到站点」后生效。
+   */
+  published: boolean
 }
 
 /** 我的展示应用列表（含挂靠站点与授权清单） */

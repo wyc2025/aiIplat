@@ -289,7 +289,12 @@ async function copyUrl(item: DisplayItem): Promise<void> {
   if (!url) return
   try {
     await navigator.clipboard.writeText(url)
-    ElMessage.success('访问链接已复制，可直接发给他人')
+    if (item.published) {
+      ElMessage.success('访问链接已复制，可直接发给他人')
+    } else {
+      // 提醒给出路（文案准则）：链接是真的，但访客还打不开——点明下一步
+      ElMessage.warning('链接已复制，但还没发布：访客暂时打不开，点「发布到站点」后生效')
+    }
   } catch {
     ElMessage.error('复制失败，请手动选择后复制')
   }
@@ -373,15 +378,25 @@ function appNameOf(appCode: string): string {
           >
             云盘暂存区
           </el-tag>
+          <!-- 访客可见性（P21.1 T179）：已进当前发布快照才标「已发布」，否则明示出路 -->
+          <el-tag
+            v-if="item.siteSlug"
+            size="small"
+            :type="item.published ? 'success' : 'warning'"
+            effect="plain"
+          >
+            {{ item.published ? '已发布' : '未发布' }}
+          </el-tag>
         </div>
 
         <!-- 状态说明：只讲用户关心的事，不出现目录写路径、接口地址这类实现细节 -->
         <div class="v-disp-card__meta">
           <span v-if="item.folderId">
-            页面文件在它自己的云盘目录里，可点「打开目录」查看；挂到站点并发布后才会对外访问。
+            页面文件在它自己的云盘目录里，可点「打开目录」查看。
           </span>
           <span v-else>页面文件还没开始写，写入后会出现在它的云盘目录里。</span>
-          <span v-if="item.urlPreview">访问地址已生成，点「复制链接」即可分享。</span>
+          <span v-if="item.urlPreview && item.published">已发布：访问地址已生成，点「复制链接」即可分享。</span>
+          <span v-else-if="item.urlPreview">还没发布：访客暂时打不开这个链接，点「发布到站点」后生效。</span>
           <span v-else>挂到站点后才会生成访问地址。</span>
           <span>创建于 {{ formatTime(item.createdAt) }}</span>
         </div>

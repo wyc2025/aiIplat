@@ -50,6 +50,13 @@ export interface DisplayView {
   folderId: string | null
   /** 挂靠站点**根目录** id（未挂靠 null）：目录尚未创建时前端退回跳到站点根 */
   siteRootFolderId: string | null
+  /**
+   * 访客是否已可见（P21.1 T179）：挂靠且内容已聚合进站点**当前发布快照**
+   * （manifest 含 `disp/{id}/` 条目，与开放层快照轨同口径）。false = 未挂靠，或挂靠后
+   * 未发布——工作区文件访客打不开，需「发布到站点」/全量发布。仅 `list()` 填充，
+   * 单条响应保持 false（创建/挂靠/授权后前端整体刷新列表）。
+   */
+  published: boolean
 }
 
 /**
@@ -109,6 +116,11 @@ export class DisplayService {
     })
     // 卡片「打开云盘目录」：P20 B1 起**所有**展示应用（含未挂靠）都有独立工作区目录，
     // 故无条件下沉解析 —— 按钮恒可直达自己的工作区（不再退化为站点根）。
+    // P21.1 T179：「访客是否已可见」——按挂靠站点批量取当前快照已聚合的展示应用集（经 SiteFacade）。
+    const affiliatedSiteIds = [
+      ...new Set(views.filter((view) => view.siteId).map((view) => BigInt(view.siteId as string))),
+    ]
+    const publishedMap = await this.siteFacade.publishedDisplayIds(affiliatedSiteIds)
     return Promise.all(
       views.map(async (view) => {
         const folderId = await this.cloudFacade.resolveUserDirId(userId, view.writePath)
@@ -118,6 +130,8 @@ export class DisplayService {
           siteRootFolderId: view.siteId
             ? (siteById.get(view.siteId)?.rootFolderId.toString() ?? null)
             : null,
+          published:
+            view.siteId !== null && (publishedMap.get(BigInt(view.siteId))?.has(BigInt(view.id)) ?? false),
         }
       }),
     )
@@ -577,6 +591,8 @@ export class DisplayService {
       // 默认 null（单条响应不解析目录）；`list()` 会按挂靠态填充真实目录 id
       folderId: null,
       siteRootFolderId: null,
+      // P21.1 T179：单条响应默认未发布（list() 按当前快照填充）
+      published: false,
     }
   }
 

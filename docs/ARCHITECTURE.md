@@ -851,6 +851,7 @@ P11 增补（app 配置组，见 `apps/api/src/config/app.config.ts`，§27.8）
 | 全局中文语言包 | web/src/App.vue | ElConfigProvider + `element-plus/es/locale/lang/zh-cn` 在最外层注入：组件走 unplugin 按需自动引入，没有 `app.use(ElementPlus,{locale})` 这一步，函数式弹窗（ElMessageBox/ElMessage）读全局配置后按钮即中文（P4F T69 根因级修复） | 已建（T69） |
 | SiteFacade CMS 层扩展（P5） | api/src/modules/site/facade | listArticles / readArticle / createArticle / updateArticle / publishArticle / ensureColumn / ensureTags / listColumns / listTags（全部收 siteId，slug 解析在工具层经 resolveSiteForTool，§20.1）；SiteFacadeModule 增 imports 文章/栏目/标签三模块（同域直注） | 已建（T71） |
 | SiteFacade 生命周期扩展（P5） | api/src/modules/site/facade | updateSite（委托 manage.update）/ getSiteDeleteImpact（R66 计数预检）/ deleteSite（委托 manage.remove） | 已建（T71） |
+| SiteFacade 发布状态查询（P21.1） | api/src/modules/site/facade | publishedDisplayIds(siteIds)：各站点当前发布快照 manifest 的 `disp/{id}/` 前缀集合（display 域「访客可见性」标注，§37.7；读侧降级不抛错） | 已建（T179） |
 | SiteArticleService.getOwnedSiteId | api/src/modules/site/article | 文章 → 所属站点 id（复用同一属主链：40109/40119），供门面 CMS 写路径定位站点作用域 | 已建（T71） |
 | CloudFacade 云盘根基点原语（P5） | api/src/modules/cloud/facade | listUserFiles / readUserFile / writeUserFile / moveUserFiles / deleteUserFiles / isUserDirPublic（基点 = 用户云盘根 parent_id=0，路径防穿越 + 文本白名单 + **2MB**（P10 T97 由 64KB 放宽）/256KB 上限 + 批量上限 20，§20.1）；CloudFacadeModule 增 imports SiteRootModule（inSite 标注） | 已建（T71，P10 读上限放宽） |
 | AI 云盘五件套 | api/src/modules/ai/tool/tools | list_cloud_files / read_cloud_file / write_cloud_file / move_cloud_files / delete_cloud_files（handler 只注入 CloudFacade，§20.2） | 已建（T72） |
@@ -3652,3 +3653,21 @@ ExtAuthGuard.canActivate → resolvePrincipal
   「纯应用查询不带 cloud」边界样例。
 - **未做（有意）**：cloud 不进 `ALWAYS_GROUPS`（5 工具成本，纯查询无写文件需求）；
   meta-tool 搜索路由（§21.6 形态 B）仍按 `toolsBudget > max_context × 20%` 阈值演进。
+
+### 37.7 追加：展示应用「访客可见性」UX 缺口（T179，2026-10-07）
+
+> 来源：会话 #288 的用户实测——展示应用挂靠 wyc 且工作区已写入三个页面文件，「复制链接」
+> 打开却 40400。取证定案：站点已发布（快照轨）而当前快照（10-03 发布）不含 10-06 创建的
+> `disp/135/`——「挂靠 ≠ 上线」，但界面与 AI 工具都未表达这一状态。
+
+- **后端**：`SiteFacade.publishedDisplayIds(siteIds)`（新增）——读各站点当前发布快照
+  `manifest.json` 的 `disp/{id}/` 前缀条目，返回 `Map<siteId, Set<displayId>>`；未发布 /
+  manifest 缺失损坏 → 空集合（读侧降级不抛错）。`DisplayView` 增 `published` 字段，仅
+  `list()` 填充（口径与开放层快照轨同源：快照里有 ⇔ 访客可见）。
+- **前端**：展示应用卡片增「已发布 / 未发布」标签；状态文案区分三态（未发布时明示
+  「访客暂时打不开，点『发布到站点』后生效」）；未发布时「复制链接」改为 warning 提示
+  （链接真实但访客打不开，点明出路）。
+- **AI 工具配套**：`create_display_app` 的 description 与 `nextSteps` 修正——原「文件写好
+  即可访问」在已发布站点不成立（会误导模型宣布"已完成"，#288 实证），改为写明发布前提；
+  PLATFORM-GUIDE 通用版同步补「发布后访客才可见」（等量精简 6 字，合注 1999/2000）。
+- **API**：`GET /api/display` 响应补 `published`（API.md §21.3）。

@@ -1531,6 +1531,7 @@ system 动态追加（不计手册 2000 字帽，上限 20 条，R84）：
   - `siteRootFolderId`：挂靠站点根目录 id（未挂靠 `null`）——`folderId` 为 `null` 时前端退回跳站点根。
     两者**仅列表接口**返回（创建/编辑/授权等单条响应为 `null`）；前端跳转范式 `/cloud/file?dir={folderId}`。
     另：站点被删后（`disp_display.site_id` 为逻辑外键、删站不清理该关系），该展示应用按**未挂靠**返回（`siteId` / `siteSlug` / `folderId` / `siteRootFolderId` 均 `null`），其目录已随站点文件进回收站。
+- **列表追加「访客可见性」字段（P21 T179）**：`GET /api/display` 响应补 `published: boolean`——挂靠且内容已聚合进站点**当前发布快照**（manifest 含 `disp/{id}/` 条目，与开放层快照轨同口径）为 `true`；未挂靠 / 挂靠后未发布为 `false`（访客此时打不开 `urlPreview`，需「发布到站点」/全量发布后生效）。仅列表接口返回；未发布站点（无 activeReleaseId）恒 `false`。
 - **换挂靠**：`PUT /api/display/:id/affiliate` → 事务内完成目录移动 + site_id 更新；响应附 `moved`；中断全回滚（R127）。
 - **授权/撤权**：`POST /api/display/:id/grants` / `DELETE .../grants/:appCode`；授权变更立即触发该 app 取数面缓存 DEL（写后失效沿用）。
 - **取数面响应**：结构 = §19 公开面对应端点响应体（`schema` 为 `{app:{name,description}, tables:[{name,label,fields:[…]}]}`；列表 `{list,total,pageNo,pageSize}`、单行 `{op:'get',row}`）。

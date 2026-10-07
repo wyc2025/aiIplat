@@ -4,6 +4,7 @@ import { BusinessException } from '../../../common/exceptions/business.exception
 import { RedisKey, SITE_PATH_TRACK_LEGACY } from '../../../common/constants/redis-key'
 import { PrismaService } from '../../../infra/prisma/prisma.service'
 import { RedisService } from '../../../infra/redis/redis.service'
+import { StorageService } from '../../../infra/storage/storage.service'
 import {
   CloudFacade,
   type RawWriteResult,
@@ -289,6 +290,7 @@ export class SiteFacade {
     private readonly columnService: SiteColumnService,
     private readonly tagService: SiteTagService,
     private readonly commentService: SiteCommentService,
+    private readonly storage: StorageService,
   ) {}
 
   /** 用户是否已开通站点（有 site_site 行即 true）；删除用户前预检，与 cloud hasFiles 并列 */
@@ -312,6 +314,47 @@ export class SiteFacade {
       orderBy: [{ createTime: 'asc' }, { id: 'asc' }],
     })
     return sites.map((site) => this.toInfo(site))
+  }
+
+  /**
+   * 各站点**当前发布快照**中已聚合的展示应用 id 集合（P21.1 T179，display 域「访客是否已可见」标注用）。
+   *
+   * 判定口径与开放层快照轨同源：已发布站点的访客内容 = 当前版本快照，快照 manifest 含
+   * `disp/{id}/…` 条目 ⇔ 该展示应用线上可见。站点未发布（activeReleaseId=null）/ manifest
+   * 缺失或损坏 → 空集合（读侧降级不抛错——状态标注缺失不应阻断列表页）。
+   * 管理端低频调用，不做缓存。
+   */
+  async publishedDisplayIds(siteIds: readonly bigint[]): Promise<Map<bigint, Set<bigint>>> {
+    const result = new Map<bigint, Set<bigint>>()
+    const unique = [...new Set(siteIds)]
+    if (unique.length === 0) return result
+
+    const sites = await this.prisma.siteSite.findMany({
+      where: { id: { in: unique } },
+      select: { id: true, activeReleaseId: true },
+    })
+    for (const site of sites) {
+      const published = new Set<bigint>()
+      result.set(site.id, published)
+      if (site.activeReleaseId === null) continue
+      // 'manifest.json' 与 site-release.service 的 MANIFEST_NAME 同源（该常量未导出：
+      // facade→release 会经 display-facade 成模块环，故此处就地表意）
+      const raw = await this.storage.readInto(
+        this.storage.releaseDirOf(site.id, site.activeReleaseId),
+        'manifest.json',
+      )
+      if (!raw) continue
+      try {
+        const manifest = JSON.parse(raw) as Record<string, unknown>
+        for (const key of Object.keys(manifest)) {
+          const hit = /^disp\/(\d{1,20})\//.exec(key)
+          if (hit) published.add(BigInt(hit[1]))
+        }
+      } catch {
+        // manifest 损坏：按空集合处理（读侧降级）
+      }
+    }
+    return result
   }
 
   /** 单个站点信息（属主校验；不存在/非属主返回 null） */
