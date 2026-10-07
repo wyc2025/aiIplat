@@ -283,9 +283,17 @@ export class ChatService {
 
     // 7. 解析目标（原 assistant 消息 + 会话模型）→ 过滤后工具子集 → 重建上下文（实测预算截取，R67）
     const { conversationId, model, originalMessage } = await this.resolveConfirmTarget(record)
-    // 组路由口径：确认回填链路取本会话最近一条 user 消息（P6 T77；与 chat 链路同一路由函数）
+    // 组路由口径（P6 T77 建单条 user 消息；P21.1 T178 方案 B 升级为阶段感知）：
+    // 路由输入 = 最近 user 消息 + 原 assistant 消息文本（多阶段任务「创建应用 → 挂靠 → 写文件」
+    // 的语义演进不被首条消息的词根锁死），并锚定本次确认工具与同批已执行 read 工具所在组
+    // （确定性并入）——实测会话 #288 中 cloud 组因 user 消息无云盘词根而全程缺席，
+    // AI 只能如实说「没有 write_cloud_file」。
     const routingText = await this.lastUserMessageText(conversationId)
-    const { tools, routing } = await this.getAvailableTools(user, model, routingText)
+    const combinedRoutingText = [routingText, originalMessage.content]
+      .filter((t) => t && t.length > 0)
+      .join('\n')
+    const anchorToolNames = [record.toolName, ...(confirm.priorToolCalls?.map((p) => p.name) ?? [])]
+    const { tools, routing } = await this.getAvailableTools(user, model, combinedRoutingText, anchorToolNames)
     const messages = await this.buildConfirmContext(
       user,
       record,
@@ -1102,12 +1110,16 @@ export class ChatService {
    * 确定可用工具：模型 support_tool=1 → 权限过滤（现状）→ 组路由（P6 T77 / D68 / R70）。
    * 两道串联顺序固定：先权限过滤、再组路由（路由不改变权限语义）。
    * 无命中 = 全量兜底；未归组工具（孤儿，启动已告警）出于安全一律保留。
-   * routingText = 当前用户消息（不含历史），确认回填链路取最近一条 user 消息。
+   * routingText = 当前用户消息（不含历史），确认回填链路取最近一条 user 消息
+   * **+ 原 assistant 消息文本**（P21.1 T178 方案 B：阶段感知，见 runToolConfirm）。
+   * anchorToolNames（P21.1 T178）：锚定工具所在组强制并入下发集合——正在确认 / 刚执行过的
+   * 工具必须仍可达，确定性并入、不依赖词根。
    */
   private async getAvailableTools(
     user: AuthUser,
     model: ChatModel,
     routingText?: string,
+    anchorToolNames?: readonly string[],
   ): Promise<{ tools: EngineTool[]; routing: ToolRoutingResult; injected: number; total: number }> {
     const all = this.toolRegistry.getAll()
     const total = all.length
@@ -1128,9 +1140,14 @@ export class ChatService {
       }
     }
 
-    // 第二道：组路由（无命中全量兜底；孤儿工具恒保留）
+    // 第二道：组路由（无命中全量兜底；孤儿工具恒保留）+ 锚定组并入（P21.1 T178）
     const routing = resolveToolGroups(routingText)
     const groups = new Set(routing.groups)
+    for (const name of anchorToolNames ?? []) {
+      const anchorGroup = groupOfTool(name)
+      if (anchorGroup) groups.add(anchorGroup)
+    }
+    routing.groups = [...groups]
     const available = permitted.filter((t) => {
       const group = groupOfTool(t.name)
       return routing.fallback || group === null || groups.has(group)

@@ -24,10 +24,15 @@
 const ALWAYS_GROUPS: readonly ToolGroupName[] = ['system', 'common']
 
 /**
- * 创建意图词根（P21 T176）：消息命中任一词根，或直接命中 app / siteLifecycle 本组词根时，
- * app + siteLifecycle 随任意命中组一并下发。
- * 词根纪律同 KEYWORD_TO_GROUPS：宁多勿漏——漏命中最坏后果 = 该轮未豁免（AI 需用户补一句
- * 创建诉求才能拿到工具），多命中只是多下发几个工具（不高于旧「恒豁免」的基线）。
+ * 创建意图词根（P21 T176 建 / T177 修订）：消息命中任一词根，或直接命中 app / siteLifecycle
+ * 本组词根时，app + siteLifecycle 随任意命中组一并下发；**创建意图命中时 cloud 一并豁免**。
+ *
+ * T177 方案 A 背景（实测会话 #288）：创建类任务天然会走到「写文件到云盘」——展示应用工作区
+ * `disp-staging/…`、站点目录均属云盘树，而路由只看最近一条 user 消息（「随便挂靠哪个站点」
+ * 无云盘词根），cloud 组全程缺席 → AI 只能如实说「没有 write_cloud_file」。
+ * cloud 仅由**创建意图**触发（不随 app 组直接命中触发）——纯查询（如「我有哪些数据应用」）
+ * 不需要写文件，避免无谓多带 5 个工具。
+ * 词根纪律同 KEYWORD_TO_GROUPS：宁多勿漏——漏命中最坏后果 = 该轮未豁免（不劣于旧基线）。
  */
 const CREATE_INTENT_KEYWORDS = '做|建|创建|生成|搭|开发|搞|弄|想要|需要一个|来一个'
 
@@ -163,13 +168,16 @@ export function resolveToolGroups(message?: string): ToolRoutingResult {
   if (hitGroups.size === 0) {
     return { matchedKeywords: [], groups: [...ALL_TOOL_GROUPS], fallback: true }
   }
-  // P20 T171 / R162 建，P21 T176 修订：创建类组（app / siteLifecycle）按**创建意图**豁免裁剪。
+  // P20 T171 / R162 建，P21 T176 修订，T177 方案 A 补 cloud：创建类组按**创建意图**豁免裁剪。
   // 原因不变：真实需求常跨域混述（「把云盘里的字帖整理成应用」命中 cloud 而漏 app），
   // 建站/建应用是平台核心理念，裁掉会让 AI 在最自然的表达下「失能」；
-  // 但由「恒豁免」改为意图触发，恢复组路由对纯查询类消息的裁剪收益（工具 schema 成本）。
+  // T177 起**创建意图**命中时 cloud 一并豁免（创建链路末段的「写展示页文件」依赖
+  // write_cloud_file，见 CREATE_INTENT_KEYWORDS 注释），但 app 组直接命中（纯查询）不带 cloud。
   const hitCreateIntent = CREATE_INTENT_KEYWORDS.split('|').some((kw) => text.includes(kw.toLowerCase()))
   const eagerCreate: ToolGroupName[] =
-    hitCreateIntent || hitGroups.has('app') || hitGroups.has('siteLifecycle') ? ['app', 'siteLifecycle'] : []
+    hitCreateIntent || hitGroups.has('app') || hitGroups.has('siteLifecycle')
+      ? ['app', 'siteLifecycle', ...(hitCreateIntent ? (['cloud'] as ToolGroupName[]) : [])]
+      : []
   const eager = [...hitGroups, ...eagerCreate, ...ALWAYS_GROUPS]
   return { matchedKeywords, groups: [...new Set(eager)], fallback: false }
 }

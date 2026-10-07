@@ -221,6 +221,28 @@ function main(): void {
     `groups=${displayRoute.groups.join(',')} 下发 ${displayInjected.length}/${names.length}`,
   )
 
+  // P21.1 T177 方案 A（实测会话 #288 回归样例）：创建意图豁免须带 cloud——
+  // 创建类任务末段「写展示页文件」依赖 write_cloud_file（展示应用工作区 disp-staging 属云盘树），
+  // 旧路由只看 user 消息词根（「随便挂靠哪个站点」无云盘词根）导致 cloud 全程缺席。
+  const createAppRoute = resolveToolGroups('你好，帮我创建一个字帖应用，让我能在随时查看名家字帖，并且能展示我的作品。')
+  check(
+    '「创建字帖应用」创建意图命中 app 且豁免 cloud',
+    !createAppRoute.fallback &&
+      createAppRoute.groups.includes('app') &&
+      createAppRoute.groups.includes('cloud'),
+    `groups=${createAppRoute.groups.join(',')} 命中关键字=${createAppRoute.matchedKeywords.join(',')}`,
+  )
+
+  // T177 防过度豁免：app 组直接命中（纯查询，无创建意图）不带 cloud。
+  // 注：含「公开发布」的句子会因子串「开发」误触创建意图而带 cloud——按「宁多勿漏」纪律
+  // 接受（多带 5 个 cloud 工具无行为害处），此处用无歧义纯查询句做边界断言。
+  const appQueryRoute = resolveToolGroups('我有哪些数据应用？')
+  check(
+    '纯应用查询不带 cloud（豁免仅由创建意图触发）',
+    appQueryRoute.groups.includes('app') && !appQueryRoute.groups.includes('cloud'),
+    `groups=${appQueryRoute.groups.join(',')}`,
+  )
+
   const weatherRoute = resolveToolGroups('今天天气怎么样')
   check(
     '无命中 → 全量兜底',
