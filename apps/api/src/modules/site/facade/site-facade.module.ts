@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common'
+import { StorageModule } from '../../../infra/storage/storage.module'
 import { CloudModule } from '../../cloud/cloud.module'
 import { SiteArticleModule } from '../article/article.module'
 import { SiteColumnModule } from '../column/column.module'
@@ -21,6 +22,10 @@ import { SiteFacade } from './site-facade.service'
  *
  * P6 T78：再 imports SiteCommentModule 以获得 SiteCommentService（评论 list/audit/reply），
  * CommentModule 零 imports，无循环风险。
+ *
+ * P21.1 T179：imports StorageModule（publishedDisplayIds 读发布快照 manifest 用）；
+ * StorageModule 零 imports，无循环风险。CloudModule 虽内部使用 StorageService 但不转出口，
+ * 故需显式引入。
  */
 @Module({
   imports: [
@@ -30,6 +35,7 @@ import { SiteFacade } from './site-facade.service'
     SiteColumnModule,
     SiteTagModule,
     SiteCommentModule,
+    StorageModule,
   ],
   providers: [SiteFacade],
   exports: [SiteFacade],

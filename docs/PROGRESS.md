@@ -834,6 +834,7 @@
 | T179 | **展示应用「访客是否已可见」状态全链路**：① `SiteFacade.publishedDisplayIds(siteIds)`（读各站点当前发布快照 manifest 的 `disp/{id}/` 前缀，未发布/损坏 → 空集合降级）；② `DisplayView` + `published` 字段（仅 `list()` 填充，与开放层快照轨同口径）；③ 前端卡片「已发布/未发布」标签 + 三态文案（未发布明示「点『发布到站点』后生效」）+ 复制链接改 warning 提示；④ `create_display_app` 工具 description/nextSteps 修正（原「文件写好即可访问」在已发布站点不成立，会误导模型宣布已完成——#288 实证）+ PLATFORM-GUIDE 补「发布后访客才可见」（等量精简 6 字）+ API.md §21.3 补字段 | 已完成 | 2026-10-07 |
 
 **验证**：`check:ai` **22/22**（通用版 967/1000、合注 1999/2000）；API `tsc` / web `vue-tsc` 零错。
+**交付后修复（2026-10-08）**：T179 给 SiteFacade 注入 StorageService 时漏在 SiteFacadeModule import StorageModule → 启动 `UnknownDependenciesException`（DI 错误**编译期不可见**，tsc 验证拦不住——教训：涉及模块装配的改动必须真机启动验证）。补 import 后 `node dist/main.js` 实测 `Nest application successfully started`（43 工具注册、手册加载全过）。
 **行为口径**：未发布站点（无 activeReleaseId）`published` 恒 `false`——开放层走工作区轨「写好即生效」，但该态下访客本就无稳定入口，不构成误导（站点首次发布后自动转为快照轨语义）。
 
 ## 进行中
